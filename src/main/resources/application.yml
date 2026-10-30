@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: tax-agent-harness
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${SERVER_PORT:8080}

@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS agent_tasks (user_id TEXT NOT NULL REFERENCES users(id), enterprise_id TEXT NOT NULL REFERENCES enterprises(id), id TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('ACTIVE','WAITING_USER','COMPLETED','CANCELLED')), version INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(user_id,enterprise_id,id));
+CREATE UNIQUE INDEX IF NOT EXISTS one_open_agent_task ON agent_tasks(user_id,enterprise_id) WHERE status IN ('ACTIVE','WAITING_USER');
+CREATE TABLE IF NOT EXISTS agent_preferences (user_id TEXT NOT NULL REFERENCES users(id), enterprise_id TEXT NOT NULL REFERENCES enterprises(id), name TEXT NOT NULL, value TEXT NOT NULL, user_request TEXT NOT NULL, PRIMARY KEY(user_id,enterprise_id,name));
