@@ -4,3 +4,12 @@ spring:
 server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:8080}
+  forward-headers-strategy: none
+  servlet:
+    session:
+      tracking-modes: cookie
+      cookie:
+        http-only: true
+        same-site: strict
+taxagent:
+  database: ${TAXAGENT_DATABASE:data/harness.db}

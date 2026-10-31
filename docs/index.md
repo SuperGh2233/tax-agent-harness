@@ -23,3 +23,12 @@
 | [T10 计划](plans/active/PLAN-20261030-end-to-end.md) | completed | 三场景端到端范围、风险与验收，保留原路径 |
 | [T10 服务契约](specs/SPEC-20261030-finance-agent.md) | completed | 可信本地入口、模型写工具、跨轮授权与结构化证据 |
 | [T11 回归与故障注入计划](plans/active/PLAN-20261030-t11-regression-fault-injection.md) | completed | 权限隔离、规则版本、超时/重试、提交边界故障注入；JDK 21 全量 163 项通过，详见 TASKS.md |
+
+| [T12 计划](plans/active/PLAN-20261030-t12-ui-audit-demo.md) | completed | 本地 UI、安全会话、脱敏审计与演示验证 |
+
+| [T12 演示 API](specs/SPEC-20261030-demo-api.md) | completed | 本地模拟会话、CSRF、最小接口和审计失败语义 |
+| [T12 演示与录屏](../DEMO_SCRIPT.md) | completed | 独立 demo DB、安全启动、演示步骤与 macOS 手动录屏 |
+
+| [T13 计划](plans/active/PLAN-20261030-t13-release-reproduction.md) | active | 独立复现、经用户批准的真实模型E2E范围、证据与待验证边界 |
+| [独立复现](../REPRODUCE.md) | active | JDK21首次在线/后续离线构建、新库、安全启动及排障 |
+| [交付检查单](../RELEASE_CHECKLIST.md) | active | 官方要求对照、白名单、人工设计/记录/录屏待办和T13变更清单 |

@@ -32,8 +32,9 @@
 | T09 | P0 | 实现允许字段的安全写入与回读验证 | T03、T04、T06 | DONE | Coding Agent | JDK21 全量 145/0/0/0，T09 18 项；可信授权、幂等台账、回滚及超时回查，见工作记录 |
 | T10 | P0 | 端到端集成三类官方场景 | T05、T06、T07、T08、T09 | DONE | Coding Agent | JDK21全量158/0/0/0；三场景smoke 9/0/0/0；临时SQLite结构化证据，见T10记录 |
 | T11 | P1 | 构建回归与故障注入用例 | T10 | DONE | Coding Agent | JDK21 离线定向91/0/0/0、全量163/0/0/0；两企业提交后任务保存故障及六项验收映射见T11验证记录 |
-| T12 | P1 | 简易交互界面、审计日志与演示录制 | T10 | TODO | — | 工具执行日志可查看；演示真实写入验证 |
-| T13 | P1 | 打包提交说明及复现文档 | T11、T12 | TODO | — | 干净环境按 README 可启动、初始化、测试、演示 |
+| T12 | P1 | 简易交互界面、审计日志与演示录制 | T10 | DONE | Coding Agent | JDK21 全量187/0/0/0（T12共24）；任务审计UUID隔离强断言、CSP及原T12验收通过，见安全修正记录 |
+| T14 | P1 | 财税工作台 UI/UX 视觉重构 | T12 | DONE | Coding Agent | [T14计划](docs/plans/active/PLAN-20261030-t14-ui-ux.md)：JDK21全量194/0/0/0、DemoApiTest24、八断点/52本地资源通过 |
+| T13 | P1 | 打包提交说明及复现文档 | T11、T12 | IN_PROGRESS | Coding Agent | 干净源码+既有缓存187/0/0/0、JAR/新库/HTTP/UI通过；空缓存在线及全新checkout未证实，见T13记录 |
 
 > **注意**：T00 的 DONE 仅代表本次建立共享文档，不代表代码已开始开发。其他任务均需实际验收后才可标记完成。
 
@@ -211,3 +212,95 @@
 - 定向命令：`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" '-Dtest=FinanceAgentIntegrationTest,AgentRuntimeTest,TaskMemoryTest,InvoiceWriteServiceTest,ReadOnlyFinanceToolsTest,RuleServiceTest' test`。2026-10-30 10:47:35 +08:00，**91 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**。此前未加入缺失规则测试的定向运行90项亦通过。
 - 全量命令：`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" test`。2026-10-30 10:48:08 +08:00，**163 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**，实际Java 21.0.12.1（启动日志及Surefire XML核对）。报告 `target/surefire-reports`；基线158 + 新增5。受限只读沙箱需临时目录/构建写入及本机端口，获许可后沙箱外离线执行；现有Mockito动态agent警告未影响结果。
 - 结论与边界：全部T11验收通过，未发现需保留失败测试的生产缺陷，无阻塞。仅Fake模型、临时SQLite和本机HTTP stub/健康检查，未访问网络服务、真实用户数据或data/harness.db。原有未跟踪项目文件保留，Git状态仍为原先未跟踪列表；未清理、提交或推送，未开展T12/T13。
+
+### T12 — 简易交互界面、审计日志与演示录制准备
+- 状态：DONE；认领人：Coding Agent；完成日期：2026-10-30。基线 main/本地 origin/main 均为 c1bc5a14afe18bce572179fd8b335600f785f017，初始工作区干净；先核对任务、README、冻结业务契约、T10 服务契约、TaskMemory/FinanceAgent/AgentRuntime/InvoiceWriteService 和相关测试，认领 IN_PROGRESS 并创建计划后编码。
+- Commit：无，按要求未提交/推送。T13 保持 TODO，未开展。未修改现有 data/harness.db、官方原件、计划书、冻结业务及 T10 服务契约、真实密钥，未清理其他文件。
+- 变更：demo/DemoConfiguration、DemoSecurity、DemoController、DemoAudit；static/index.html、demo.css、demo.js；application.yml；DemoApiTest；DEMO_SCRIPT.md；T12 计划、演示 API 规范、README、docs/index、TASKS。无新依赖、无前端框架；未修改现有 Agent/工具业务规则。
+- 安全：固定 operator→U001 / viewer→U002，明示“本地模拟身份，不是生产认证”；HttpSession 服务端身份、cookie HttpOnly/SameSite Strict、变更 CSRF（含选择身份）、直接 loopback + Host/Origin 检查、禁代理/CORS、默认 127.0.0.1。未知 DTO 字段及 userId 拒绝；permissions 实际复核，U002/C001 只读、U002/C002 拒绝；用户/企业任务及审计隔离。三项 LLM 配置缺任一项返回 MODEL_NOT_CONFIGURED，无 Fake fallback、无密钥记录。
+- 写入：补充只存明确值/原话，普通聊天无授权；确认面板和二次弹窗显示精确企业、发票、字段/值，经 approvedTurn 后仍由模型决定是否调用 update_invoice，exact approval 保持；以真实工具 verified 与 recover 回读为证。财务提交后任务保存失败只读 recover，返回 TASK_STATE_SAVE_FAILED 和“财务写入已核验但任务状态保存失败”，记录可恢复审计；审计同时失败明确报错，不伪称整体成功，不重复写入。
+- 审计：SQLite append-only demo_audit，禁止 UPDATE/DELETE/同id REPLACE；保存请求/任务/工具/callId/月或发票ID/字段名/operationId/outcome/errorCode/verified/UTC时间，不保存完整财务流水、金额、用途/备注内容或模型文本。当前 UI 用 textContent 展示真实工具调用及完整结果；历史仅脱敏摘要。审计请求失败则执行前阻断，提交后失败明确返回审计错误和可得回读证据。
+- 验收命令：`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" test`。
+- 最终验收：2026-10-30 12:11:31 +08:00，真实 Temurin Java 21.0.12.1，**186 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**（原有163 + T12新增23）；报告 target/surefire-reports，日志 target/t12-test.log。全部业务测试使用临时 SQLite；FakeLlmClient 仅测试。覆盖 loopback/外部拒绝、Host/Origin/CORS、固定角色/任意身份拒绝、CSRF/会话轮换、用户企业任务隔离、查询/追问/补充/恢复、未确认不写、精确确认一次写入及回读/同operation不重写、缺模型、审计追加/隔离/脱敏/防改删覆盖、提交后任务保存失败 recover，以及审计与状态双重失败。
+- 环境说明：首次沙箱测试被系统临时目录限制阻止，按权限流程在沙箱外复验成功；首次离线 package 缺缓存 JAR 插件，下载 Maven 构建插件后 package 成功，不涉及模型网络调用。构建产物与依赖缓存均为 Git 忽略目录。
+- 浏览器验收：ego-browser 操作真实 127.0.0.1:18080 页面，使用全新系统临时 demo DB，显式移除三项模型变量；身份选择、任务创建、缺模型提示、确认弹窗及取消、Viewer/C002 拒绝、Viewer/C001 任务隔离均通过。只读查库 invoice_operations=0，C001/F002 用途仍空，缺模型错误已审计；截图 target/t12-ui.png。临时服务已停止，浏览器测试空间已关闭，未清理临时数据。
+- 演示准备：DEMO_SCRIPT.md 提供全新独立 DB 初始化/启动、查询→追问→补充→恢复→精确确认→工具 verified/回读→审计脚本、失败核查，以及 macOS Shift–Cmd–5 / QuickTime 手动录制说明。真实财务写入与回读在 Fake + 真 SQLite 自动测试中验证；本次不调用真实云模型、不生成录屏视频。真实供应商兼容性与最终手动录制为明确遗留，不能把未配置模型页面或离线测试冒称云模型演示。
+
+### T12 — 验收后审计隔离安全修正
+- 状态：DONE；认领人：Coding Agent。确认 request 在所有权校验前写入目标 UUID，上一轮将 task UUID 断言改为 requestId 检查掩盖了泄漏；本次恢复强断言并修复，仅改指定 T12 文件。
+- 修复：带 taskId 的 request 在写 REQUESTED 前先以当前 DemoPrincipal 调用 agent(p).load(taskId)；NOT_FOUND/PERMISSION_DENIED 拒绝日志使用 taskId=null、保留请求ID/action/errorCode，不保存目标 UUID；适用于 load/supplement。turn 原有先 load 后记录顺序不变。
+- 强断言：Viewer/C001、Operator/C002 分别对 C001 拥有者任务执行失败 load/supplement/turn 后，GET 自己的审计均不含目标 UUID；load/supplement 的 NOT_FOUND 拒绝事件 taskId=null。拥有者仍能查看自己的任务和含本任务 UUID 的审计。未以 requestId 检查替代 UUID 隔离。
+- CSP：DemoSecurity 为页面、静态资源和 API（含拒绝响应）设置 `default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`；无外部资源、无界面重做，来源/CSRF规则不变。
+- 验收：2026-10-30 12:16:23 +08:00，真实 Java 21.0.12.1，`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" test`：**187 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**。T12 共24项（本次新增1项CSP测试并加强原隔离用例）；日志 target/t12-security-test.log，报告 target/surefire-reports。此前186项为历史验收，本记录为最终安全复验。
+- 范围：仅 DemoController/DemoSecurity/DemoApiTest、TASKS/README/T12 plan/API文档；保留其他既有变更。仅临时 SQLite 和测试 Fake/本机 stub，未访问真实模型、未修改业务服务/数据库/官方原件或 data/harness.db、未做T13、未提交推送。现存审计表为 append-only，本次不迁移或清理任何历史记录。
+
+### T13 — 打包提交说明及复现文档
+- 本轮单一任务续认领：Coding Agent；GPT-6 Luna Max / Responses 最小适配，保留全部现有 T12/T13 工作，T13 仍 IN_PROGRESS。未查看环境变量值、未设置凭证、未发起真实 API 请求。
+- Responses 实现：完整 `/responses` endpoint 显式选择 gpt-6-luna / reasoning.effort=max / store=false / parallel_tool_calls=false，复用原系统指令和工具 schema；Chat Completions 保留，无自动协议回退。LlmClient.Call 内部保存并防御性复制 output items（含 reasoning），现有 history 续接重放后追加精确 call_id 的 function_call_output；JsonIgnore 和安全 toString 防止供应商续接元数据进入可见历史/审计。AgentRuntime、DemoConfiguration、财务工具、写授权、DB schema、UI未改。
+- 本轮精确验证命令：`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home PATH=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home/bin:$PATH mvn -o -B -ntp "-Dmaven.repo.local=$PWD/.m2/repository" -Dtest=OpenAiCompatibleClientTest,OpenAiResponsesClientTest test`。2026-10-30 14:07:33 +08:00，**5 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**（Responses新增3、Chat原有2），报告 target/surefire-reports。首次编译泛型推断错误已修正；沙箱内测试5/0/3/0因本机监听拒绝，获准沙箱外重跑原命令通过。只跑上述聚焦离线测试，全部HTTP均为127.0.0.1 stub；验证请求配置/schema、调用解析、reasoning/output重放及call_id关联、最终文本、畸形/截断/多调用、缺key及关联错误零网络、重定向拒绝/脱敏错误和隐藏元数据。
+- 文档同步：README、T12 API spec、DEMO_SCRIPT、REPRODUCE、T13计划及本台账；配置示例无凭证值。真实云端E2E范围已获用户授权，待本机凭证安全配置；仅使用官方合成样本+全新临时SQLite+loopback。本轮未操作SQLite、data/harness.db、真实财务数据、官方材料、计划书或冻结契约，未提交推送；未声称真实集成或全量回归通过。
+- 状态：IN_PROGRESS；认领人：Coding Agent；2026-10-30。先检查Git、AGENTS、TASKS、README、DEMO_SCRIPT、冻结契约、T12计划/最终安全证据及官方参赛说明，确认T11/T12 DONE；先保存认领与T13计划再推进。仅单一T13。2026-10-30用户授权扩展为真实模型E2E：只用官方演示种子合成数据与独立临时DB；不碰 data/harness.db、不用真实财务数据、不写入真实密钥、不提交推送。当时初始目标为 gpt-6-luna + OpenAI Responses API + reasoning.effort=max；之后本轮用户改选 DashScope qwen3.8-flash + Anthropic Messages API。执行环境未读取凭证或使用聊天中暴露的密钥；真实云端E2E待用户撤销旧密钥并在本机配置轮换密钥后执行。
+- 变更：新增REPRODUCE.md、RELEASE_CHECKLIST.md、docs/plans/active/PLAN-20261030-t13-release-reproduction.md；在README/docs/index追加入口；更新本台账；.gitignore仅追加安全模式。T13完整Git变更清单与原有T12区别见RELEASE_CHECKLIST。
+- 副本：git ls-files -co --exclude-standard列出70个当时文件，复制到/tmp/taxagent-t13-oor9i4rc/source，含未提交T12；无data/.env/target/.m2/.git，不复制现有DB。不是全新Git checkout；使用原仓库既有隔离缓存绝对路径，未重新下载依赖。
+- 实际测试命令（副本根）：`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home mvn -o -B -ntp -Dmaven.repo.local='/Users/a123/Projects/财税 harness/.m2/repository' test`。沙箱内187/0/145/0（系统临时目录/Socket拒绝），获准沙箱外原命令重跑，**2026-10-30 12:22:41 +08:00 BUILD SUCCESS，187 tests / 0 failures / 0 errors / 0 skipped**；Surefire XML求和复核一致，java.version=21.0.12.1。日志/tmp/taxagent-t13-oor9i4rc/test-escalated.log；Maven3.10.0。相同环境加`-DskipTests package`成功，产物副本target/harness-0.0.1-SNAPSHOT.jar（忽略，不交付构建产物）。
+- 初始化：副本`python3 -B scripts/official_seed.py --check`输出PASS，原件哈希与所有种子字段一致；JDK21 JAR `--initialize-data --database=/tmp/taxagent-t13-oor9i4rc/demo.db`成功。首次沙箱内SQLite原生库临时目录拒绝，获准外部重跑成功。只读查新库2企业/2用户/4权限/40发票/48流水/5规则；HTTP检查后invoice_operations=0。
+- 启动：env -u LLM_ENDPOINT -u LLM_API_KEY -u LLM_MODEL移除配置，JDK21 JAR参数`--taxagent.database=/tmp/taxagent-t13-oor9i4rc/demo.db --server.address=127.0.0.1 --server.port=18083`；获准本机监听。curl健康200/UP；ego-browser真实页面可浏览、显示本地模拟身份、operator/C002任务恢复；浏览器fetch健康200、demo.js200（6562字节）、demo.css200（2653字节）；CSRF会话→创建任务→turn返回200/MODEL_NOT_CONFIGURED，无真实模型调用。HTTP脚本沙箱本机连接拒绝后通过获准curl与浏览器检查。Ctrl+C停止（进程退出130），最终curl连接失败退出7，确认无遗留服务；浏览器任务空间关闭。
+- 审查：初始SHA256快照与最终比对，官方三原件、计划书、冻结契约、已有data/harness.db及所有非T13文件内容未变；原T12未提交文件完整保留。git diff --check通过；git ls-files -ci --exclude-standard无输出；data/.m2/target/.env、tmp财务CSV、exports财务XLSX、recordings视频均命中忽略。没有清理文件、提交或推送。
+- 未证实/后续：为避免不必要下载，未做空缓存首次在线构建；真正全新checkout（当前HEAD尚无未提交T12）未验证，故不标DONE。用户在允许联网的独立新checkout先整合完整源码，再按REPRODUCE第2节在线test/package、离线重跑及新库UI复验，补版本/计数/结果后再验收。最低Maven版本和其他平台未实测。真实供应商兼容性及真实云模型三场景未实测；正式2–3页设计短稿、去敏关键记录、≤5分钟手动视频和最终压缩包/提交仍由用户完成。主办方截止/入口/大小待核实，不冒称比赛提交就绪。文档已记录恢复路径，无额外handoff。
+
+### T13 — DashScope Messages 适配（进行中）
+- 认领人：Coding Agent；IN_PROGRESS。仅独立适配器、loopback 测试和复现文档；保留既有改动。禁止外网和 SQLite 操作。暴露凭证须撤销，替换值仅本机输入。
+
+## DashScope 本轮验证结果（2026-10-30）
+T13 保持 IN_PROGRESS。当前目标 DashScope qwen3.8-flash，旧 Luna/Chat 支持保留。
+精确命令：
+```zsh
+JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" -Dtest=AnthropicMessagesClientTest,OpenAiCompatibleClientTest,OpenAiResponsesClientTest test
+```
+初次沙箱执行因 loopback bind 被拒：7 tests / 0 failures / 4 errors；获准沙箱外离线重跑。最终 2026-10-30 14:47:51 +08:00 BUILD SUCCESS：8 tests / 0 failures / 0 errors / 0 skipped（Messages 3、Responses 3、Chat 2）。覆盖空 thinking/signature 原样重放、关联 tool_result、内部状态不序列化、请求字段、严格解析、重定向目标零访问及错误响应标记不泄漏。仅本地 HTTP stub；未读取环境凭证、未访问外网、未操作任何 SQLite。无提交或推送，既有 T12/T13 改动保留。
+该次 14:47 离线验证时的超时基线为 HTTP/AgentRuntime 15 秒；以下记录本轮 Qwen 超时修正。真实 E2E 尚未执行；聊天中提供的密钥已暴露，须撤销后仅在本机配置轮换值。
+
+### DashScope 超时与启动文档跟进（2026-10-30）
+- 当前 Qwen Messages HTTP 请求与 AgentRuntime 等待上限均设为60秒；其他模型仍采用15秒默认，系统硬上限保持60秒。
+- `DEMO_SCRIPT.md` 的主启动块已切换到 DashScope `qwen3.8-flash`；README、REPRODUCE、演示 API 契约及 T13 计划已同步当前目标与轮换密钥要求。
+- 聚焦离线验证通过。首次尝试因 ServerFS 保留源文件旧 mtime、Maven 误用旧 class 而在测试前编译失败（0项执行）；随后仅刷新四个已改源文件的 mtime、未改内容，再运行：`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home PATH=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/mvn -o -B -ntp -Dmaven.repo.local='/Users/a123/Projects/财税 harness/.m2/repository' -Dtest=AnthropicMessagesClientTest,OpenAiCompatibleClientTest,OpenAiResponsesClientTest,FinanceAgentTimeoutTest test`。2026-10-30 15:33:45 +08:00 **9 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**（Messages 3、Responses 3、Chat 2、Qwen timeout 1）；`git diff --check` 通过。测试只访问 loopback stub/未访问外网，未读取环境变量或凭证，未操作 SQLite；保留 target 中的 T10/T12 证据。真实云端 E2E 仍待用户撤销暴露密钥并在本机设置轮换值；范围限合成数据、独立临时 SQLite 与 loopback。
+
+### Qwen 联调稳定性跟进（2026-10-30）
+- 依据最新失败记录和 DashScope 官方 Messages 说明，Qwen 3.8 Flash 的 `max_tokens` 同时计算思考和答复；原 4096 上限可能在生成可解析答复前耗尽。提升至8192，并将 `stop_reason=max_tokens` 安全映射为 `MODEL_OUTPUT_LIMIT`。
+- Messages 适配器现将无效响应、连接异常、401/403、429 和其他 HTTP 错误分别映射为安全错误码；不返回异常正文或密钥。接受一个带说明文本的合法工具调用；仍拒绝多工具、截断调用及无效参数，原写入审批/权限规则不变。UI 增加对应中文错误说明。相关 API 规格与T13计划已同步。
+- 验收：JDK21离线 `mvn -o -B -ntp -Dmaven.repo.local='/Users/a123/Projects/财税 harness/.m2/repository' -DskipTests package`，2026-10-30 18:14:28 BUILD SUCCESS；生产代码20个文件及测试源码16个文件均编译，测试执行跳过。`node --check src/main/resources/static/demo.js` 与 `git diff --check` 通过。18:14以最终JAR重启本机隔离演示服务，PID 23216，`/api/health` 返回UP，页面已加载新错误说明。
+- 本轮未调用真实模型、未读取或输出密钥、未调用插件、未读写SQLite；模型真实联调仍待轮换凭证后验证。8192提高单次输出上限，也提高单轮可能使用的token上限；没有自动重试。T13保持IN_PROGRESS，未提交或推送。
+
+### T14 — 财税工作台 UI/UX 视觉重构
+- 状态：DONE；认领人：Coding Agent；2026-10-30。先检查最新任务、Git、AGENTS、README、冻结契约、前端和DemoApiTest，保存IN_PROGRESS与独立计划后实施。完整证据：[T14计划](docs/plans/active/PLAN-20261030-t14-ui-ux.md)。
+- 变更：仅本台账、新T14计划、static/index.html、demo.css、vendor及LICENSE/NOTICE；深色SaaS三栏、手机单列、右侧折叠检查器。Core1.4.0、Icons Webfont3.50.0固定本地资源及MIT，含Bootstrap5.3.7 MIT许可；npm SHA512核验通过，无CDN/插件/构建链。
+- 验证：2026-10-30 19:12:48 JDK21.0.12.1隔离缓存离线全量194/0/0/0，含DemoApiTest24/0/0/0；精确命令见计划。29/29原DOM id保留，demo.js字节未改；HTML严格嵌套/资源路径、JS语法、CSS111规则解析、git diff --check通过；八个320–1920px断点及手机展开表单无横溢，52项本地资源HTTP200，图标字体/键盘焦点/跳转/折叠/长消息滚动通过。
+- 保护：临时UI服务指向不存在的/tmp数据库，移除模型配置，仅静态与GET session；验证后正常停止并关闭浏览器。基线SHA256复核，除本任务授权文件外原文件均不变，T12/T13/Java/官方材料/冻结契约/运行数据库保留。未add/commit/push。
+- 遗留：T14无阻塞；真实模型、Safari/Firefox/实体手机未验证。T13原有状态与待办不变。
+
+### T15 — 独立 React + TypeScript 产品前端
+- 状态：IN_PROGRESS；认领人：Coding Agent；开始日期：2026-10-30。
+- 授权范围：仅新增 frontend/**、T15 计划及本台账追加记录；保留 T12/T13/T14 和全部既有文件。禁止 Git add/commit/push。
+- 计划：[T15](docs/plans/active/PLAN-20261030-t15-react-frontend.md)。核对真实 DTO/路由后实现首页、执行工作区、审核结果；隔离数据库验收，不触碰运行库。
+- 2026-10-30 跟进：React/TS 三页、typed API Adapter、对话/工具分组、审批核验和单测源码已完成；隔离合成库 API smoke 报告通过。写入锁安全修复：只有操作号匹配且回读 `verified=true` 才释放锁。用户实测 npm `verify` 四阶段通过：TypeScript、ESLint、Vitest 4/4、Vite 7.3.7 生产构建成功（1636 modules）。
+- 2026-10-31 历史任务体验修复：已结束/取消的历史任务恢复后改为专用状态面板，提供“基于原任务新建查询”，仅预填目标并调用原有任务创建 API；新任务独立 ID，待办/授权/工具证据不会继承。正在进行的任务保留对话；本轮刚完成的任务仍保留实际对话结果、审查入口和独立新建入口。新增终态分类单测，但最新改动仍需重新运行 `npm run verify` 和浏览器验收，T15 保持 IN_PROGRESS。未改 Java、旧版 static 或数据库，未提交或推送。
+- 2026-10-31 新建任务流程修复：检查发现首页仅调用 POST /tasks 并导航至工作区，不会将原始输入提交到第一轮 /turn；任务列表刷新失败还会把已创建的任务错误显示为整体失败。已将“创建成功后立即使用新 ID 发起首次非授权 turn”封装为 `createAndRunFirstTurn`，创建后立刻展示任务 ID、输入消息和工作区；第一轮失败仍保留任务，绝不自动重试或附带写入 approval。列表刷新失败只显示局部警告，不抹掉新任务；创建响应未知时要求先查任务历史，防重复创建。新增 3 个回归单测（首次 turn、turn 失败保持任务、创建失败不执行 turn）。
+- 2026-10-31 新建任务 `CONFLICT` 根因修复：截图显示同用户/企业已有 `ACTIVE`/`WAITING_USER` 任务；`task-memory.sql` 的 `one_open_agent_task` UNIQUE INDEX 强制一次只能有一项未结束任务，原前端未提供取消入口。保留这一约束，前端新增未完成任务提示、继续任务、刷新状态、结束旧任务二次确认；已有任务时禁用新建，后端竞争导致的 409 会主动刷新任务列表并显示可操作的指引，不重复创建。为实现显式结束，补充 `POST /api/demo/tasks/{id}/cancel`：必须 CSRF、固定可信身份、确认标志、合法任务版本，TaskMemory.cancel 的作用域与乐观锁持续生效；操作经审计，不删除历史、不回滚任何财务记录；存在待核验财务操作时前端禁止取消。新增 Java 2 项回归测试（重复任务/确认/版本/待补充取消/跨用户隔离），前端 3 项回归测试（未结束任务识别、CSRF 取消、冲突不自动重试）；截至这次修改 **尚未运行最新 Maven / npm 全量测试**，T15 仍为 IN_PROGRESS。此次安全可控地扩大了原 T15 范围至 DemoController/FinanceAgent 与 DemoApiTest；未修改原始数据、未提交或推送。
+
+### T15 — 提交前两个安全阻断修复
+- 状态：IN_PROGRESS；认领人：Coding Agent；2026-10-31。仅修复跨 HttpSession 的 turn/cancel/supplement 并发与静态首页未知写入锁，同步指定文档和回归；不提交、不推送、不联网、不访问现有数据库。
+
+### 两项安全修复最终验收（2026-10-31）
+- 本轮修复状态：DONE；T15整体仍IN_PROGRESS（原有部署/浏览器等未验证项保留）。64个固定进程内条带按可信userId+enterprise映射，既有DemoController的turn/cancel/supplement共用；保留权限、作用域、CSRF、乐观版本和审计。不是跨JVM锁，不承诺强杀不响应中断的超时worker。
+- 并发回归：两个独立HttpSession，同一operator/C001，CountDownLatch阻塞批准写入前的模型决策；取消和补充在释放前均不能完成；释放后turn为COMPLETED、回读verified，invoice_operations仅1条，竞争请求409 CONFLICT。finally释放latch并shutdownNow/awaitTermination。
+- 默认静态页与React共用taxagent-pending-operation，仅持久化{id,taskId,unknown:true}；请求前存储失败则不发送。只有当前响应operationId精确匹配且verification.verified===true清锁；网络、JSON、HTTP错误和未核验均保留锁，重载展示警告，其他只读操作可用。Vitest直接隔离执行实际demo.js，新增7项（六类失败/不匹配及成功回读），不调用服务。
+- 已先touch本轮修改的DemoController.java和DemoApiTest.java；Maven明确重新编译20个main/16个test源码（debug parameters release21），未clean、未删除历史证据。Java21命令：`mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" test`，22:06:21 +08:00 BUILD SUCCESS，198/0/0/0；16份Surefire XML汇总一致，DemoApiTest28项含crossSessionMutationWaitsForApprovedTurn的cancel/supplement两项PASS。随后同参数`-DskipTests package`，22:07:20 BUILD SUCCESS。
+- frontend/执行`npm run verify`：typecheck/lint、Vitest1文件18/18、build全部通过，退出0；`node --check src/main/resources/static/demo.js`与`git diff --check`退出0。初次typecheck发现测试专用Node内置模块缺类型声明，已用测试局部说明处理，不增加依赖；Vitest系统临时缓存和Maven缓存锁的沙箱权限失败获准原命令重跑成功。
+- REPRODUCE/DEMO_SCRIPT当前目标max_tokens已同步8192；README数字与API取消/锁范围契约同步。未联网、未调用真实模型、未读取/打印环境变量或凭证、未操作data/或现有数据库；SQLite仅由JUnit @TempDir管理。未暂存、未提交、未推送。
+- 收尾核对：与本轮开始的逐文件内容哈希比较，仅指定的10个源码/测试/文档文件变化，无删除；Git暂存区为空，已跟踪忽略文件检查为空。原有其他未提交变更完整保留。
+
+### T15 — 损坏操作锁存储 fail-closed 补修（2026-10-31）
+- 状态：IN_PROGRESS；认领人：Coding Agent。仅指定五文件；键不存在才无锁，读取/解析/形状错误使用unknown占位锁，保留原存储，不发送财务请求。静态页回归覆盖损坏JSON、getItem抛错、形状错误与只读刷新；React初始化同样保守，setItem失败阻断本页发送。仅跑npm verify、node --check和diff --check，不跑Maven/应用、不联网、不操作数据库、不提交推送。
+
+- 本次补修验收：DONE（T15整体仍IN_PROGRESS）。静态页和React仅键缺失返回null；读取异常、损坏JSON、无效形状均生成{id:unknown,taskId:unknown,unknown:true}保守占位锁，不改写原存储、不发送财务请求。合法已有对象继续锁定。React同时修复setItem失败时不得继续发送；两页均先建立内存锁再setItem，清锁则先成功removeItem再清内存/渲染，removeItem异常保持锁。
+- 2026-10-31最终npm run verify退出0：typecheck/lint/build通过，Vitest 1文件36/36（原18+本次18）；覆盖静态损坏JSON/getItem异常/无效形状后approve零请求且只读刷新可用、存储不被覆盖清除、setItem和removeItem失败保持锁，以及React纯初始化函数的缺失/异常/合法/无效形状。node --check src/main/resources/static/demo.js、git diff --check均退出0。首次Vitest被系统临时缓存沙箱权限阻断，获准原命令离线重跑通过。未运行Maven或应用、未联网、未操作数据库、未读取密钥、未暂存/提交/推送；仅指定五文件内容变更。

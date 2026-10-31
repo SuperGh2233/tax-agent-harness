@@ -21,13 +21,21 @@ public final class FinanceAgent {
         memory.tasks(session, enterprise); // Validate trusted selection before any model invocation.
         writer = new InvoiceWriteService(database);
         runtime = new AgentRuntime(model, new ReadOnlyFinanceTools(database), new RuleService(database),
-                AgentRuntime.Limits.defaults(), writer);
+                runtimeLimits(model), writer);
+    }
+    static AgentRuntime.Limits runtimeLimits(LlmClient model) {
+        var defaults = AgentRuntime.Limits.defaults();
+        if (!(model instanceof AnthropicMessagesClient)) return defaults;
+        return new AgentRuntime.Limits(defaults.maxSteps(), AnthropicMessagesClient.DEFAULT_TIMEOUT,
+                defaults.modelRetries(), defaults.allowedTools());
     }
     public TaskMemory.Task start(String goal, List<String> pending) {
         return memory.start(session, enterprise, goal, pending);
     }
     public TaskMemory.Context load(String id) { return memory.load(session, enterprise, id); }
     public List<TaskMemory.Task> tasks() { return memory.tasks(session, enterprise); }
+    /** Explicit human cancellation; never performed by the model or implicitly by task creation. */
+    public TaskMemory.Task cancel(String id, long version) { return memory.cancel(session, enterprise, id, version); }
     /** Explicit user statements only. This never creates financial write approval. */
     public TaskMemory.Task supplement(String id, long version, Map<String, TaskMemory.Input> statements) {
         return memory.supplement(session, enterprise, id, version, statements);

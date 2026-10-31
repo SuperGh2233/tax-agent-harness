@@ -5,8 +5,20 @@
 面向财税业务多轮任务的 Agent Harness 比赛项目，强调任务持续推进、规则可追溯、工具执行受约束，以及写入结果可验证。
 
 - 参赛队伍：用豆包就够了！
-- 项目状态：**T11 回归与故障注入验收通过（JDK 21 全量 163 项通过）；T12/T13 待完成，验收状态见 TASKS.md**
+- 项目状态：**T12/T14 本地演示 UI、安全审计已实现；T15 React 工作台及提交前两项安全修复已完成离线回归。2026-10-31 Java21 Maven 198 tests / 0 failures / 0 errors / 0 skipped，JAR 打包成功；前端 npm run verify 的18项测试及 typecheck/lint/build通过。并发条带锁仅保证当前单JVM demo；T13交付复现与T15其他验收仍IN_PROGRESS，详见TASKS.md。**
 - 主要场景：发票与银行收支独立查询；发票用途检查与明确授权后的安全写入；多轮任务记忆及恢复。
+
+## 比赛交付与独立复现（T13）
+
+先读 **[REPRODUCE.md](REPRODUCE.md)**（新副本首次在线与后续离线命令）及 **[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)**（官方要求对照、打包清单与人工待办）。选择JDK21 → 独立Maven缓存运行全量test/package → `python3 -B scripts/official_seed.py --check` → 在mktemp新目录用 `--initialize-data --database=...` 初始化 → 移除LLM环境配置并以 `--taxagent.database=... --server.address=127.0.0.1` 启动JAR → 检查 `/api/health` 并浏览 `/` → Ctrl+C停止。详细可复制命令以复现文档为准，不使用已有data/harness.db。
+
+T13 的早期干净源码副本+既有隔离缓存验收为 JDK21 全量 187/0/0/0；2026-10-31 提交前修复后全量 198/0/0/0 与 JAR 打包成功；已确认两项新增跨会话并发测试真实执行。空缓存首次在线下载和全新 Git checkout 未证实。用户在独立模拟数据库上启动 React 与 Spring Boot，曾因启动命令使用 `env -u` 显示 `MODEL_NOT_CONFIGURED`，排查出模型环境变量未注入；后续用户报告已验证，未提供完整云端工具执行证据。正式设计短稿、运行记录附件、≤5分钟手动录屏及最终压缩提交仍需用户完成；不包含数据库、密钥、缓存或临时财务数据。
+
+## React 工作台（T15）
+
+新版 React 19 + TypeScript 工作台位于 [`frontend/`](frontend/README.md)：`cd frontend && npm install && npm run dev`，开发入口为 http://127.0.0.1:5173/react-app/ ，通过 Vite 同源代理调用本机 `127.0.0.1:8080` 的 Spring Boot。仅在**独立初始化的模拟 SQLite** 上测试，且必须先启动后端。首页创建任务后自动执行一次非授权首轮查询；同一用户/企业只允许一项未完成任务，可继续、刷新或明确确认后取消；取消需要最新任务版本和审计，不能恢复财务写入授权。已有静态主页仍保留在 `/`。
+
+`npm run verify` 包含 TypeScript、ESLint、Vitest 与 Vite 构建。前端打包产物 `frontend/dist/`、依赖 `frontend/node_modules/` 和任何 `.env`、密钥、运行数据库均不可提交。详见 [T15 计划](docs/plans/active/PLAN-20261030-t15-react-frontend.md)。
 
 ## 文档入口
 
@@ -43,13 +55,13 @@
 
 默认最多 8 次模型决策，每次模型调用/工具执行 15 秒、无重试；`Limits` 可配置 1–32 步、至多 60 秒、模型至多重试 1 次，以及三个只读工具的子集。工具永不重试，不开放 update_invoice/rules/task/memory 或任何写入/管理能力。超时返回 MODEL_TIMEOUT/TOOL_TIMEOUT，达到步数为 MAX_STEPS，模型/协议故障为 MODEL_FAILURE，无配置为 MODEL_NOT_CONFIGURED；DomainException 保留既有错误码。失败不返回零金额或空查询成功。替换客户端应响应线程中断；超时会取消任务并立即结束请求，不能强杀不响应中断的第三方实现。
 
-### 可选真实模型接入（未实测）
+### 保留的 OpenAI 模型路径（真实云端未实测）
 
-`OpenAiCompatibleClient` 使用 JDK HttpClient，无新增依赖，无自动启动调用。由可信服务端代码显式注入完整 chat/completions endpoint、API key、model 和超时；可从环境读取 `LLM_ENDPOINT`、`LLM_API_KEY`、`LLM_MODEL`。这些变量不是 Spring 自动装配项；未建立认证 HTTP 入口。示例仅说明装配方式，不会随应用启动执行：
+`OpenAiCompatibleClient` 使用 JDK HttpClient，无新增依赖，无自动启动调用。完整 `LLM_ENDPOINT` 以 `/responses` 结尾时显式选择 Responses，固定 `LLM_MODEL=gpt-6-luna`、`reasoning.effort=max`（GPT-6 Luna Max）、`store=false`、`parallel_tool_calls=false`；原 `/chat/completions` 行为保留，两协议不自动回退。T12 DemoConfiguration 仅在 `LLM_ENDPOINT`、`LLM_API_KEY`、`LLM_MODEL` 三项齐全时装配；endpoint 路径以 `/anthropic` 结尾时使用 DashScope Anthropic Messages 适配器，其他受支持的 OpenAI Responses/Chat Completions endpoint 使用此客户端。key 只在可信本机终端安全设置，`.env` 不自动加载，不在命令记录/录屏/日志中展示。以下仅为可信服务层装配示例：
 
 ```java
 var client = new OpenAiCompatibleClient(
-    URI.create(System.getenv("LLM_ENDPOINT")), // 完整 HTTPS .../v1/chat/completions
+    URI.create(System.getenv("LLM_ENDPOINT")), // 完整 HTTPS .../v1/responses 或 .../v1/chat/completions
     System.getenv("LLM_API_KEY"), System.getenv("LLM_MODEL"), Duration.ofSeconds(15));
 var runtime = new AgentRuntime(client, new ReadOnlyFinanceTools(),
     new RuleService(), AgentRuntime.Limits.defaults());
@@ -57,6 +69,8 @@ var result = runtime.run(trustedSession, userMessage);
 ```
 
 endpoint 仅允许 HTTPS（本机 stub 可用 HTTP），不跟随重定向；缺 key/model 时 `next` 返回 MODEL_NOT_CONFIGURED，零网络请求。供应商须支持 function tools、`parallel_tool_calls:false`、单个完整 tool call；无工具时按 system prompt 返回严格 `{kind:"ask"|"finish",text:"..."}` JSON。每步至多一个调用，拒绝截断和多调用响应；不支持流式输出。真实接入会发送用户消息及已授权读取的工具结果，应仅由可信调用方显式启用，密钥不写入仓库或日志。
+
+Responses 在当前请求内通过 LlmClient history 重放原 output items（含 reasoning），并以精确 call_id 追加应用工具结果；供应商续接元数据不进入用户可见历史/审计，写授权保持原校验。T13 只允许官方合成样本、全新临时 SQLite 和 loopback，禁止使用 data/harness.db 或真实财务数据。本轮仅离线 stub 验证；真实云端 E2E 范围已获用户授权，待本机凭证安全配置后执行，T13 保持 IN_PROGRESS。运行步骤见 [DEMO_SCRIPT.md](DEMO_SCRIPT.md)。
 
 `AgentRuntime.run` 保持原有当前请求行为。**T08 TaskMemory** 提供可选持久化闭环：由可信后端传入已初始化数据库 Path 和 Session，`start` 建任务，`tasks/load` 查看，`supplement` 接收明确补充及更正，`continueTask` 加载上下文并交由 Runtime 模型决策，`cancel` 取消；`preferences/putPreference/deletePreference` 管理用户明确提出的长期偏好。完整调用与状态契约见 [T08 存储契约](docs/specs/SPEC-20261030-task-memory.md)。
 
@@ -166,4 +180,32 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 
 T11 已完成回归与故障注入，未修改生产代码。新增 5 个测试用例，覆盖两企业财务写入成功后 TaskMemory 保存失败的关键提交边界、规则缺失不回退、模型有限重试、工具错误不重试，以及 SQLite 锁导致的工具超时。关键故障场景验证：发票及操作台账只提交一次，任务状态不误报完成；重建服务后通过只读 recover 和新鲜查询确认实际保存值，不再次执行写入。
 
-真实 Java 21.0.12.1 全量复验：2026-10-30 11:42:51 +08:00，**163 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**。完整命令、覆盖范围及限制见 [TASKS.md](TASKS.md)。测试使用 Fake 模型和临时 SQLite；**真实云模型尚未实测**。T12（交互界面/审计日志/演示）与 T13（打包及复现文档）仍待完成。
+真实 Java 21.0.12.1 全量复验：2026-10-30 11:42:51 +08:00，**163 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**。完整命令、覆盖范围及限制见 [TASKS.md](TASKS.md)。测试使用 Fake 模型和临时 SQLite；**真实云模型尚未实测**。以上为 T11 历史验收；T12 最新状态见下节，T13（打包及复现文档）仍待完成。
+
+## T12 本地浏览器 UI 与脱敏审计
+
+原生 HTML/CSS/JS 页面位于 `src/main/resources/static/`，启动后访问 http://127.0.0.1:8080/ 。**本地模拟身份，不是生产认证**：Operator → 官方 U001，Viewer → 官方 U002，固定服务端映射，数据库复核权限（U002/C001 只读、U002/C002 拒绝）。会话仅服务端 HttpSession，所有 demo API 限直接 loopback、同源、CSRF token；无 CORS。默认保持 127.0.0.1，勿开放外网。
+
+界面支持任务列表/恢复、自然语言、明确补充及原话、Agent 状态、真实工具调用和完整返回、精确写入确认与 DB 回读，以及当前用户/企业的脱敏审计时间线。聊天/补充不授权写入；只有确认面板和精确内容二次弹窗触发 approvedTurn，模型仍须调用 update_invoice。以工具 verified=true + 独立回读为保存证据。提交后任务保存失败只读 recover，不重复写入；审计失败明确报错。
+
+运行库可设 `--taxagent.database=/absolute/path/demo.db` 或 TAXAGENT_DATABASE，默认仍为 data/harness.db。**演示请先按 [DEMO_SCRIPT.md](DEMO_SCRIPT.md) 创建并启动全新的独立 demo DB**，不要把开发验收写入现有库。普通启动不自动初始化数据。
+
+T12 新入口从环境显式读取完整 LLM_ENDPOINT / LLM_API_KEY / LLM_MODEL；缺任一配置明确 MODEL_NOT_CONFIGURED，不回退 Fake。前文 T07–T10 的“无 HTTP / 无自动装配”描述为历史阶段状态，本节与 [T12 API 契约](docs/specs/SPEC-20261030-demo-api.md) 描述新增本地演示入口。Fake 仅存在于测试，真实云模型本次未调用/实测。录屏使用 macOS Shift–Command–5 或 QuickTime 手动完成；本任务只准备脚本和录制步骤，不生成视频、不执行 T13 打包提交。
+
+T12 最终安全复验：2026-10-30 12:16:23 +08:00，真实 JDK21 全量 **187 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**（T12共24项）。任务所有权预检在审计记录前执行，拒绝审计不包含目标任务 UUID；跨用户/企业 UUID 隔离强断言及页面/资源/API 的严格同源 CSP 已验证。浏览器缺模型及权限核验使用独立临时库，真实云模型未调用、录屏待手动完成；准确命令与证据见 TASKS.md。
+
+## 当前真实测试目标：DashScope Messages
+当前目标为 `LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.8-flash`；独立适配器追加 `/v1/messages`，使用 x-api-key、max_tokens=8192、output_config.effort=medium，自动工具选择。Qwen 的 max_tokens 计入思考与答复；适配器会清楚报告输出上限、格式、连接、认证及限流错误。保留 GPT-6 Luna Responses 和既有 Chat Completions，无自动回退。思考及签名仅作为内部续接状态，不进入结果或审计。Qwen 的 HTTP 与 AgentRuntime 每次调用上限均为60秒；其他模型默认15秒，系统硬上限60秒。
+
+此前粘贴的凭证已暴露，必须先在供应商控制台撤销；替换凭证仅在本机 zsh 隐藏输入，勿粘贴到聊天：
+```zsh
+export LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic
+export LLM_MODEL=qwen3.8-flash
+read -rs "LLM_API_KEY?输入已轮换的新密钥（隐藏）："; print
+export LLM_API_KEY
+# 完成后清除
+unset LLM_API_KEY
+```
+用户已授权合成数据及独立临时 SQLite。此次仅允许 loopback HTTP stub，不访问外网、不操作任何 SQLite；真实 E2E 等待轮换密钥在本机配置。T13 保持 IN_PROGRESS。上述目标替代文档早先的 Luna 当前目标描述，Luna 支持继续保留。
+
+注意：Qwen 单次 HTTP 请求和 AgentRuntime 等待上限均为60秒；其他模型的默认仍为15秒。尚未测得真实云端延迟，超过上限会返回超时。
