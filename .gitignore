@@ -12,3 +12,21 @@
 *.db-shm
 *.db-wal
 *.log
+
+# Local reproduction artifacts, financial exports and recordings (never deliver)
+/tmp/
+/recordings/
+/exports/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+*.db-journal
+*.mov
+*.mp4
+*.mkv
+*.webm
+*.pem
+*.key
