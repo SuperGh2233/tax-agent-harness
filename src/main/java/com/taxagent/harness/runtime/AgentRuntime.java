@@ -31,7 +31,7 @@ public final class AgentRuntime {
     private final RuleService rules;
     private final Limits limits;
     private final InvoiceWriteService writer;
-    public record ApprovedWrite(String operationId, ToolContract.InvoiceUpdate update,
+    public record ApprovedWrite(String taskId, String operationId, ToolContract.InvoiceUpdate update,
                                 InvoiceWriteService.Authorization authorization) {}
     public AgentRuntime(LlmClient model, ReadOnlyFinanceTools finance, RuleService rules, Limits limits) {
         this(model, finance, rules, limits, null);
@@ -77,6 +77,7 @@ public final class AgentRuntime {
         if (session == null) return error("AUTHENTICATION_REQUIRED", history);
         if (message == null || message.isBlank()) return error("INVALID_ARGUMENT", history);
         String toolError = null;
+        boolean verifiedWrite = false;
         // Per-request worker: cancellation never blocks the caller waiting for an uncooperative client.
         var worker = Executors.newSingleThreadExecutor(r -> { var t = new Thread(r, "agent-request"); t.setDaemon(true); return t; });
         try {
@@ -94,7 +95,17 @@ public final class AgentRuntime {
                     } catch (InterruptedException e) { Thread.currentThread().interrupt(); return error("INTERRUPTED", history);
                     } catch (Exception e) { if (attempt == limits.modelRetries()) return error("MODEL_FAILURE", history); }
                 }
-                if (decision instanceof Call call) {
+                List<Call> calls = decision instanceof Call single ? List.of(single)
+                        : decision instanceof Batch batch ? batch.calls() : null;
+                if (calls != null) {
+                    // Preflight the entire read-only batch before executing any member.
+                    // An approved invoice write is never allowed to share a provider turn.
+                    if (calls.size() > 1) {
+                        try { validateReadBatch(calls, enterprise); }
+                        catch (DomainException e) { return error(e.code().name(), history); }
+                        catch (Exception e) { return error("INVALID_ARGUMENT", history); }
+                    }
+                    for (var call : calls) {
                     ToolContract.Response<?> response;
                     try {
                         if (!limits.allowedTools().contains(call.name()) && !(writer != null && call.name().equals("update_invoice")))
@@ -114,13 +125,21 @@ public final class AgentRuntime {
                             case "update_invoice" -> {
                                 if (approval == null || !approval.update().equals(input))
                                     throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Exact current-turn approval required");
-                                yield writer.execute(session, approval.operationId(), (ToolContract.InvoiceUpdate) input, approval.authorization());
+                                yield writer.execute(session, approval.taskId(), approval.operationId(), (ToolContract.InvoiceUpdate) input, approval.authorization());
                             }
                             case "query_invoices" -> finance.queryInvoices(session, (ToolContract.Query) input);
                             case "query_bank_entries" -> finance.queryBankEntries(session, (ToolContract.Query) input);
                             case "check_invoice_purpose" -> rules.checkInvoicePurpose(session, (ToolContract.PurposeCheck) input);
                             default -> throw new IllegalStateException("Unreachable tool");
                         });
+                        // Only this turn's server execution can supply evidence. execute above binds
+                        // the exact update and operationId to the trusted one-turn authorization.
+                        if (call.name().equals("update_invoice") && approval != null
+                                && data instanceof ToolContract.UpdateResult saved && saved.verified()
+                                && approval.update().key().equals(saved.key())
+                                && approval.update().changes().entrySet().stream().allMatch(e ->
+                                    e.getValue().equals(e.getKey().equals("purpose") ? saved.purpose() : saved.remarks())))
+                            verifiedWrite = true;
                         response = new ToolContract.Response<>(data, null);
                     } catch (DomainException e) {
                         toolError = e.code().name();
@@ -129,16 +148,34 @@ public final class AgentRuntime {
                     } catch (InterruptedException e) { Thread.currentThread().interrupt(); return error("INTERRUPTED", history);
                     } catch (Exception e) { return error("TOOL_FAILURE", history); }
                     history.add(new Exchange(call, JSON.writeValueAsString(response)));
+                    }
                 } else {
                     if (toolError != null) return error(toolError, history);
                     if (decision instanceof Ask ask) return new Result(Status.NEEDS_INPUT, ask.text(), null, history);
-                    if (decision instanceof Finish finish) return new Result(Status.FINISHED, finish.text(), null, history);
+                    if (decision instanceof Finish finish) {
+                        if (approval != null && !verifiedWrite) return error("WRITE_NOT_VERIFIED", history);
+                        return new Result(Status.FINISHED, finish.text(), null, history);
+                    }
                     return error("MODEL_FAILURE", history);
                 }
             }
             return error("MAX_STEPS", history);
         } catch (Exception e) { return error("RUNTIME_FAILURE", history);
         } finally { worker.shutdownNow(); }
+    }
+    /** All batch arguments must be valid and read-only before the first tool runs. */
+    private void validateReadBatch(List<Call> calls, String enterprise) {
+        for (var call : calls) {
+            if (!limits.allowedTools().contains(call.name()) || call.name().equals("update_invoice"))
+                throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Batch must be read-only");
+            Object input = call.name().equals("check_invoice_purpose")
+                    ? ToolContract.decode(call.arguments(), ToolContract.PurposeCheck.class)
+                    : ToolContract.decode(call.arguments(), ToolContract.Query.class);
+            String requestedEnterprise = input instanceof ToolContract.Query q ? q.enterpriseId()
+                    : ((ToolContract.PurposeCheck) input).enterpriseId();
+            if (enterprise != null && !enterprise.equals(requestedEnterprise))
+                throw new DomainException(ErrorCode.PERMISSION_DENIED, "Batch enterprise mismatch");
+        }
     }
     private <T> T bounded(ExecutorService worker, Callable<T> action) throws Exception {
         var task = worker.submit(action);

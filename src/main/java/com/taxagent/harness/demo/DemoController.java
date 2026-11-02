@@ -132,6 +132,23 @@ public final class DemoController {
         var p = principal(session);
         synchronized (mutationLock(p)) { return run(p,id,input); }
     }
+    @PostMapping("/tasks/{id}/operations/{operationId}/verify")
+    public InvoiceWriteService.Verification verify(@PathVariable String id, @PathVariable String operationId, HttpSession session) {
+        var p = principal(session); taskId(id); taskId(operationId);
+        synchronized (mutationLock(p)) {
+            String requestId = UUID.randomUUID().toString();
+            try {
+                var result = new InvoiceWriteService(database, false).verify(p.trustedSession(), p.enterprise(), id, operationId);
+                audit.append(p.trustedSession(), p.enterprise(), event(requestId,id,"verify",null,null,null,null,
+                        operationId,result.status().name(),null,result.status() == InvoiceWriteService.VerificationStatus.VERIFIED));
+                return result;
+            } catch (DomainException e) {
+                audit.append(p.trustedSession(), p.enterprise(), event(requestId,id,"verify",null,null,null,null,
+                        operationId,e.code() == ErrorCode.NOT_FOUND ? "NOT_FOUND" : "ERROR",e.code().name(),false));
+                throw e;
+            }
+        }
+    }
     private TurnView run(DemoPrincipal p, String taskId, Turn input) {
         var a = agent(p); a.load(taskId);
         String requestId = UUID.randomUUID().toString();
@@ -149,7 +166,7 @@ public final class DemoController {
                     update.changes().values().stream().anyMatch(String::isBlank) ? InvoiceWriteService.Intent.CLEAR_NOW : InvoiceWriteService.Intent.SAVE_NOW);
         } catch (DomainException failure) {
             if (update != null) {
-                var recovered = a.recover(approval.operationId(),update); // Query only, never retry a financial update.
+                var recovered = a.recover(taskId,approval.operationId(),update); // Query only, never retry a financial update.
                 if (recovered.isPresent()) {
                     try {
                         audit.append(p.trustedSession(),p.enterprise(),event(requestId,taskId,"recover",null,null,safe(update.key().invoiceId()),
@@ -175,12 +192,12 @@ public final class DemoController {
                 audit.append(p.trustedSession(),p.enterprise(),event(requestId,taskId,tool,safe(call.id()),
                         month(args.path("month").asText()),safe(args.at("/key/invoice_id").asText()),
                         fields(keys(args.path("changes"))),approval == null ? null : approval.operationId(),ok ? "TOOL_RESULT" : "TOOL_ERROR",code,saved));
-                if (saved && update != null) verified = a.recover(approval.operationId(),update).orElse(null);
+                if (saved && update != null) verified = a.recover(taskId,approval.operationId(),update).orElse(null);
             }
             log(p,requestId,taskId,"turn",turn.result().status().name(),turn.result().errorCode());
         } catch (DemoAudit.Failure failure) {
             // A committed write stays committed. Return explicit audit failure plus read-only verification.
-            if (update != null) verified = a.recover(approval.operationId(),update).orElse(null);
+            if (update != null) verified = a.recover(taskId,approval.operationId(),update).orElse(null);
             return new TurnView(turn,verified,"AUDIT_STORAGE_ERROR","审计记录失败；以回读核验为准，请勿重复写入",approval == null ? null : approval.operationId());
         } catch (DomainException e) { throw e;
         } catch (Exception e) { throw new DemoAudit.Failure(); }

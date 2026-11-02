@@ -24,8 +24,8 @@ class InvoiceWriteServiceTest {
         return new InvoiceUpdate(new InvoiceKey(enterprise, invoice), changes);
     }
     InvoiceUpdate purpose(String enterprise, String value) { return update(enterprise,"F002",Map.of("purpose",value)); }
-    Authorization auth(String id, InvoiceUpdate update) { return authorizeExplicitRequest(user,id,update,Intent.SAVE_NOW); }
-    UpdateResult save(String id, InvoiceUpdate update) { return service.execute(user,id,update,auth(id,update)); }
+    Authorization auth(String id, InvoiceUpdate update) { return authorizeExplicitRequest(user,"service-task",id,update,Intent.SAVE_NOW); }
+    UpdateResult save(String id, InvoiceUpdate update) { return service.execute(user,"service-task",id,update,auth(id,update)); }
     void sql(String sql) throws Exception {
         try (var c = DriverManager.getConnection("jdbc:sqlite:" + db); var s = c.createStatement()) { s.execute(sql); }
     }
@@ -36,6 +36,56 @@ class InvoiceWriteServiceTest {
     Invoice invoice(String enterprise, String id) {
         return new ReadOnlyFinanceTools(db).queryInvoices(user,new Query(enterprise,"2026-09"))
                 .rows().stream().filter(i -> i.key().invoiceId().equals(id)).findFirst().orElseThrow();
+    }
+    String ownedTask(String userId, String enterprise) {
+        return new com.taxagent.harness.runtime.TaskMemory(db).start(new PermissionGuard.Session(userId),enterprise,"verify",List.of()).id();
+    }
+    @Test void verificationUsesReadPermissionAndNeverMutatesDatabase() throws Exception {
+        String task=ownedTask("U001","C001"), other=ownedTask("U002","C001");
+        var u=purpose("C001","committed");
+        var a=authorizeExplicitRequest(user,task,"operation",u,Intent.SAVE_NOW);
+        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(user,other,"operation",u,a));
+        var saved=service.execute(user,task,"operation",u,a);
+        var before=Files.readAllBytes(db);
+        for (int i=0;i<2;i++) {
+            var result=new InvoiceWriteService(db,false).verify(user,"C001",task,"operation");
+            assertThat(result.status()).isEqualTo(VerificationStatus.VERIFIED);
+            assertThat(result.verification()).isEqualTo(saved);
+        }
+        assertThat(Files.readAllBytes(db)).isEqualTo(before);
+        assertThat(service.verify(new PermissionGuard.Session("U002"),"C001",other,"operation").status()).isEqualTo(VerificationStatus.NOT_FOUND);
+        assertThat(service.verify(user,"C001",task,"missing").verification()).isNull();
+        sql("UPDATE permissions SET permission='仅查看' WHERE user_id='U001' AND enterprise_id='C001'");
+        assertThat(service.verify(user,"C001",task,"operation").status()).isEqualTo(VerificationStatus.VERIFIED);
+        sql("DELETE FROM permissions WHERE user_id='U001' AND enterprise_id='C001'");
+        fails(ErrorCode.PERMISSION_DENIED, () -> service.verify(user,"C001",task,"operation"));
+    }
+    @Test void driftOrMissingReferencedInvoiceIsDivergedWithNoFinancialContent() throws Exception {
+        String task=ownedTask("U001","C001"); var u=purpose("C001","committed");
+        service.execute(user,task,"op",u,authorizeExplicitRequest(user,task,"op",u,Intent.SAVE_NOW));
+        sql("UPDATE invoices SET remarks='changed' WHERE enterprise_id='C001' AND id='F002'");
+        var drift=service.verify(user,"C001",task,"op");
+        assertThat(drift.status()).isEqualTo(VerificationStatus.DIVERGED); assertThat(drift.verification()).isNull();
+        sql("DELETE FROM invoices WHERE enterprise_id='C001' AND id='F002'");
+        var missing=service.verify(user,"C001",task,"op");
+        assertThat(missing.status()).isEqualTo(VerificationStatus.DIVERGED); assertThat(missing.verification()).isNull();
+    }
+    @Test void legacySchemaMigratesAdditivelyWithoutAssociatingOldRows() throws Exception {
+        String task=ownedTask("U001","C001");
+        sql("DROP TABLE invoice_operations");
+        sql("CREATE TABLE invoice_operations(operation_id TEXT PRIMARY KEY NOT NULL,user_id TEXT NOT NULL,enterprise_id TEXT NOT NULL,invoice_id TEXT NOT NULL,payload TEXT NOT NULL,purpose TEXT NOT NULL,remarks TEXT NOT NULL)");
+        sql("INSERT INTO invoice_operations VALUES('legacy','U001','C001','F002','{}','','')");
+        var oldInvoice=invoice("C001","F002");
+        service=new InvoiceWriteService(db); new InvoiceWriteService(db); // Repeated migration is safe.
+        assertThat(count()).isEqualTo(1); assertThat(invoice("C001","F002")).isEqualTo(oldInvoice);
+        assertThat(service.verify(user,"C001",task,"legacy").status()).isEqualTo(VerificationStatus.NOT_FOUND);
+        try (var c=DriverManager.getConnection("jdbc:sqlite:"+db);var s=c.createStatement();var r=s.executeQuery("SELECT task_id FROM invoice_operations")) {
+            assertThat(r.next()).isTrue(); assertThat(r.getString(1)).isNull();
+        }
+        var u=purpose("C001","new");
+        service.execute(user,task,"new",u,authorizeExplicitRequest(user,task,"new",u,Intent.SAVE_NOW));
+        assertThat(service.verify(user,"C001",task,"new").status()).isEqualTo(VerificationStatus.VERIFIED);
+        fails(ErrorCode.CONFLICT, () -> service.execute(user,task,"legacy",u,authorizeExplicitRequest(user,task,"legacy",u,Intent.SAVE_NOW)));
     }
     @Test void writesBothEnterprisesAndReadbackPreservesOtherFields() {
         for (String enterprise : List.of("C001","C002")) {
@@ -62,13 +112,13 @@ class InvoiceWriteServiceTest {
     @Test void permissionMatrixAndMissingIdentity() {
         for (String enterprise : List.of("C001","C002")) {
             var reader = new PermissionGuard.Session("U002"); var u = purpose(enterprise,"用途");
-            var a = authorizeExplicitRequest(reader,"reader",u,Intent.SAVE_NOW);
-            fails(ErrorCode.PERMISSION_DENIED, () -> service.execute(reader,"reader",u,a));
+            var a = authorizeExplicitRequest(reader,"service-task","reader",u,Intent.SAVE_NOW);
+            fails(ErrorCode.PERMISSION_DENIED, () -> service.execute(reader,"service-task","reader",u,a));
         }
         var u = purpose("C001","用途");
-        fails(ErrorCode.AUTHENTICATION_REQUIRED, () -> authorizeExplicitRequest(null,"a",u,Intent.SAVE_NOW));
+        fails(ErrorCode.AUTHENTICATION_REQUIRED, () -> authorizeExplicitRequest(null,"service-task","a",u,Intent.SAVE_NOW));
         var unknown = new PermissionGuard.Session("unknown");
-        fails(ErrorCode.PERMISSION_DENIED, () -> service.execute(unknown,"a",u,authorizeExplicitRequest(unknown,"a",u,Intent.SAVE_NOW)));
+        fails(ErrorCode.PERMISSION_DENIED, () -> service.execute(unknown,"service-task","a",u,authorizeExplicitRequest(unknown,"service-task","a",u,Intent.SAVE_NOW)));
     }
     @Test void unknownCompanyAndMissingInvoice() {
         fails(ErrorCode.PERMISSION_DENIED, () -> save("a",purpose("UNKNOWN","用途")));
@@ -90,19 +140,19 @@ class InvoiceWriteServiceTest {
     }
     @Test void explanationAndBindingCannotAuthorizeWrite() {
         var u = purpose("C001","说明用途");
-        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> authorizeExplicitRequest(user,"a",u,Intent.EXPLANATION));
-        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(user,"a",u,null));
+        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> authorizeExplicitRequest(user,"service-task","a",u,Intent.EXPLANATION));
+        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(user,"service-task","a",u,null));
         var a = auth("a",u);
-        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(user,"b",u,a));
-        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(user,"a",purpose("C002","说明用途"),a));
-        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(user,"a",purpose("C001","不同内容"),a));
-        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(new PermissionGuard.Session("U002"),"a",u,a));
-        assertThat(service.execute(user,"a",u,a).verified()).isTrue();
+        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(user,"service-task","b",u,a));
+        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(user,"service-task","a",purpose("C002","说明用途"),a));
+        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(user,"service-task","a",purpose("C001","不同内容"),a));
+        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> service.execute(new PermissionGuard.Session("U002"),"service-task","a",u,a));
+        assertThat(service.execute(user,"service-task","a",u,a).verified()).isTrue();
     }
     @Test void explicitClearingPreservesExactWhitespace() {
         var u = update("C001","F002",Map.of("purpose","  ","remarks",""));
         fails(ErrorCode.CONFIRMATION_REQUIRED, () -> auth("a",u));
-        var result = service.execute(user,"a",u,authorizeExplicitRequest(user,"a",u,Intent.CLEAR_NOW));
+        var result = service.execute(user,"service-task","a",u,authorizeExplicitRequest(user,"service-task","a",u,Intent.CLEAR_NOW));
         assertThat(result.purpose()).isEqualTo("  "); assertThat(result.remarks()).isEmpty();
     }
     @Test void sameValueDoesNotExecuteUpdateAndSameOperationNeverReexecutes() throws Exception {
@@ -113,8 +163,8 @@ class InvoiceWriteServiceTest {
         assertThat(count()).isEqualTo(2);
     }
     @Test void consumedAuthorizationAndIdPayloadConflicts() throws Exception {
-        var u = purpose("C001","用途"); var a = auth("a",u); service.execute(user,"a",u,a);
-        fails(ErrorCode.CONFLICT, () -> service.execute(user,"a",u,a));
+        var u = purpose("C001","用途"); var a = auth("a",u); service.execute(user,"service-task","a",u,a);
+        fails(ErrorCode.CONFLICT, () -> service.execute(user,"service-task","a",u,a));
         fails(ErrorCode.CONFLICT, () -> save("a",purpose("C001","不同用途")));
         fails(ErrorCode.CONFLICT, () -> save("a",purpose("C002","用途")));
         assertThat(count()).isEqualTo(1);
@@ -122,13 +172,13 @@ class InvoiceWriteServiceTest {
     @Test void authorizationDoesNotCachePermissions() throws Exception {
         var u = purpose("C001","用途"); var a = auth("a",u);
         sql("UPDATE permissions SET permission='仅查看' WHERE user_id='U001' AND enterprise_id='C001'");
-        fails(ErrorCode.PERMISSION_DENIED, () -> service.execute(user,"a",u,a));
+        fails(ErrorCode.PERMISSION_DENIED, () -> service.execute(user,"service-task","a",u,a));
         assertThat(count()).isZero();
     }
     @Test void currentRulesRecheckedAfterAuthorization() throws Exception {
         var u = purpose("C001","用途"); var a = auth("a",u);
         sql("UPDATE rules SET content='未知变更语义' WHERE id='R002' AND version='2.0'");
-        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> service.execute(user,"a",u,a));
+        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> service.execute(user,"service-task","a",u,a));
         assertThat(count()).isZero();
     }
     @Test void disabledAndAmbiguousRulesRejected() throws Exception {
@@ -152,11 +202,11 @@ class InvoiceWriteServiceTest {
         save("lost-response",u); // Simulate caller timeout: discard response, then restart service.
         var restarted = new InvoiceWriteService(db);
         sql("CREATE TRIGGER no_update BEFORE UPDATE ON invoices BEGIN SELECT RAISE(ABORT,'must not retry'); END");
-        assertThat(restarted.recover(user,"lost-response",u)).get().extracting(UpdateResult::verified).isEqualTo(true);
-        assertThat(restarted.recover(user,"never-committed",u)).isEmpty();
-        fails(ErrorCode.CONFLICT, () -> restarted.recover(user,"lost-response",purpose("C001","另一内容")));
+        assertThat(restarted.recover(user,"service-task","lost-response",u)).get().extracting(UpdateResult::verified).isEqualTo(true);
+        assertThat(restarted.recover(user,"service-task","never-committed",u)).isEmpty();
+        fails(ErrorCode.CONFLICT, () -> restarted.recover(user,"service-task","lost-response",purpose("C001","另一内容")));
         sql("DROP TRIGGER no_update"); sql("UPDATE invoices SET purpose='后续用户修改' WHERE enterprise_id='C001' AND id='F002'");
-        fails(ErrorCode.CONFLICT, () -> restarted.recover(user,"lost-response",u));
+        fails(ErrorCode.CONFLICT, () -> restarted.recover(user,"service-task","lost-response",u));
         fails(ErrorCode.CONFLICT, () -> save("lost-response",u));
         assertThat(invoice("C001","F002").purpose()).isEqualTo("后续用户修改");
         assertThat(count()).isEqualTo(1);
@@ -172,7 +222,7 @@ class InvoiceWriteServiceTest {
         var u = purpose("C001","超时保存"); var a = auth("timeout",u);
         try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
             var response = executor.submit(() -> {
-                var result = service.execute(user,"timeout",u,a);
+                var result = service.execute(user,"service-task","timeout",u,a);
                 committed.countDown(); deliver.await(); return result;
             });
             try {
@@ -180,8 +230,8 @@ class InvoiceWriteServiceTest {
                 assertThatThrownBy(() -> response.get(10, java.util.concurrent.TimeUnit.MILLISECONDS))
                         .isInstanceOf(java.util.concurrent.TimeoutException.class);
                 sql("CREATE TRIGGER no_retry BEFORE UPDATE ON invoices BEGIN SELECT RAISE(ABORT,'no retry'); END");
-                assertThat(service.recover(user,"timeout",u)).get().extracting(UpdateResult::verified).isEqualTo(true);
-                fails(ErrorCode.CONFLICT, () -> service.execute(user,"timeout",u,a));
+                assertThat(service.recover(user,"service-task","timeout",u)).get().extracting(UpdateResult::verified).isEqualTo(true);
+                fails(ErrorCode.CONFLICT, () -> service.execute(user,"service-task","timeout",u,a));
                 assertThat(count()).isEqualTo(1);
             } finally { deliver.countDown(); }
             assertThat(response.get(5, java.util.concurrent.TimeUnit.SECONDS).verified()).isTrue();

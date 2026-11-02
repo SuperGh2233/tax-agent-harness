@@ -117,6 +117,8 @@ public final class TaskMemory {
                              AgentRuntime.ApprovedWrite approval) {
         text(message);
         var context = load(session, enterprise, id); var old = context.task(); open(old, old.version());
+        if (approval != null && !id.equals(approval.taskId()))
+            throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Approval must belong to this task");
         String memory;
         try { memory = JSON.writeValueAsString(context); } catch (Exception e) { throw storage(e); }
         var result = runtime.runScoped(session, enterprise, message, memory, approval);
@@ -128,15 +130,63 @@ public final class TaskMemory {
                     return new Summary(e.call().name(), error == null || error.isNull() ? "SUCCESS" : error.path("code").asText("ERROR"));
                 } catch (Exception failure) { throw storage(failure); }
             }).toList();
-            var status = switch (result.status()) {
+            // Only an actual, matching verified write from this exact approved turn can
+            // satisfy pending fields. Model text, tool arguments, and prior-turn history cannot.
+            var pending = remainingPending(old.pending(), result, approval);
+            var effective = result;
+            if (!pending.isEmpty() && result.status() == AgentRuntime.Status.FINISHED) {
+                // A model Finish is not task completion while explicit required inputs remain.
+                effective = new AgentRuntime.Result(AgentRuntime.Status.NEEDS_INPUT,
+                        pendingQuestion(pending), null, result.history());
+            } else if (!pending.isEmpty() && result.status() == AgentRuntime.Status.NEEDS_INPUT) {
+                effective = new AgentRuntime.Result(AgentRuntime.Status.NEEDS_INPUT,
+                        withPendingQuestion(result.text(), pending), result.errorCode(), result.history());
+            }
+            var status = switch (effective.status()) {
                 case NEEDS_INPUT -> Status.WAITING_USER;
                 case FINISHED -> Status.COMPLETED;
                 case ERROR -> Status.ACTIVE;
             };
-            var next = new Task(id, status, old.version() + 1, old.goal(), old.pending(), old.supplied(),
-                    result.status() == AgentRuntime.Status.NEEDS_INPUT ? result.text() : null, summaries);
-            save(c, session, enterprise, old, next); return new Turn(next, result);
+            var next = new Task(id, status, old.version() + 1, old.goal(), pending, old.supplied(),
+                    effective.status() == AgentRuntime.Status.NEEDS_INPUT ? effective.text() : null, summaries);
+            save(c, session, enterprise, old, next); return new Turn(next, effective);
         });
+    }
+    private static List<String> remainingPending(List<String> pending, AgentRuntime.Result result,
+                                                 AgentRuntime.ApprovedWrite approval) {
+        if (approval == null || pending.isEmpty()) return pending;
+        var resolved = new HashSet<String>();
+        for (var exchange : result.history()) {
+            if (!"update_invoice".equals(exchange.call().name())) continue;
+            try {
+                var submitted = ToolContract.decode(exchange.call().arguments(), ToolContract.InvoiceUpdate.class);
+                if (!approval.update().equals(submitted)) continue;
+                var response = JSON.readTree(exchange.resultJson());
+                var error = response.get("error");
+                var data = response.get("data");
+                if (error != null && !error.isNull() || data == null || !data.path("verified").asBoolean(false)) continue;
+                var key = data.path("key");
+                if (!approval.update().key().enterpriseId().equals(key.path("enterprise_id").asText())
+                        || !approval.update().key().invoiceId().equals(key.path("invoice_id").asText())) continue;
+                boolean valuesMatch = approval.update().changes().entrySet().stream()
+                        .allMatch(change -> change.getValue().equals(data.path(change.getKey()).asText(null)));
+                if (!valuesMatch) continue;
+                approval.update().changes().keySet().forEach(field ->
+                        resolved.add(approval.update().key().invoiceId() + "." + field));
+            } catch (Exception ignored) {
+                // Malformed or unverifiable tool history never satisfies a required field.
+            }
+        }
+        return pending.stream().filter(field -> !resolved.contains(field)).toList();
+    }
+    private static String pendingQuestion(List<String> pending) {
+        return "任务仍有未补充的必填信息：" + String.join("、", pending)
+                + "。请在“补充 / 更正明确事实”中逐项填写字段、明确值和你的原话。"
+                + "补充只记录用户声明，不会修改发票。全部补充后再继续。";
+    }
+    private static String withPendingQuestion(String modelQuestion, List<String> pending) {
+        var required = pendingQuestion(pending);
+        return modelQuestion == null || modelQuestion.isBlank() ? required : modelQuestion + "\n\n" + required;
     }
     private Map<String, Input> preferences(Connection c, Session session, String enterprise) throws SQLException {
         var values = new LinkedHashMap<String, Input>();

@@ -84,18 +84,28 @@ python3 -B -c 'import os, sqlite3; from pathlib import Path; p=Path(os.environ["
 - 建议≤5分钟；预演后再正式录制，写入只在新建独立库上演示一次。播放回看角色标识、弹窗精确值、真实工具结果、verified 回读、审计是否清晰，确认音画和总时长。
 - 本任务提供脚本和录制准备，不自动操作系统录屏，也不声称已生成视频。录制文件保存在自行指定目录，不加入 Git；打包/提交为 T13，本任务不执行。
 
-## 当前真实测试目标：DashScope Messages
-当前目标为 `LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.8-flash`；独立适配器追加 `/v1/messages`，使用 x-api-key、max_tokens=8192、output_config.effort=medium，自动工具选择。保留 GPT-6 Luna Responses 和既有 Chat Completions，无自动回退。思考及签名仅作为内部续接状态，不进入结果或审计。Qwen 的 HTTP 与 AgentRuntime 每次调用上限均为60秒；其他模型仍为15秒，系统硬上限60秒。
+## 当前真实测试目标：DashScope Messages（2026-11-02 更新）
 
-此前粘贴的凭证已暴露，必须先在供应商控制台撤销；替换凭证仅在本机 zsh 隐藏输入，勿粘贴到聊天：
+当前目标为 `LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.8-flash`；独立适配器追加 `/v1/messages`，使用 x-api-key、`max_tokens=8192` 和结构化 JSON Schema。首个模型请求使用 `output_config.effort=medium`；有工具结果历史的续接请求使用 `low`，以降低最终总结阶段延迟。Qwen 的 HTTP 与 AgentRuntime 每次调用上限均为 60 秒；其他模型默认 15 秒，系统硬上限 60 秒。保留 GPT-6 Luna Responses 和既有 Chat Completions，无自动回退。思考及签名仅作为内部续接状态，不进入结果或审计。
+
+### 已验证与未验证
+
+- 真实 Qwen Demo API 只读跨轮流程已通过：查询三项只读工具 → 服务端 WAITING_USER/NEEDS_INPUT → 用户结构化补充 → 第二轮恢复并 COMPLETED。合成数据库发票/流水未变，`invoice_operations=0`，未调用 `update_invoice`。
+- 真实浏览器 UI 已完成页面加载、身份选择、建任务、发消息及三项只读工具调用；但最终模型总结阶段发生 `MODEL_TIMEOUT`，因此浏览器的追问、补充和跨轮恢复**尚未通过**。
+- medium → low 的新适配已通过 JDK21 定向/全量测试并打包；新 JAR 尚未在现有 18084 服务重启后做真实 Qwen 时延复验。
+- 供应商在同一响应中返回多个 `tool_use` 的真实行为、真实受控写入和 operationId UI 核验仍待验证。T13 保持 IN_PROGRESS。详见 [开发交接说明](docs/agent-handoff.md)。
+
+### 本机凭证与运行边界
+
+曾在聊天中暴露的旧凭证必须在供应商控制台撤销；当前凭证只在本机可信终端安全配置，绝不粘贴到聊天、日志、截图或仓库。zsh 可使用隐藏输入：
+
 ```zsh
 export LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic
 export LLM_MODEL=qwen3.8-flash
-read -rs "LLM_API_KEY?输入已轮换的新密钥（隐藏）："; print
+read -rs "LLM_API_KEY?输入当前有效密钥（隐藏）："; print
 export LLM_API_KEY
-# 完成后清除
-unset LLM_API_KEY
+# 停止服务后清除
+unset LLM_API_KEY LLM_ENDPOINT LLM_MODEL
 ```
-用户已授权合成数据及独立临时 SQLite。此次仅允许 loopback HTTP stub，不访问外网、不操作任何 SQLite；真实 E2E 等待轮换密钥在本机配置。T13 保持 IN_PROGRESS。上述目标替代文档早先的 Luna 当前目标描述，Luna 支持继续保留。
 
-注意：Qwen 的单次 HTTP 请求和 AgentRuntime 等待上限为60秒；其他模型的默认仍为15秒。尚未测得真实云端延迟，超过上限会返回超时。
+只使用官方合成样本、独立临时 SQLite 和 loopback（127.0.0.1）。禁止使用 `data/harness.db` 或真实财务数据。写入仅允许 Operator 在当前轮明确确认后执行一次；结果未知时保留 operationId 并走只读核验，禁止自动重试。

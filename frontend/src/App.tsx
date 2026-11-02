@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { ArrowUp, ArrowUpRight, Check, ChevronRight, CircleDashed, FileCheck2, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
-import { ApiError, createAndRunFirstTurn, DemoApi, findOpenTask, friendlyError, isTerminalTaskStatus, parseTool, queriedInvoices, verifiedWriteResult } from './api'
+import { ApiError, canVerifyOperation, createAndRunFirstTurn, DemoApi, findOpenTask, friendlyError, isTerminalTaskStatus, parseTool, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from './api'
 import type { Approval, AuditEvent, Exchange, Invoice, Session, Task, TurnView } from './api'
 import { Button, Modal } from './ui'
 
@@ -219,6 +219,14 @@ export default function App() {
     })
   }
   async function showAudit() { await run(async () => { setAudit(await api.audit()) }) }
+  async function verifyOperation() {
+    if (!operation) return
+    await run(async () => {
+      await verifyPendingOperation(api, operation, () => rememberOperation(null))
+      setMessages(old => [...old, {role:'notice', text:'VERIFIED · 已提交操作与当前发票快照一致；未重新执行写入。'}])
+      setAudit(null)
+    })
+  }
   const navigate = (next: Page) => { setPage(next); setInspector(false) }
   const taskList = (limit?: number) => <div className="task-list">{tasks.length ? tasks.slice(0, limit).map(t => <button className="task-row" key={t.id} disabled={busy} onClick={() => void load(t.id)}><History size={17}/><span>{t.goal}<small>{t.id.slice(0,8)} · {statusLabel[t.status]}</small></span><ArrowUpRight size={17}/></button>) : <p className="empty">{selected ? '还没有任务，从一个具体问题开始。' : '选择企业与身份后，查看你的任务。'}</p>}</div>
 
@@ -231,7 +239,7 @@ export default function App() {
     <div className="environment-line"><span className="dot"/> 本地演示工作空间 <span>·</span> {session?.identityNotice ?? '正在连接本地服务'}</div>
     <main id="main" tabIndex={-1} className={page === 'workspace' ? 'main workspace-main' : 'main'}>
       {error && <div role="alert" className="error-banner">{error}<Button variant="ghost" disabled={busy} onClick={() => void run(async () => { const s = await api.session(); setSession(s); if (s.profile) setTasks(await api.tasks()) })}>重新连接</Button></div>}
-      {operation && <aside className="operation-warning" role="status">保存请求需核查 · operationId: <code>{operation.id}</code><br/>任务 {operation.taskId}。请检查审计和数据库；结果未核验前不会再次开放保存。编号保留在本浏览器会话中。</aside>}
+      {operation && <aside className="operation-warning" role="status">保存请求需核查 · operationId: <code>{operation.id}</code><br/>任务 {operation.taskId}。结果未核验前保持锁定；NOT_FOUND 不允许重试，DIVERGED 需人工核查。编号保留在本浏览器会话中。<Button disabled={busy || !selected || !canVerifyOperation(operation)} onClick={() => void verifyOperation()}>只读核验保存结果</Button>{!canVerifyOperation(operation) && <p>存储编号无法识别，请人工核查。</p>}</aside>}
       {page === 'home' && <div className="home">
         <section className="hero"><span className="eyebrow"><Sparkles size={14}/> YOUR FINANCE WORKSPACE</span><h1 ref={heading} tabIndex={-1}>今天，交给 Agent 什么任务？</h1><p>从一个问题开始，让每一步执行都有据可查。</p>
           {sourceTaskId && <p className="source-task-note"><History size={14}/> 已带入历史任务目标（{sourceTaskId.slice(0,8)}）。创建后会生成全新的任务，不会恢复旧任务的写入授权。</p>}

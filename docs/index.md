@@ -1,7 +1,10 @@
 # 文档索引
 
+> **队友接手请先读 [开发交接说明](agent-handoff.md)**，再阅读业务契约、工具契约和任务台账。交接说明包含当前 Git 工作区、测试证据、未完成事项和安全边界。
+
 | 路径 | 状态 | 用途 |
 |---|---|---|
+| [开发交接说明](agent-handoff.md) | current | 当前 Git 工作区、测试证据、未完成事项和接手顺序 |
 | [BUSINESS_CONTRACT.md](BUSINESS_CONTRACT.md) | completed | T01 冻结业务边界，只读保留原路径 |
 | [T02 计划](plans/active/PLAN-20261029-backend-bootstrap.md) | completed | 后端骨架目标、验收和风险，保留原路径 |
 

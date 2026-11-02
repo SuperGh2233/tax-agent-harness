@@ -219,17 +219,18 @@ Vite 开发服务器只监听本机回环地址，并将同源 `/api` 请求代�
 
 ## 测试与验证
 
-最近一次本地提交前验证结果（2026-10-31）：
+最近一次本地验证结果（2026-11-02；以当前工作树为准，尚未提交）：
 
 | 验证项 | 结果 |
 | --- | ---: |
-| Java 21 Maven 全量测试 | 198 passed，0 failures，0 errors，0 skipped |
-| Maven JAR 打包 | 成功 |
-| 前端 Vitest | 36 passed |
+| Java 21 Maven 全量测试 | 223 passed，0 failures，0 errors，0 skipped |
+| Maven JAR 打包 | BUILD SUCCESS；JAR 34,131,390 bytes |
+| 前端 Vitest | 71 passed |
 | TypeScript 类型检查 | 通过 |
 | ESLint | 通过 |
 | Vite 生产构建 | 通过 |
 | 静态演示脚本语法检查 | 通过 |
+| Git diff whitespace 检查 | 通过 |
 
 常用命令：
 
@@ -247,7 +248,7 @@ npm run build
 npm run verify
 ```
 
-上述结果来自本地离线测试、合成样例数据和隔离测试数据库，不代表真实模型服务或真实财务数据的端到端验收已经完成。
+自动化测试使用合成样例数据和隔离测试数据库。真实 Qwen 的只读 API 跨轮流程（查询、必填追问、用户补充、恢复完成）已通过；真实浏览器 UI 在工具成功后最终总结阶段仍发生 MODEL_TIMEOUT，真实受控写入及 UI 核验 E2E 尚未完成。不要把 API 验证写成浏览器 UI 验证。
 
 ## 项目结构
 
@@ -282,14 +283,15 @@ npm run verify
 | [演示脚本](DEMO_SCRIPT.md) | 场景演示与录屏说明 |
 | [交付检查清单](RELEASE_CHECKLIST.md) | 比赛交付材料与检查项 |
 | [文档索引](docs/index.md) | 详细设计与技术契约 |
+| [开发交接说明](docs/agent-handoff.md) | 当前代码状态、验证证据、接手顺序与未完成事项 |
 | [前端说明](frontend/README.md) | React 工作台开发与构建 |
 
 ## 当前状态与限制
 
 - 后端核心流程、任务记忆、受控写入、演示 API 与本地 UI 已实现。
 - React 工作台与前端安全保护已实现；T15 的完整浏览器和部署验收仍在进行。
-- 独立复现和交付材料核验仍在进行，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
-- 本次记录的 198 项 Java 测试和 36 项前端测试均为本地自动化验证；真实云模型端到端调用尚未完成验证。
+- 独立复现和交付材料核验仍在进行；队友接手请先阅读 [开发交接说明](docs/agent-handoff.md)，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
+- 最新 JDK21 全量 223 项、前端 Vitest 71 项自动化测试通过；真实 Qwen 只读 API 跨轮流程通过，但浏览器 UI 最终回复仍超时，受控写入 UI E2E 未完成。
 - 当前系统用于比赛演示与技术验证，不应视为具备生产环境所需的认证、部署、审计防篡改和运维能力。
 
 ---

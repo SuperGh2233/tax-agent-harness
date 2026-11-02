@@ -17,6 +17,19 @@ export interface Result { status: 'FINISHED' | 'NEEDS_INPUT' | 'ERROR'; text: st
 export interface Verification { key: {enterpriseId: string; invoiceId: string}; purpose: string; remarks: string; verified: boolean }
 export interface TurnView { turn: {task: Task; result: Result} | null; verification: Verification | null; errorCode: string | null; message: string; operationId: string | null }
 export interface Approval { operationId: string; invoiceId: string; changes: Partial<Record<'purpose' | 'remarks', string>>; confirmed: true }
+export interface OperationVerification { operationId: string; status: 'VERIFIED' | 'NOT_FOUND' | 'DIVERGED'; verification: Verification | null }
+export function canVerifyOperation(operation: {id: string; taskId: string} | null): boolean {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+  return !!operation && uuid.test(operation.id) && uuid.test(operation.taskId)
+}
+/** Shared by the React manual action and tests; clearing storage must succeed before unlocking. */
+export async function verifyPendingOperation(api: Pick<DemoApi, 'verify'>, operation: {id: string; taskId: string}, clear: () => void) {
+  if (!canVerifyOperation(operation)) throw new ApiError('INVALID_RESPONSE')
+  const result = await api.verify(operation.taskId, operation.id)
+  if (result?.operationId !== operation.id || result?.status !== 'VERIFIED' || result?.verification?.verified !== true)
+    throw new Error('写入仍未核验；保留锁定，请人工核查。NOT_FOUND 不表示可以重试。')
+  clear()
+}
 export interface AuditEvent { id: number; requestId: string; taskId: string | null; tool: string | null; callId: string | null; month: string | null; invoiceId: string | null; fields: string | null; operationId: string | null; outcome: string; errorCode: string | null; verified: boolean; time: string }
 export interface Invoice { key: {enterprise_id: string; invoice_id: string}; invoice_date: string; seller: string; item: string; amount_cents: number; purpose: string; remarks: string }
 
@@ -69,6 +82,7 @@ export class DemoApi {
   load(id: string) { return this.request<Context>(`/tasks/${encodeURIComponent(id)}`) }
   supplement(id: string, version: number, statements: Record<string, Statement>) { return this.request<Task>(`/tasks/${encodeURIComponent(id)}/supplement`, 'POST', {version, statements}) }
   turn(id: string, message: string, approval?: Approval) { return this.request<TurnView>(`/tasks/${encodeURIComponent(id)}/turn`, 'POST', {message, ...(approval ? {approval} : {})}) }
+  verify(taskId: string, operationId: string) { return this.request<OperationVerification>(`/tasks/${encodeURIComponent(taskId)}/operations/${encodeURIComponent(operationId)}/verify`, 'POST') }
   audit() { return this.request<AuditEvent[]>('/audit') }
 }
 

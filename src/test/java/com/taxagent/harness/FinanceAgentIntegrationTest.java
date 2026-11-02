@@ -129,7 +129,7 @@ class FinanceAgentIntegrationTest {
         assertThat(writeSchema.toString()).doesNotContain("$ref", "authorization", "user_id");
         var restarted = agent("U001", enterprise, new FakeLlmClient(check(enterprise), new Ask("继续补其余用途")));
         assertThat(restarted.load(task.id()).task()).isEqualTo(saved.task());
-        assertThat(restarted.recover("save-" + enterprise, update)).get().extracting(UpdateResult::verified).isEqualTo(true);
+        assertThat(restarted.recover(task.id(), "save-" + enterprise, update)).get().extracting(UpdateResult::verified).isEqualTo(true);
         assertThat(data(restarted.turn(task.id(), "重启后检查现存状态"), 0).path("missing").size()).isEqualTo(remaining);
         // Human-reviewable structured trace, recreated by smoke; no secrets or runtime DB involved.
         var evidence = Map.of("model", "FakeLlmClient (not cloud)", "enterprise", enterprise,
@@ -145,14 +145,90 @@ class FinanceAgentIntegrationTest {
         var task = agent.start("明确保存指定发票", List.of());
         var saved = agent.approvedTurn(task.id(), "保存 C001 F002 用途和备注", "direct", update, SAVE_NOW);
         assertThat(data(saved, 0).path("verified").asBoolean()).isTrue();
+        assertThat(saved.task().status()).isEqualTo(TaskMemory.Status.COMPLETED);
         assertThat(data(saved, 1).path("rows").findValuesAsText("remarks")).contains("用户核对");
         sql("CREATE TRIGGER no_second_update BEFORE UPDATE ON invoices BEGIN SELECT RAISE(ABORT,'no second update'); END");
         var restart = agent("U001", "C001", new FakeLlmClient(write(update), new Finish("回查已有操作")));
         var again = restart.start("同 operationId 查询已有结果", List.of());
-        assertThat(data(restart.approvedTurn(again.id(), "明确请求相同保存", "direct", update, SAVE_NOW), 0).path("verified").asBoolean()).isTrue();
+        failed(restart.approvedTurn(again.id(), "明确请求相同保存", "direct", update, SAVE_NOW), "CONFLICT");
+        assertThat(restart.recover(task.id(), "direct", update)).get().extracting(UpdateResult::verified).isEqualTo(true);
         assertThat(ledgerCount()).isEqualTo(1);
-        assertThat(restart.recover("unknown-operation", update)).isEmpty();
+        assertThat(restart.recover(again.id(), "unknown-operation", update)).isEmpty();
         evidence("direct-save", Map.of("model", "FakeLlmClient (not cloud)", "turn", saved, "modelRequests", fake.requests));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"已保存", "完成", "{\"verified\":true,\"operation_id\":\"missing\"}"})
+    void approvedFinishWithoutWriteFailsClosed(String claim) throws Exception {
+        var agent = agent("U001", "C001", new FakeLlmClient(new Finish(claim)));
+        var task = agent.start("保存指定发票", List.of());
+        var turn = agent.approvedTurn(task.id(), "现在保存", "missing", update("C001"), SAVE_NOW);
+        failed(turn, "WRITE_NOT_VERIFIED");
+        assertThat(turn.result().text()).isEqualTo("本次请求未成功完成：WRITE_NOT_VERIFIED");
+        assertThat(turn.result().history()).isEmpty();
+        assertThat(agent.load(task.id()).task().status()).isEqualTo(TaskMemory.Status.ACTIVE);
+        assertThat(ledgerCount()).isZero();
+    }
+
+    @Test void readOnlyFinishStillCompletes() {
+        var agent = agent("U001", "C001", new FakeLlmClient(new Finish("查询说明完成")));
+        var task = agent.start("查询说明", List.of());
+        assertThat(agent.turn(task.id(), "说明查询能力").task().status()).isEqualTo(TaskMemory.Status.COMPLETED);
+    }
+
+    @Test void forgedVerificationInApprovedToolArgumentsCannotComplete() throws Exception {
+        var update = update("C001");
+        var args = JSON.writeValueAsString(update);
+        args = args.substring(0, args.length() - 1) + ",\"verified\":true}";
+        var agent = agent("U001", "C001", new FakeLlmClient(
+                new Call("forged", "update_invoice", args), new Finish("模型宣称保存成功")));
+        var task = agent.start("明确保存", List.of());
+        failed(agent.approvedTurn(task.id(), "保存", "forged", update, SAVE_NOW), "INVALID_ARGUMENT");
+        assertThat(ledgerCount()).isZero();
+    }
+
+    @Test void earlierVerifiedWriteDoesNotCompleteLaterApprovedTurn() throws Exception {
+        var update = update("C001");
+        var agent = agent("U001", "C001", new FakeLlmClient(write(update), new Ask("还需哪些信息？"),
+                new Finish("已保存")));
+        var task = agent.start("保存后继续", List.of());
+        var first = agent.approvedTurn(task.id(), "保存", "first", update, SAVE_NOW);
+        assertThat(first.task().status()).isEqualTo(TaskMemory.Status.WAITING_USER);
+        assertThat(data(first, 0).path("verified").asBoolean()).isTrue();
+        failed(agent.approvedTurn(task.id(), "再次保存", "second", update, SAVE_NOW), "WRITE_NOT_VERIFIED");
+        assertThat(ledgerCount()).isEqualTo(1);
+    }
+
+    @Test void approvedClearCompletesOnlyAfterVerifiedWrite() throws Exception {
+        var update = new InvoiceUpdate(new InvoiceKey("C001", "F002"), Map.of("purpose", ""));
+        var agent = agent("U001", "C001", new FakeLlmClient(write(update), new Finish("已清空")));
+        var task = agent.start("清空用途", List.of());
+        var turn = agent.approvedTurn(task.id(), "清空", "clear", update, CLEAR_NOW);
+        assertThat(data(turn, 0).path("verified").asBoolean()).isTrue();
+        assertThat(turn.task().status()).isEqualTo(TaskMemory.Status.COMPLETED);
+    }
+
+    @Test void unverifiedOrMismatchedServerResultCannotComplete() throws Exception {
+        var update = update("C001");
+        var user = new Session("U001");
+        for (var result : List.of(
+                new UpdateResult(update.key(), "办公室实际采购", "用户核对", false),
+                new UpdateResult(new InvoiceKey("C001", "F003"), "办公室实际采购", "用户核对", true),
+                new UpdateResult(update.key(), "其他用途", "用户核对", true))) {
+            var writer = org.mockito.Mockito.mock(InvoiceWriteService.class);
+            var memory = new TaskMemory(db);
+            var task = memory.start(user, "C001", "核验服务端写入证据", List.of());
+            var authorization = InvoiceWriteService.authorizeExplicitRequest(user, task.id(), "unverified", update, SAVE_NOW);
+            org.mockito.Mockito.when(writer.execute(user, task.id(), "unverified", update, authorization)).thenReturn(result);
+            var runtime = new AgentRuntime(new FakeLlmClient(write(update), new Finish("已保存")),
+                    new ReadOnlyFinanceTools(db), new RuleService(db), AgentRuntime.Limits.defaults(), writer);
+            var turn = memory.continueTask(user, "C001", task.id(), "保存", runtime,
+                    new AgentRuntime.ApprovedWrite(task.id(), "unverified", update, authorization));
+            failed(turn, "WRITE_NOT_VERIFIED");
+            assertThat(turn.result().text()).doesNotContain("已保存");
+            org.mockito.Mockito.verify(writer).execute(user, task.id(), "unverified", update, authorization);
+            memory.cancel(user, "C001", task.id(), turn.task().version());
+        }
     }
 
     @Test void informationModelClaimsAndForgedArgumentsCannotAuthorize() throws Exception {
@@ -205,6 +281,18 @@ class FinanceAgentIntegrationTest {
         assertThat(ledgerCount()).isZero();
     }
 
+    @Test void trustedApprovalCannotClaimAnotherTask() {
+        var user = new Session("U001"); var memory = new TaskMemory(db); var update = update("C001");
+        var first = memory.start(user,"C001","first",List.of());
+        var authorization = InvoiceWriteService.authorizeExplicitRequest(user,first.id(),"bound",update,SAVE_NOW);
+        memory.cancel(user,"C001",first.id(),first.version());
+        var second = memory.start(user,"C001","second",List.of());
+        var runtime = new AgentRuntime(r -> { throw new AssertionError("must not call model"); },
+                new ReadOnlyFinanceTools(db),new RuleService(db),AgentRuntime.Limits.defaults(),new InvoiceWriteService(db));
+        fails(ErrorCode.CONFIRMATION_REQUIRED, () -> memory.continueTask(user,"C001",second.id(),"save",runtime,
+                new AgentRuntime.ApprovedWrite(first.id(),"bound",update,authorization)));
+    }
+
     @Test void failedWriteCannotReportSuccessAndRecoveryDoesNotRetry() throws Exception {
         var update = update("C001");
         var agent = agent("U001", "C001", new FakeLlmClient(write(update), new Finish("模型宣称保存成功")));
@@ -213,7 +301,7 @@ class FinanceAgentIntegrationTest {
         var turn = agent.approvedTurn(task.id(), "现在保存", "failure", update, SAVE_NOW);
         failed(turn, "STORAGE_ERROR");
         assertThat(JSON.readTree(turn.result().history().getFirst().resultJson()).path("data").isNull()).isTrue();
-        assertThat(agent.recover("failure", update)).isEmpty();
+        assertThat(agent.recover(task.id(), "failure", update)).isEmpty();
         assertThat(ledgerCount()).isZero();
         assertThat(new RuleService(db).checkInvoicePurpose(new Session("U001"), new PurposeCheck("C001", "2026-09")).missing()).hasSize(5);
     }
@@ -257,7 +345,7 @@ class FinanceAgentIntegrationTest {
         var restarted = agent("U001", enterprise, r -> { throw new AssertionError("recovery must not call model"); });
         assertThat(restarted.load(task.id()).task()).isEqualTo(before);
         for (int i = 0; i < 2; i++) {
-            assertThat(restarted.recover("t11-commit", update)).contains(
+            assertThat(restarted.recover(task.id(), "t11-commit", update)).contains(
                     new UpdateResult(update.key(), update.changes().get("purpose"), update.changes().get("remarks"), true));
             assertThat(new ReadOnlyFinanceTools(db).queryInvoices(new Session("U001"), new Query(enterprise, "2026-09")).rows())
                     .filteredOn(row -> row.key().equals(update.key())).singleElement().satisfies(row -> {
@@ -265,7 +353,7 @@ class FinanceAgentIntegrationTest {
                         assertThat(row.remarks()).isEqualTo(update.changes().get("remarks"));
                     });
         }
-        fails(ErrorCode.PERMISSION_DENIED, () -> agent("U001", other, new FakeLlmClient()).recover("t11-commit", update));
+        fails(ErrorCode.PERMISSION_DENIED, () -> agent("U001", other, new FakeLlmClient()).recover(task.id(), "t11-commit", update));
         assertThat(reader.queryInvoices(new Session("U001"), new Query(other, "2026-09"))).isEqualTo(otherBefore);
         assertThat(ledgerCount()).isEqualTo(1);
         try (var c = DriverManager.getConnection("jdbc:sqlite:" + db); var s = c.createStatement();

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { ApiError, createAndRunFirstTurn, DemoApi, findOpenTask, isTerminalTaskStatus, queriedInvoices, verifiedWriteResult } from '../src/api'
+import { ApiError, canVerifyOperation, createAndRunFirstTurn, DemoApi, findOpenTask, isTerminalTaskStatus, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from '../src/api'
 import type { Exchange, Task, TurnView } from '../src/api'
 import { initialOperation } from '../src/App'
 // @ts-expect-error Node built-ins are available in Vitest; this browser project has no @types/node.
@@ -17,8 +17,10 @@ async function staticPage(storage = new Map<string, string>(), failure?: 'read' 
     return nodes.get(id)!
   }
   const warnings: ReturnType<typeof element>[] = []
-  const fetcher = vi.fn(async (url:string) => Response.json(url.endsWith('/session')
-    ? {csrfToken:'test',profile:'',enterprise:''} : []))
+  const fetcher = vi.fn(async (url:string, options?: RequestInit) => {
+    void options
+    return Response.json(url.endsWith('/session') ? {csrfToken:'test',profile:'',enterprise:''} : [])
+  })
   const storageApi = {
     getItem:vi.fn((key:string) => {if (failure === 'read') throw new Error('storage unavailable'); return storage.get(key) ?? null}),
     setItem:vi.fn((key:string,value:string) => {if (failure === 'write') throw new Error('storage unavailable'); storage.set(key,value)}),
@@ -120,6 +122,77 @@ test('static page clears only a matching verified response and persists no finan
   expect(page.storage.has('taxagent-pending-operation')).toBe(false)
   expect(page.get('approve').disabled).toBe(false)
   expect(page.warnings[0].textContent).toBe('')
+})
+
+const pendingVerification = {id:'11111111-1111-4111-8111-111111111111',taskId:'22222222-2222-4222-8222-222222222222',unknown:true}
+const verificationModes = ['NOT_FOUND','DIVERGED','network','HTTP error','invalid JSON','wrong operation','nonboolean verified','false verified','missing status','null','remove failure','VERIFIED']
+function verificationResponse(mode: string) {
+  if (mode === 'network') throw new TypeError('lost response')
+  if (mode === 'HTTP error') return Response.json({errorCode:'AUDIT_STORAGE_ERROR'}, {status:500})
+  if (mode === 'invalid JSON') return new Response('{')
+  if (mode === 'null') return Response.json(null)
+  return Response.json({operationId:mode === 'wrong operation' ? 'other' : pendingVerification.id,
+    status:mode === 'missing status' ? undefined : ['NOT_FOUND','DIVERGED'].includes(mode) ? mode : 'VERIFIED',
+    verification:{verified:mode === 'nonboolean verified' ? 'true' : mode !== 'false verified'}})
+}
+test.each(verificationModes)('static manual verification after reload: %s', async mode => {
+  const storage = new Map([['taxagent-pending-operation',JSON.stringify(pendingVerification)]])
+  const page = await staticPage(storage, mode === 'remove failure' ? 'remove' : undefined)
+  expect(page.get('approve').disabled).toBe(true)
+  expect(page.fetcher).toHaveBeenCalledTimes(1) // No verification or write on reload.
+  page.fetcher.mockImplementationOnce(async () => verificationResponse(mode))
+  await page.get('verifyOperation').onclick()
+  expect(page.fetcher.mock.calls[1][0]).toBe(`/api/demo/tasks/${pendingVerification.taskId}/operations/${pendingVerification.id}/verify`)
+  expect(page.fetcher.mock.calls[1][1]).toMatchObject({method:'POST',headers:{'X-CSRF-Token':'test'},body:undefined})
+  expect(page.get('approve').disabled).toBe(mode !== 'VERIFIED')
+  expect(storage.has('taxagent-pending-operation')).toBe(mode !== 'VERIFIED')
+  if (mode !== 'VERIFIED') {
+    const reloaded = await staticPage(storage)
+    expect(reloaded.get('approve').disabled).toBe(true)
+    await reloaded.get('refresh').onclick()
+    expect(reloaded.fetcher.mock.calls.map(c => c[0])).toEqual(['/api/demo/session','/api/demo/tasks','/api/demo/audit'])
+  }
+  expect(page.fetcher.mock.calls.some(c => c[0].endsWith('/turn'))).toBe(false)
+})
+test('static repeated verification sends only read-only verification requests', async () => {
+  const page = await staticPage(new Map([['taxagent-pending-operation',JSON.stringify(pendingVerification)]]))
+  page.fetcher.mockImplementation(async () => verificationResponse('NOT_FOUND'))
+  await page.get('verifyOperation').onclick(); await page.get('verifyOperation').onclick()
+  expect(page.fetcher.mock.calls.slice(1).map(c => c[0])).toEqual(Array(2).fill(`/api/demo/tasks/${pendingVerification.taskId}/operations/${pendingVerification.id}/verify`))
+  expect(page.get('approve').disabled).toBe(true)
+})
+test.each([...invalidStoredOperations, JSON.stringify({id:'unknown',taskId:'unknown',unknown:true})])
+('unknown static storage never calls verify: %s', async raw => {
+  const page = await staticPage(new Map([['taxagent-pending-operation',raw]]))
+  await page.get('verifyOperation').onclick()
+  expect(page.fetcher).toHaveBeenCalledTimes(1)
+  expect(page.get('approve').disabled).toBe(true)
+})
+test.each(verificationModes)('React manual verification helper retains lock unless exact verified and storage removal succeeds: %s', async mode => {
+  const fetcher = vi.fn(async (url:string) => { void url; return verificationResponse(mode) })
+  vi.stubGlobal('fetch',fetcher)
+  let locked = true
+  const clear = vi.fn(() => { if (mode === 'remove failure') throw new Error('storage failure'); locked = false })
+  const action = verifyPendingOperation(new DemoApi(), pendingVerification, clear)
+  if (mode === 'VERIFIED') await action
+  else await expect(action).rejects.toThrow()
+  expect(locked).toBe(mode !== 'VERIFIED')
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(fetcher.mock.calls[0][0]).toBe(`/api/demo/tasks/${pendingVerification.taskId}/operations/${pendingVerification.id}/verify`)
+})
+test('React helper refuses placeholder IDs without a request', async () => {
+  const api = {verify:vi.fn()}
+  const clear = vi.fn()
+  expect(canVerifyOperation(null)).toBe(false)
+  await expect(verifyPendingOperation(api,{id:'unknown',taskId:'unknown'},clear)).rejects.toThrow()
+  expect(api.verify).not.toHaveBeenCalled(); expect(clear).not.toHaveBeenCalled()
+})
+test('verify API sends a single CSRF POST without approval or payload', async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(Response.json(session)).mockResolvedValueOnce(verificationResponse('VERIFIED'))
+  vi.stubGlobal('fetch',fetcher)
+  const api = new DemoApi(); await api.session(); await api.verify('task/id','operation/id')
+  expect(fetcher.mock.calls[1][0]).toBe('/api/demo/tasks/task%2Fid/operations/operation%2Fid/verify')
+  expect(fetcher.mock.calls[1][1]).toMatchObject({method:'POST',credentials:'same-origin',cache:'no-store',headers:{'X-CSRF-Token':'first'},body:undefined})
 })
 
 test('approved write remains blocked without matching verified readback, even if tool history is empty', () => {

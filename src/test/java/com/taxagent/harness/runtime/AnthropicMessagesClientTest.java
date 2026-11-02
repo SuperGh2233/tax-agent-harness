@@ -28,10 +28,12 @@ class AnthropicMessagesClientTest {
             var tools = List.of(new LlmClient.Tool("query", json.readTree("{\"type\":\"object\"}")));
             var call = (LlmClient.Call) client.next(new LlmClient.Request("query", tools, List.of()));
             client.next(new LlmClient.Request("query", tools, List.of(new LlmClient.Exchange(call, "{\"ok\":true}"))));
+            var initialBody = json.readTree(requests.getFirst());
             var body = json.readTree(requests.get(1));
+            assertEquals("medium", initialBody.at("/output_config/effort").asText());
             assertEquals("qwen3.8-flash", body.path("model").asText());
             assertEquals(8192, body.path("max_tokens").asInt());
-            assertEquals("medium", body.at("/output_config/effort").asText());
+            assertEquals("low", body.at("/output_config/effort").asText());
             assertEquals("json_schema", body.at("/output_config/format/type").asText());
             assertEquals("object", body.at("/output_config/format/schema/type").asText());
             assertEquals("ask", body.at("/output_config/format/schema/properties/kind/enum/0").asText());

@@ -2,6 +2,7 @@ package com.taxagent.harness.runtime;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
+import java.util.HashSet;
 
 /** Provider-neutral decisions. No trusted identity is exposed to the model. */
 @FunctionalInterface
@@ -13,7 +14,18 @@ public interface LlmClient {
     record Request(String userMessage, List<Tool> tools, List<Exchange> history) {
         public Request { tools = List.copyOf(tools); history = List.copyOf(history); }
     }
-    sealed interface Decision permits Call, Ask, Finish {}
+    sealed interface Decision permits Call, Batch, Ask, Finish {}
+    /** A single assistant turn may request several distinct tools. Never infer approval from a batch. */
+    record Batch(List<Call> calls) implements Decision {
+        public Batch {
+            calls = List.copyOf(calls);
+            if (calls.size() < 2 || calls.size() > 8) throw new IllegalArgumentException("Invalid batch size");
+            var ids = new HashSet<String>();
+            for (var call : calls) {
+                if (call == null || !ids.add(call.id())) throw new IllegalArgumentException("Duplicate or missing tool call");
+            }
+        }
+    }
     record Call(String id, String name, String arguments,
                 @com.fasterxml.jackson.annotation.JsonIgnore List<JsonNode> providerOutput) implements Decision {
         public Call(String id, String name, String arguments) { this(id, name, arguments, List.of()); }

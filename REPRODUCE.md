@@ -98,18 +98,20 @@ JAR 绑定127.0.0.1:18083，HTTP健康200/UP，HTML与JS/CSS可访问；真实�
 
 **未验证：空缓存首次在线依赖下载、真正全新 Git checkout、其他平台和 Maven最低版本、真实模型、真实视频、最终压缩包。** 为避免不必要下载没有联网重建缓存。T13 因空缓存/全新 checkout 未证实保留 IN_PROGRESS；用户下一步在独立新 checkout（先完成代码整合）执行第2节在线命令，再离线复跑，补确切证据。录屏和提交材料按 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) 人工完成。
 
-## 当前真实测试目标：DashScope Messages
-当前目标为 `LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.8-flash`；独立适配器追加 `/v1/messages`，使用 x-api-key、max_tokens=8192、output_config.effort=medium，自动工具选择。保留 GPT-6 Luna Responses 和既有 Chat Completions，无自动回退。思考及签名仅作为内部续接状态，不进入结果或审计。Qwen 的 HTTP 与 AgentRuntime 每次调用上限均为60秒；其他模型仍为15秒，系统硬上限60秒。
+## 2026-10-30 测试配置记录（历史快照）
+以下配置和“真实 E2E 等待凭证”的状态仅代表 2026-10-30 当时的测试准备情况，已被 2026-11-02 的真实 Qwen API 只读跨轮验证及后续延迟适配更新。**不要将此段当作当前测试状态或照搬旧密钥配置。** 当前模型参数、验证结论和本机凭证处理方式以 [DEMO_SCRIPT.md](DEMO_SCRIPT.md) 与 [docs/agent-handoff.md](docs/agent-handoff.md) 为准。所有凭证只在本机安全终端使用，不得写入仓库、日志或聊天。
 
-此前粘贴的凭证已暴露，必须先在供应商控制台撤销；替换凭证仅在本机 zsh 隐藏输入，勿粘贴到聊天：
-```zsh
-export LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic
-export LLM_MODEL=qwen3.8-flash
-read -rs "LLM_API_KEY?输入已轮换的新密钥（隐藏）："; print
-export LLM_API_KEY
-# 完成后清除
-unset LLM_API_KEY
-```
-用户已授权合成数据及独立临时 SQLite。此次仅允许 loopback HTTP stub，不访问外网、不操作任何 SQLite；真实 E2E 等待轮换密钥在本机配置。T13 保持 IN_PROGRESS。上述目标替代文档早先的 Luna 当前目标描述，Luna 支持继续保留。
+当时使用 DashScope Anthropic-compatible Messages endpoint。旧版本机凭证输入示例已移除；当前配置请按 `DEMO_SCRIPT.md` 的说明执行。
+Qwen 单次 HTTP 请求与 AgentRuntime 等待上限为 60 秒，其他模型默认 15 秒，系统硬上限 60 秒。Luna Responses 与既有 Chat Completions 路径继续保留，协议选择不自动回退。
 
-注意：Qwen 的单次 HTTP 请求和 AgentRuntime 等待上限为60秒；其他模型的默认仍为15秒。尚未测得真实云端延迟，超过上限会返回超时。
+
+
+## 最新验证补充（2026-11-02）
+
+以下结果更新本文件前面 2026-10-30 的历史快照；旧记录保留作时间线，不应覆盖本节的最新状态。
+
+- JDK21 离线 Maven 全量测试：223/0/0/0；`package` BUILD SUCCESS；最新 JAR 为 `target/harness-0.0.1-SNAPSHOT.jar`，34,131,390 bytes。
+- 前端 `cd frontend && npm run verify` 通过，Vitest 71 项；TypeScript、ESLint、Vite build 均通过。
+- 真实 Qwen Demo API 只读跨轮流程通过：三项只读工具执行后，服务端将仍有 pending 的任务保持 WAITING_USER；用户结构化补充后，第二轮恢复并 COMPLETED。合成数据库财务表前后不变，`invoice_operations=0`，未调用 `update_invoice`。
+- 真实浏览器 UI 只读尝试已成功加载页面、选身份、创建任务、发送消息并执行三项只读工具，但模型最终总结阶段返回 `MODEL_TIMEOUT`；没有完成 UI 补充/恢复流程。最新代码已将首轮 effort 设为 medium、工具结果后的续接 effort 设为 low，但**新 JAR 尚未在真实服务重启后复验**。
+- 当前最新状态、未提交文件列表和下一步顺序见 [docs/agent-handoff.md](docs/agent-handoff.md)。T13 继续保持 IN_PROGRESS。

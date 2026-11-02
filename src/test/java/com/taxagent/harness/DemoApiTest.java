@@ -72,7 +72,66 @@ class DemoApiTest {
     String purpose() throws Exception {
         try(var c=DriverManager.getConnection("jdbc:sqlite:"+db);var s=c.createStatement();var r=s.executeQuery("SELECT purpose FROM invoices WHERE enterprise_id='C001' AND id='F002'")){return r.getString(1);}
     }
-    @ParameterizedTest @ValueSource(strings={"cancel","supplement"})
+    String verificationPath(String task, String operation) { return "/tasks/"+task+"/operations/"+operation+"/verify"; }
+    JsonNode verifyOperation(String task, String operation) throws Exception {
+        return ok(postJson(verificationPath(task,operation),Map.of()));
+    }
+    @Test void lostResponseCanBeVerifiedRepeatedlyWithoutFinancialWrites() throws Exception {
+        setup(new FakeLlmClient(new Call("save","update_invoice",WRITE),new Finish("saved")));
+        select("operator","C001"); String task=start(), op=UUID.randomUUID().toString();
+        turn(task,approved(op)); // Discard the original response.
+        sql("CREATE TRIGGER no_verify_update BEFORE UPDATE ON invoices BEGIN SELECT RAISE(ABORT,'no update'); END");
+        sql("CREATE TRIGGER no_verify_insert BEFORE INSERT ON invoice_operations BEGIN SELECT RAISE(ABORT,'no insert'); END");
+        var result=verifyOperation(task,op);
+        assertThat(result.path("status").asText()).isEqualTo("VERIFIED");
+        assertThat(result.path("operationId").asText()).isEqualTo(op);
+        assertThat(result.at("/verification/verified").isBoolean()).isTrue();
+        assertThat(result.at("/verification/verified").booleanValue()).isTrue();
+        assertThat(verifyOperation(task,op)).isEqualTo(result);
+        assertThat(count("invoice_operations")).isEqualTo(1);
+        var events=ok(get("/api/demo/audit"));
+        assertThat(events.findValuesAsText("outcome")).contains("VERIFIED");
+        var event=events.get(0);
+        assertThat(event.path("taskId").asText()).isEqualTo(task);
+        assertThat(event.path("operationId").asText()).isEqualTo(op);
+        assertThat(event.path("tool").asText()).isEqualTo("verify");
+        assertThat(event.toString()).doesNotContain("private-purpose");
+    }
+    @Test void verificationFailsClosedForMissingMismatchedLegacyAndDriftedOperations() throws Exception {
+        setup(new FakeLlmClient(new Call("save","update_invoice",WRITE),new Finish("saved")));
+        select("operator","C001"); String task=start(), op=UUID.randomUUID().toString();
+        turn(task,approved(op)); String other=start();
+        for (String id:List.of(op,UUID.randomUUID().toString())) {
+            var result=verifyOperation(other,id);
+            assertThat(result.path("status").asText()).isEqualTo("NOT_FOUND");
+            assertThat(result.path("verification").isNull()).isTrue();
+            assertThat(result.toString()).doesNotContain("private-purpose");
+        }
+        sql("UPDATE invoices SET remarks='later' WHERE enterprise_id='C001' AND id='F002'");
+        var drift=verifyOperation(task,op);
+        assertThat(drift.path("status").asText()).isEqualTo("DIVERGED");
+        assertThat(drift.path("verification").isNull()).isTrue();
+        sql("UPDATE invoice_operations SET task_id=NULL");
+        assertThat(verifyOperation(task,op).path("status").asText()).isEqualTo("NOT_FOUND");
+        select("viewer","C001");
+        mvc.perform(postJson(verificationPath(task,op),Map.of()).session(session).header("X-CSRF-Token",csrf)).andExpect(status().isNotFound());
+        select("operator","C002");
+        mvc.perform(postJson(verificationPath(task,op),Map.of()).session(session).header("X-CSRF-Token",csrf)).andExpect(status().isNotFound());
+    }
+    @Test void verificationRequiresCsrfCanonicalIdsAndSuccessfulAudit() throws Exception {
+        setup(new FakeLlmClient(new Call("save","update_invoice",WRITE),new Finish("saved")));
+        select("operator","C001"); String task=start(), op=UUID.randomUUID().toString();
+        turn(task,approved(op));
+        mvc.perform(postJson(verificationPath(task,op),Map.of()).session(session)).andExpect(status().isForbidden());
+        for (String path:List.of(verificationPath("bad",op),verificationPath(task,"bad")))
+            mvc.perform(postJson(path,Map.of()).session(session).header("X-CSRF-Token",csrf)).andExpect(status().isBadRequest());
+        sql("CREATE TRIGGER fail_verification_audit BEFORE INSERT ON demo_audit WHEN NEW.tool='verify' BEGIN SELECT RAISE(ABORT,'audit failure'); END");
+        mvc.perform(postJson(verificationPath(task,op),Map.of()).session(session).header("X-CSRF-Token",csrf)).andExpect(status().isInternalServerError());
+        assertThat(count("invoice_operations")).isEqualTo(1);
+        sql("DROP TRIGGER fail_verification_audit");
+        assertThat(verifyOperation(task,op).path("status").asText()).isEqualTo("VERIFIED");
+    }
+    @ParameterizedTest @ValueSource(strings={"cancel","supplement","verify"})
     void crossSessionMutationWaitsForApprovedTurn(String mutation) throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
@@ -93,7 +152,7 @@ class DemoApiTest {
         var turnRequest = postJson("/tasks/"+id+"/turn",approved(operation)).session(turnSession).header("X-CSRF-Token",turnCsrf);
         Object input = mutation.equals("cancel") ? Map.of("version",0,"confirmed",true)
                 : Map.of("version",0,"statements",Map.of("F002.purpose",Map.of("value","fact","userRequest","explicit fact")));
-        var mutationRequest = postJson("/tasks/"+id+"/"+mutation,input).session(otherSession).header("X-CSRF-Token",otherCsrf)
+        var mutationRequest = postJson(mutation.equals("verify") ? verificationPath(id,operation) : "/tasks/"+id+"/"+mutation,input).session(otherSession).header("X-CSRF-Token",otherCsrf)
                 .with(r -> { attempted.countDown(); return r; });
         var executor = Executors.newFixedThreadPool(2);
         try {
@@ -108,8 +167,13 @@ class DemoApiTest {
             assertThat(result.at("/turn/task/status").asText()).isEqualTo("COMPLETED");
             assertThat(result.at("/verification/verified").asBoolean()).isTrue();
             var conflict = competing.get(5,TimeUnit.SECONDS);
-            assertThat(conflict.getResponse().getStatus()).isEqualTo(409);
-            assertThat(body(conflict).path("errorCode").asText()).isEqualTo("CONFLICT");
+            if (mutation.equals("verify")) {
+                assertThat(conflict.getResponse().getStatus()).isEqualTo(200);
+                assertThat(body(conflict).path("status").asText()).isEqualTo("VERIFIED");
+            } else {
+                assertThat(conflict.getResponse().getStatus()).isEqualTo(409);
+                assertThat(body(conflict).path("errorCode").asText()).isEqualTo("CONFLICT");
+            }
             assertThat(ok(get("/api/demo/tasks/"+id)).at("/task/status").asText()).isEqualTo("COMPLETED");
             assertThat(count("invoice_operations")).isEqualTo(1);
             assertThat(purpose()).isEqualTo("private-purpose");
@@ -257,6 +321,29 @@ class DemoApiTest {
         var resumed=ok(get("/api/demo/tasks/"+task));assertThat(resumed.at("/task/supplied/F002.purpose/userRequest").asText()).isEqualTo("原话 private-purpose");
         turn(task,Map.of("message","只是补充"));assertThat(purpose()).isEmpty();assertThat(count("invoice_operations")).isZero();
         assertThat(model.seen.getLast().userMessage()).contains("private-purpose","无；补充信息不是保存授权");
+    }
+    @Test void modelFinishCannotCloseTaskWithPendingFieldsAtHttpBoundary() throws Exception {
+        setup(new FakeLlmClient(
+                new Call("query","query_invoices","""
+                {"enterprise_id":"C001","month":"2026-09"}
+                """),
+                new Finish("模型认为任务已完成")));
+        select("operator","C001"); String task=start();
+        var first=turn(task,Map.of("message","查询发票并检查 F002 用途"));
+        assertThat(first.at("/turn/result/status").asText()).isEqualTo("NEEDS_INPUT");
+        assertThat(first.at("/turn/task/status").asText()).isEqualTo("WAITING_USER");
+        assertThat(first.at("/turn/task/pending").toString()).contains("F002.purpose");
+        assertThat(first.at("/turn/task/question").asText()).contains("F002.purpose","补充");
+        assertThat(first.at("/turn/result/text").asText()).doesNotContain("模型认为任务已完成");
+        var supplemented=ok(postJson("/tasks/"+task+"/supplement",Map.of("version",1,
+                "statements",Map.of("F002.purpose",Map.of("value","办公室采购","userRequest","用户明确补充：办公室采购")))));
+        assertThat(supplemented.path("status").asText()).isEqualTo("ACTIVE");
+        assertThat(supplemented.path("pending").isEmpty()).isTrue();
+        setup(new FakeLlmClient(new Finish("补充后核查完成")));
+        var resumed=turn(task,Map.of("message","根据已补充事实继续完成核查"));
+        assertThat(resumed.at("/turn/result/status").asText()).isEqualTo("FINISHED");
+        assertThat(resumed.at("/turn/task/status").asText()).isEqualTo("COMPLETED");
+        assertThat(resumed.at("/turn/task/pending").isEmpty()).isTrue();
     }
     @Test void ordinaryChatCannotWriteAndExactConfirmationWritesOnceWithReadback() throws Exception {
         setup(new FakeLlmClient(new Call("unapproved","update_invoice",WRITE),new Ask("请确认"),new Call("approved","update_invoice",WRITE),new Ask("已保存请继续"),new Call("repeat","update_invoice",WRITE),new Ask("已回查")));

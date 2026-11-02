@@ -52,14 +52,15 @@ public final class FinanceAgent {
         load(id);
         if (update == null || !enterprise.equals(update.key().enterpriseId()))
             throw new DomainException(ErrorCode.PERMISSION_DENIED, "Selected enterprise required");
-        var authorization = InvoiceWriteService.authorizeExplicitRequest(session, operationId, update, explicitIntent);
+        var authorization = InvoiceWriteService.authorizeExplicitRequest(session, id, operationId, update, explicitIntent);
         return memory.continueTask(session, enterprise, id, message, runtime,
-                new AgentRuntime.ApprovedWrite(operationId, update, authorization));
+                new AgentRuntime.ApprovedWrite(id, operationId, update, authorization));
     }
     /** Unknown write outcome: query only; empty is never automatic retry permission. */
-    public Optional<ToolContract.UpdateResult> recover(String operationId, InvoiceUpdate update) {
+    public Optional<ToolContract.UpdateResult> recover(String id, String operationId, InvoiceUpdate update) {
         if (update == null || !enterprise.equals(update.key().enterpriseId()))
             throw new DomainException(ErrorCode.PERMISSION_DENIED, "Selected enterprise required");
-        return writer.recover(session, operationId, update);
+        load(id);
+        return writer.recover(session, id, operationId, update);
     }
 }

@@ -5,6 +5,8 @@
 > 状态：`TODO` 待认领 · `IN_PROGRESS` 开发中 · `BLOCKED` 阻塞 · `DONE` 验收通过。
 >
 > 这是开发执行台账；完整业务背景和设计以仓库中的《财税_Agent_Harness_项目计划书_V1.1_共享任务池.docx》以及官方 v1.1.0 材料为依据。如有冲突，以官方材料和双方确认后的决策为准。
+>
+> 历史记录中的 `/Users/...`、`/tmp/...` 等绝对路径仅为原开发 Mac 上的验证位置，不随 GitHub 仓库分发；新环境请按 REPRODUCE.md 使用自己的路径和独立临时数据库。
 
 ## 协作规则（不按人员固定分工）
 
@@ -34,7 +36,7 @@
 | T11 | P1 | 构建回归与故障注入用例 | T10 | DONE | Coding Agent | JDK21 离线定向91/0/0/0、全量163/0/0/0；两企业提交后任务保存故障及六项验收映射见T11验证记录 |
 | T12 | P1 | 简易交互界面、审计日志与演示录制 | T10 | DONE | Coding Agent | JDK21 全量187/0/0/0（T12共24）；任务审计UUID隔离强断言、CSP及原T12验收通过，见安全修正记录 |
 | T14 | P1 | 财税工作台 UI/UX 视觉重构 | T12 | DONE | Coding Agent | [T14计划](docs/plans/active/PLAN-20261030-t14-ui-ux.md)：JDK21全量194/0/0/0、DemoApiTest24、八断点/52本地资源通过 |
-| T13 | P1 | 打包提交说明及复现文档 | T11、T12 | IN_PROGRESS | Coding Agent | 干净源码+既有缓存187/0/0/0、JAR/新库/HTTP/UI通过；空缓存在线及全新checkout未证实，见T13记录 |
+| T13 | P1 | 打包提交说明及复现文档 | T11、T12 | IN_PROGRESS | Coding Agent | JDK21全量223/0/0/0、前端Vitest71通过；真实Qwen只读API跨轮通过；浏览器最终回复MODEL_TIMEOUT，空缓存/全新checkout、真实写入UI E2E未证实；见 [交接说明](docs/agent-handoff.md) 与T13记录 |
 
 > **注意**：T00 的 DONE 仅代表本次建立共享文档，不代表代码已开始开发。其他任务均需实际验收后才可标记完成。
 
@@ -60,6 +62,37 @@
 ```
 
 ## 工作记录
+
+### P0-3 — Anthropic 多工具调用与回放兼容性修复
+- 状态：DONE（离线回归验收）；2026-11-02。真实浏览器单工具 query_invoices 成功，但发票+银行双工具请求出现 MODEL_RESPONSE_INVALID。原适配器只允许一个 tool_use，且 LlmClient/AgentRuntime 不支持单轮批量 Call。
+- 变更：旧 Codex 会话因交互超时中断；按用户要求改由 GPT-Free-Mac 文件写入工具完成。仅修改 LlmClient、AnthropicMessagesClient、AgentRuntime 以及 TASKS.md，新增 MultiToolCallTest（5 项）。支持最多 8 个批量工具、Anthropic assistant 消息单次回放与多个匹配 tool_result、串行执行只读工具；整批预校验，禁止混合 update_invoice，保留 P0-1 写入证据门和 P0-2 自助核验及原有未提交修改。
+- 验收：JDK21 离线 Maven 定向（MultiToolCallTest、AnthropicMessagesClientTest、AgentRuntimeTest、FinanceAgentIntegrationTest）54/0/0/0；全量 Java 219/0/0/0；git diff --check 通过。因 ServerFS 编辑保留源文件时间戳，首次测试读到旧 target/classes；只 touch 三个 runtime 文件刷新 mtime 后，Maven 正确编译 LlmClient$Batch.class，再次验证通过。Codex 仅运行测试/mtime 更新，没有编辑源码内容。没有 clean、没有修改审计docs、没有暂存/提交/推送或外网请求。
+- T13 打包跟进（2026-11-02）：P0-3 完成后重新执行 JDK21 离线 `mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" -DskipTests package`，BUILD SUCCESS；JAR `target/harness-0.0.1-SNAPSHOT.jar`（34,129,319 bytes）确认包含 `LlmClient$Batch.class`、`AnthropicMessagesClient.class`、`AgentRuntime.class`；`git diff --check` 通过。17 个已修改、22 个未跟踪、0 暂存；HEAD 仍为 `6af75cebbf60205375db81af6a5ff25ec212d829`。未启动服务、未读取凭证、未访问网络/数据库、未修改源码、未 clean/提交/推送。
+- T13 真实 Qwen 只读联调（2026-11-02，用户已轮换凭证、启动独立实例）：本机 127.0.0.1:18084 健康检查 HTTP 200/UP；在 `/tmp/taxagent-qwen-e2e-20261102-08e66a4/demo.db` 官方合成数据上，通过 Demo API 真实调用 `query_invoices` → `query_bank_entries` → `check_invoice_purpose`，三工具均成功，发票 962206 分、银行收入 1300050 分、支出 718074 分、缺用途 5 项与独立库一致。模型返回 FINISHED、TaskMemory 直接 COMPLETED（版本 1），未按任务目标追问 F002 用途；故未补充/第二轮，跨轮能力本次未通过。调用链验证不等同确认供应商在同一个模型响应中批量发出 tool_use。全量 invoices/bank_entries 与 F002 用途/备注前后相同，invoice_operations=0，未授权写入=0，未调用 update_invoice；实例未被停机，Git 未提交/推送。任务 ID 5f3e033e-50ea-47db-be40-0b4eeda34686。
+- T13 必填 pending 完成门控修复（2026-11-02）：由 GPT-Free-Mac 直接修改 `TaskMemory.java`。服务端不再直接信任模型 `Finish`：只要结构化必填 pending 仍存在，返回结果改为 `NEEDS_INPUT`、任务保持 `WAITING_USER`，生成明确的字段补充提示；用户通过结构化 supplement 清空 pending 后，才允许后续 Finish 变为 COMPLETED。若本轮有精确匹配的 `ApprovedWrite`，只有当前轮 `update_invoice` 参数与审批一致、工具返回 `data.verified=true` 且回读键和值完全匹配时，才清除对应的 `<invoiceId>.<field>` pending；其他字段继续等待，模型文本/参数/历史均不能清除待办。普通无 pending 查询仍可正常完成。
+- 新增/更新回归：`TaskMemoryTest` 覆盖提前 Finish 阻断、补充后恢复、无 pending 正常完成、已核验写入只解除精确字段；`DemoApiTest` 覆盖 HTTP 返回与任务状态。JDK21 离线定向 70/0/0/0；最终完整套件 223/0/0/0（BUILD SUCCESS）；`git diff --check` 通过。未改审计docs、前端、冻结契约或种子。
+- 新 JAR：JDK21 离线 `mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" -DskipTests package` BUILD SUCCESS；`target/harness-0.0.1-SNAPSHOT.jar` 34,131,343 bytes，确认包含 TaskMemory、AgentRuntime、AnthropicMessagesClient。Codex 仅运行测试/打包和 mtime 刷新，源文件写入由 GPT-Free-Mac 完成；没有 clean、暂存、提交或推送。
+- T13 真实 Qwen 完成门控与跨轮恢复 E2E（2026-11-02，用户重启新 JAR 后）：`127.0.0.1:18084/api/health` HTTP 200/UP。通过真实 Demo API，使用 `viewer/C001` 只读身份，在同一独立合成库创建任务，pending=`F002.purpose`。第一轮 HTTP 200，真实 Qwen 依次调用 `query_invoices`、`query_bank_entries`、`check_invoice_purpose`；result=`NEEDS_INPUT`、task=`WAITING_USER`、version=1，question 包含 F002.purpose。用一条明确标注为合成测试信息的结构化 supplement 清空 pending 后，第二轮真实 Qwen 再次完成三项只读工具调用；result=`FINISHED`、task=`COMPLETED`、version=3。两轮均未尝试 `update_invoice`，无 errorCode，无模型重试。前后 SQLite 只读快照一致：C001 发票20行、银行流水24行，两表 SHA256 不变，F002 purpose/remarks 仍为空，invoice_operations=0。只写入预期的任务/审计元数据；未触碰 data/harness.db、真实客户数据或仓库文件，未停止服务。结论：模型提前 Finish 被服务端正确拦截；真实 Qwen 的追问→用户补充→恢复完成链路通过。
+- T13 真实浏览器 UI 只读 E2E（2026-11-02）：通过独立临时配置的 Chrome 156 + CDP 访问 `127.0.0.1:18084`；页面、JS、CSS、字体 HTTP 200，favicon.ico 404（非核心资源）。UI 成功选择 `viewer/C001`、创建唯一任务并发送一次只读 turn；三个只读工具均返回成功，但随后模型最终回复触发 `MODEL_TIMEOUT`。只读 API 诊断确认任务仍为 `ACTIVE`/version=1、pending=`F002.purpose`、无 question；审计顺序为 start COMPLETED → turn REQUESTED → query_invoices/query_bank_entries/check_invoice_purpose TOOL_RESULT → turn ERROR/MODEL_TIMEOUT。未补充、未发送第二轮，未调用 update_invoice。前后合成 DB 快照一致：发票/流水行数 20/24、SHA256 不变、F002 用途/备注空值状态不变、invoice_operations=0。临时 Chrome 和 profile 已清理；服务与仓库未改动。结论：浏览器加载、会话选择、建任务和发送消息通过；完整 WAITING_USER→supplement→COMPLETED UI 链路因 Qwen 第二阶段超时未完成，不能记为 UI E2E 通过。当前 `viewer/C001` 存在一条 ACTIVE 未完成任务（ID 后缀 `46c64d16`），后续必须恢复该任务，不能再创建第二条。
+- Qwen 延迟适配（2026-11-02）：根据真实 UI E2E 在三项只读工具成功后发生 `MODEL_TIMEOUT` 的证据，`AnthropicMessagesClient` 调整为首个模型请求（无工具历史）使用 `output_config.effort=medium`，有工具结果历史的后续请求使用 `low`，保留 8192 max_tokens 和现有 60 秒上限。官方 Anthropic-compatible Messages 文档确认 qwen3.8-flash 支持 low/medium/xhigh；low 用于缩短工具结果后的总结阶段，不改变工具白名单、批量预校验、权限或写入授权。`AnthropicMessagesClientTest` 断言首轮 medium、工具结果后 low。
+- 适配验收：JDK21 定向测试 88/0/0/0；完整 Maven 套件 223/0/0/0；离线 package BUILD SUCCESS；新 JAR `target/harness-0.0.1-SNAPSHOT.jar` 34,131,390 bytes。只刷新两处 Java 源/测试文件 mtime 后重编译；未运行新的云端模型请求，未重启当前服务。Git HEAD 仍为 `6af75cebbf60205375db81af6a5ff25ec212d829`，未提交/推送。
+- 剩余：请用户用新 JAR 重启 18084 服务后，先恢复现有 ACTIVE 任务（不新建），验证中/低 effort 后的 Qwen 追问与 UI 补充恢复；再验证真实浏览器 UI 完整链路。仍需确认供应商同一响应多个 `tool_use` 的真实兼容性、受控写入及自助核验的 UI E2E。受控写入必须由演示 UI 当前轮明确授权、使用合成样本，只执行一次且不自动重试；此前 viewer 测试均未执行财务写入。JDK21 为已测构建环境；后续复现仍建议 JDK21。
+
+### P0-2 — 不确定发票写入的自助只读核验
+- 状态：DONE；认领人：Coding Agent；2026-11-02。先保存 IN_PROGRESS、添加后端失败测试，再实现原子台账 task_id、本轮授权绑定及任务范围恢复、CSRF 只读核验、元数据审计和双前端手动入口。仅精确 VERIFIED、布尔 verified=true 且成功删除存储才清锁；其他结果保留锁且不重试写入。
+- 行为：`POST /api/demo/tasks/{taskId}/operations/{operationId}/verify` 使用现有 mutationLock，READ 权限及同一只读事务先验证任务归属，再按 task/user/enterprise/operation 精确查询台账及当前用途/备注。只有 VERIFIED 返回 UpdateResult；NOT_FOUND、DIVERGED 不返回财务内容。查询连接启用 query_only，不初始化 Schema、不调用 execute；每次有效核验追加 taskId/operationId/status 元数据，审计失败 HTTP 500。React 与实际静态 demo.js 均支持从 sessionStorage 恢复后手动核验；未知编号不请求，失败/异常/不匹配/非布尔核验/存储删除失败保留锁，普通查询仍可用。
+- 迁移：仅 invoice_operations 新增可空 task_id；构造写服务时检测旧表后 ALTER ADD COLUMN，重复初始化安全，不回填或猜测旧关联、不改业务表/种子。所有新写入的 task_id 与发票更新、台账插入同事务；Authorization、ApprovedWrite 和 TaskMemory 校验任务绑定，恢复调用同任务。旧无关联记录核验 NOT_FOUND；跨任务复用 operationId 写入拒绝，既有同任务幂等保留。
+- 精确变更文件：TASKS.md；src/main/java/com/taxagent/harness/demo/DemoController.java；src/main/java/com/taxagent/harness/runtime/AgentRuntime.java、FinanceAgent.java、TaskMemory.java；src/main/java/com/taxagent/harness/tool/InvoiceWriteService.java；src/main/resources/invoice-operations.sql、static/index.html、static/demo.js；src/test/java/com/taxagent/harness/DemoApiTest.java、InvoiceWriteServiceTest.java、FinanceAgentIntegrationTest.java；frontend/src/api.ts、App.tsx；frontend/tests/api.test.ts。无新依赖。
+- 后端证据：先行 `-Dtest=DemoApiTest#lostResponseCanBeVerifiedRepeatedlyWithoutFinancialWrites+verificationFailsClosedForMissingMismatchedLegacyAndDriftedOperations+verificationRequiresCsrfCanonicalIdsAndSuccessfulAudit`：3 项/3 失败/0 错误（端点缺失，15:50:45）。最终 `JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" -Dtest=DemoApiTest,InvoiceWriteServiceTest,FinanceAgentIntegrationTest test`：77/0/0/0（15:57:15）；同命令去掉 -Dtest 全量：214/0/0/0（15:57:39）。覆盖丢响应、重复只读/数据库字节一致、任务/用户/企业隔离、READ 权限复检、漂移/发票缺失、旧库迁移、CSRF/非法 ID、锁串行及已提交结果的审计失败。
+- 前端证据：frontend 下 `npm run verify`（依次 typecheck、lint、npm test、build）全部通过，Vitest 71 项（15:56:05）；实际 demo.js VM 与 React 使用的 helper 覆盖刷新恢复及全部失败保锁分支，无自动重执行；`node --check src/main/resources/static/demo.js`、`git diff --check` 通过。沙箱 shell 临时文件、Vitest 临时目录受限后获准在沙箱外离线运行；现有 Mockito 动态 agent 警告不影响通过。
+- 保留核对：P0-1 verifiedWrite 生产门控原文未改，全部原测试保留，仅必要的 taskId 签名适配；P0-1 工作记录原文完整。审计docs 目录内21个文件 SHA-256 与开工基线一致，仍未跟踪；冻结契约、README、计划/发布材料、业务字段/规则/权限/种子均未编辑。main / HEAD 6af75cebbf60205375db81af6a5ff25ec212d829 不变，暂存区为空，无提交/推送、外部服务/网络、凭证或现有业务库访问，无构建清理。
+- 剩余边界：无本任务阻塞；现有锁仅保证单 JVM 内串行，核验反映查询时的快照，之后外部修改不由本入口阻止。旧无关联、NOT_FOUND、DIVERGED 或损坏存储仍需人工核查，绝不据此重试。React 验证为 helper/类型/构建覆盖，静态页为实际脚本 VM 覆盖，未做真实浏览器手工验收。
+
+### P0-1 — 本轮批准写入的任务完成证据门控
+- 状态：DONE；认领人：Coding Agent；完成日期：2026-11-02。仅后端 runtime 与测试；先添加回归并验证失败，再以本轮服务端写入结果限制 Finish，普通查询保持可完成。不得以模型文本、参数或旧轮历史证明保存；保留精确授权、权限、幂等、审计及恢复行为。不改审计docs、前端、数据库契约或其他计划，不提交推送。验收：JDK21 离线定向/全量 Maven、diff --check 及精确状态核对。
+- 验收完成：DONE。仅 AgentRuntime.java、FinanceAgentIntegrationTest.java 及本记录；证据为本轮 execute 的强类型 UpdateResult（verified、发票键及批准值匹配），operationId 沿用 execute 的可信授权绑定，不存储跨轮标志；缺证据的 Finish 返回 WRITE_NOT_VERIFIED/ACTIVE 和安全错误文本，Ask 及普通查询行为保留。
+- 命令：`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home mvn -o -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" -Dtest=FinanceAgentIntegrationTest test`；修复前22项/4失败/0错误；最终23项全通过。相同命令移除 `-Dtest=FinanceAgentIntegrationTest` 后全量206项/0失败/0错误/0跳过（15:38:35 +08:00）。新增8项覆盖无调用、模型伪造核验文本、参数伪造、旧轮证据、普通 Finish、清空及未核验/不匹配返回；沿用真实保存、精确参数、失败回滚及恢复用例。最初沙箱因JUnit临时目录权限失败，获准离线重跑；中间修正安全错误文本断言及 mock 未初始化台账的测试夹具，无生产额外改动。
+- 收尾：git diff --check 通过；审计docs 全部22文件SHA-256与开始一致，仍未跟踪；无外网、凭证或现有业务库访问，无清理、暂存、提交或推送。无本任务未解决项；既有超时未知结果继续走只查询恢复，不自动重试。
 
 ### T07 — 模型驱动 Agent Runtime 与 Tool Calling
 - 状态：DONE；认领人：Coding Agent；完成日期：2026-10-30。先读 TASKS/README/业务及工具契约、Schema、PermissionGuard、只读服务和 Git 状态，确认 T04 DONE/T07 TODO；先保存 IN_PROGRESS 和计划后编码。
@@ -117,7 +150,7 @@
 
 - T02 按本次用户授权采用 Java 21 + Spring Boot + Maven + SQLite JDBC + JUnit 5；SQLite 仅预备依赖，数据导入属于 T03。
 - T01 已完成本地官方材料核对，后续以 docs/BUSINESS_CONTRACT.md 为依据；其中待核实项不得作为已确认规则。
-- Git 当前 main 无上游跟踪分支，且插件状态有未展开的受限变更，**不要在未确认前清理或盲目提交**。
+- Git 当前 `main` 已跟踪 `origin/main`；2026-11-02 交接提交前基线为 `6af75cebbf60205375db81af6a5ff25ec212d829`。本轮仅提交明确列出的 24 个修改文件和 2 个新增文件；本地 `审计docs/` 目录不纳入远端。
 
 ### T04 — 工具 Schema、错误码与权限契约
 - 状态：DONE；认领人：ChatGPT / Coding Agent；完成日期：2026-10-30。沿用已有 IN_PROGRESS，未重新认领或重置。

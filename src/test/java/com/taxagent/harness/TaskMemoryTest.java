@@ -137,8 +137,71 @@ class TaskMemoryTest {
             assertThat(data.at("/data/missing").size()).isEqualTo(4);
             return new Finish("根据当前查询完成");
         }));
-        assertThat(fresh.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(fresh.result().status()).isEqualTo(AgentRuntime.Status.NEEDS_INPUT);
+        assertThat(fresh.task().status()).isEqualTo(Status.WAITING_USER);
+        assertThat(fresh.task().pending()).containsExactly("month", "purpose");
+        assertThat(fresh.result().text()).contains("month", "purpose");
         assertThat(count.get()).isEqualTo(2);
+    }
+    @Test void modelFinishCannotCompleteWhileRequiredFieldsRemainAndCanResumeAfterSupplement() {
+        var task = memory.start(u1, "C001", "核查 F002 发票用途", List.of("F002.purpose"));
+        var first = memory.continueTask(u1, "C001", task.id(), "检查用途", runtime(r -> new Finish("已经全部完成")));
+        assertThat(first.result().status()).isEqualTo(AgentRuntime.Status.NEEDS_INPUT);
+        assertThat(first.result().text()).contains("F002.purpose", "补充").doesNotContain("已经全部完成");
+        assertThat(first.task().status()).isEqualTo(Status.WAITING_USER);
+        assertThat(first.task().pending()).containsExactly("F002.purpose");
+        assertThat(first.task().question()).isEqualTo(first.result().text());
+        var supplemented = memory.supplement(u1, "C001", task.id(), first.task().version(),
+                Map.of("F002.purpose", explicit("办公室采购")));
+        assertThat(supplemented.status()).isEqualTo(Status.ACTIVE);
+        assertThat(supplemented.pending()).isEmpty();
+        var resumed = memory.continueTask(u1, "C001", task.id(), "继续完成核查", runtime(r -> {
+            assertThat(r.userMessage()).contains("办公室采购", "继续完成核查");
+            return new Finish("补充后核查完成");
+        }));
+        assertThat(resumed.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(resumed.task().status()).isEqualTo(Status.COMPLETED);
+        assertThat(resumed.task().pending()).isEmpty();
+        assertThat(resumed.task().question()).isNull();
+    }
+    @Test void verifiedApprovedWriteResolvesOnlyTheMatchingPendingField() {
+        var task = memory.start(u1, "C001", "补充并核查发票用途", List.of("F002.purpose", "F004.purpose"));
+        var update = new ToolContract.InvoiceUpdate(new ToolContract.InvoiceKey("C001", "F002"),
+                Map.of("purpose", "办公室采购"));
+        String operation = UUID.randomUUID().toString();
+        var writer = new InvoiceWriteService(database);
+        var authorization = InvoiceWriteService.authorizeExplicitRequest(u1, task.id(), operation, update,
+                InvoiceWriteService.Intent.SAVE_NOW);
+        var model = new java.util.concurrent.atomic.AtomicInteger();
+        var agent = new AgentRuntime(r -> model.getAndIncrement() == 0
+                ? new Call("save-f002", "update_invoice",
+                    """
+                    {"key":{"enterprise_id":"C001","invoice_id":"F002"},"changes":{"purpose":"办公室采购"}}
+                    """)
+                : new Finish("已完成"), new ReadOnlyFinanceTools(database), new RuleService(database),
+                AgentRuntime.Limits.defaults(), writer);
+        var result = memory.continueTask(u1, "C001", task.id(), "现在保存 F002 的明确用途并继续核查", agent,
+                new AgentRuntime.ApprovedWrite(task.id(), operation, update, authorization));
+        assertThat(result.result().status()).isEqualTo(AgentRuntime.Status.NEEDS_INPUT);
+        assertThat(result.task().status()).isEqualTo(Status.WAITING_USER);
+        assertThat(result.task().pending()).containsExactly("F004.purpose");
+        assertThat(result.task().question()).contains("F004.purpose");
+        assertThat(new ReadOnlyFinanceTools(database).queryInvoices(u1, new ToolContract.Query("C001", "2026-09"))
+                .rows().stream().filter(row -> row.key().invoiceId().equals("F002")).findFirst().orElseThrow().purpose())
+                .isEqualTo("办公室采购");
+        try (var c = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var s = c.createStatement(); var rows = s.executeQuery("SELECT count(*) FROM invoice_operations")) {
+            assertThat(rows.next()).isTrue();
+            assertThat(rows.getInt(1)).isEqualTo(1);
+        } catch (SQLException e) { throw new AssertionError(e); }
+    }
+    @Test void finishCompletesNormallyWhenTaskHasNoRequiredInputs() {
+        var task = memory.start(u1, "C001", "只查询九月发票", List.of());
+        var turn = memory.continueTask(u1, "C001", task.id(), "查询九月", runtime(r -> new Finish("查询完成")));
+        assertThat(turn.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(turn.task().status()).isEqualTo(Status.COMPLETED);
+        assertThat(turn.task().pending()).isEmpty();
+        assertThat(turn.task().question()).isNull();
     }
     @Test void modelInferenceDoesNotBecomePreferenceOrSuppliedFact() {
         var task = start();

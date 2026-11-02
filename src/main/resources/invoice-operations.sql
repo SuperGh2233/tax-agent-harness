@@ -6,5 +6,6 @@ CREATE TABLE IF NOT EXISTS invoice_operations (
  payload TEXT NOT NULL,
  purpose TEXT NOT NULL,
  remarks TEXT NOT NULL,
+ task_id TEXT,
  FOREIGN KEY(enterprise_id,invoice_id) REFERENCES invoices(enterprise_id,id)
 );

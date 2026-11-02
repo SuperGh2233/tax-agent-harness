@@ -17,6 +17,10 @@ function initialOperation() {
   return unknown;
 }
 let operation = initialOperation();
+function canVerifyOperation() {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  return !!operation && uuid.test(operation.id) && uuid.test(operation.taskId);
+}
 const operationWarning = document.createElement('p');
 operationWarning.setAttribute('role', 'status');
 $('verification').after(operationWarning);
@@ -25,6 +29,7 @@ function renderOperation() {
     ? '保存结果待核验 · operationId=' + operation.id + ' · taskId=' + operation.taskId + '；请核查审计与数据库，禁止重复保存。'
     : '';
   $('approve').disabled = busy || !!operation;
+  $('verifyOperation').disabled = busy || !selected || !canVerifyOperation();
 }
 function rememberOperation(value) {
   // Do not unlock this page unless the persisted lock was successfully removed.
@@ -123,6 +128,15 @@ $('select').onclick = () => action(async () => {
 });
 $('logout').onclick = () => action(async () => { await api('/session','DELETE'); resetViews(); identity(await api('/session')); });
 $('refresh').onclick = () => action(refresh);
+$('verifyOperation').onclick = () => action(async () => {
+  if (!selected || !canVerifyOperation()) throw new Error('待核验编号无法识别或未选择身份；保留锁定，请人工核查。');
+  const pending = operation;
+  const result = await api('/tasks/' + encodeURIComponent(pending.taskId) + '/operations/' + encodeURIComponent(pending.id) + '/verify','POST');
+  if (result?.operationId !== pending.id || result?.status !== 'VERIFIED' || result?.verification?.verified !== true)
+    throw new Error('保存仍未核验；保留锁定。NOT_FOUND 不允许重试，DIVERGED 需人工核查。');
+  rememberOperation(null);
+  $('verification').textContent = 'VERIFIED · 已提交操作与当前发票快照一致；未重新执行写入。';
+});
 $('start').onclick = () => action(async () => {
   const pending = $('pending').value.split(',').map(x=>x.trim()).filter(Boolean);
   showTask(await api('/tasks','POST',{goal:$('goal').value,pending})); await refresh();
