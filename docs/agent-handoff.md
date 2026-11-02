@@ -167,7 +167,7 @@ npm run verify
 - 已修改但未暂存：24 个受跟踪文件。
 - 未跟踪状态项：3 个（`docs/agent-handoff.md`、一个测试文件、`审计docs/` 目录）。
 - 暂存：0。
-- 本次交接提交应纳入上述 24 个修改文件，以及 `docs/agent-handoff.md` 和 `MultiToolCallTest.java` 两个新文件；`审计docs/` 刻意排除，避免重复及过期的审计快照进入正式文档树。
+- 本次交接提交已包含上述 24 个修改文件，以及 `docs/agent-handoff.md` 和 `MultiToolCallTest.java` 两个新文件；`审计docs/` 刻意排除，避免重复及过期的审计快照进入正式文档树。
 
 24 个已修改文件：
 
@@ -179,7 +179,7 @@ npm run verify
 - `src/main/resources/invoice-operations.sql`、`static/demo.js`、`static/index.html`。
 - `src/test/java/com/taxagent/harness/DemoApiTest.java`、`FinanceAgentIntegrationTest.java`、`InvoiceWriteServiceTest.java`、`TaskMemoryTest.java`、`runtime/AnthropicMessagesClientTest.java`。
 
-两个新文件将随本次交接提交进入 GitHub：
+两个新文件已随本次交接提交纳入 GitHub 版本历史：
 
 - `docs/agent-handoff.md`（本交接说明）。
 - `src/test/java/com/taxagent/harness/runtime/MultiToolCallTest.java`（P0-3 批量工具回放回归测试）。
