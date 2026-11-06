@@ -35,6 +35,19 @@ public final class RuleService {
         });
     }
 
+    /** Model-facing read-only rule lookup: active versions effective on the explicit business date. */
+    public RuleQueryResult queryRules(PermissionGuard.Session session, RuleQuery query) {
+        if (query == null) throw invalid("Rule query required");
+        return transaction(false, c -> {
+            guard.require(c, session, query.enterpriseId(), PermissionGuard.Access.READ);
+            return new RuleQueryResult(rules(c, query.enterpriseId(), query.date()).stream()
+                    .map(rule -> new RuleSummary(rule.key(), rule.definition().name(),
+                            rule.definition().effectiveFrom(), rule.definition().status(),
+                            rule.definition().content()))
+                    .toList());
+        });
+    }
+
     /** All ordinary session mutations are denied, including U001 and self-declared admins. */
     public void manageRules(PermissionGuard.Session session, RuleRequest request) {
         if (request == null || request.action() == RuleAction.GET) throw invalid("Mutation required");

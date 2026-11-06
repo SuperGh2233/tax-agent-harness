@@ -193,3 +193,12 @@ npm run verify
 - 能恢复或重新建立隔离合成任务，不会误操作现有数据库。
 - 能解释 P0-1 / P0-2 / P0-3 的安全边界，并在修改时保留回归测试。
 - 所有未完成事项仍保持可见；只有证据完整后才把 T13 / 后续任务标为 DONE。
+
+## 11. 2026-11-06 本分支补充（未提交）
+
+- 模型：百度千帆 Token Plan 个人版，OpenAI 兼容 Base URL `https://qianfan.baidubce.com/v2/tokenplan/personal`，模型 `deepseek-v4.1-flash-1017`，`LLM_PROTOCOL=openai-chat`；客户端自动追加 `/chat/completions`，超时 60 秒。密钥只在本机 `.tools/model.env`，不入库、不写入本文件。
+- 适配真实供应商：DeepSeek 一轮返回 3 个 `tool_calls`（`parallel_tool_calls=false` 未生效）已按 `Batch` 执行；工具结果后的自然语言总结按 `Finish` 接受，但不构成写入证据。
+- 新增：`query_rules`/R004 引用；按本轮批准发布写工具；`ContextProjector` 记忆投影；审计 `ruleVersion/memorySource/durationMs` 与 scorecard；偏好 CLI/HTTP API/两套前端入口；turn 级 `requestId` 幂等；跨标签页操作锁；限速/请求体上限；审计 CSV 导出；Maven Wrapper；React 主入口 `/react-app/`（静态页回退）。
+- 真实 E2E：千帆 API 查询+R004、受控保存、跨轮补充保存通过；真实 Chrome 浏览器查询+R004、受控保存通过；浏览器内跨轮、≤5 分钟视频和最终包未完成。证据见 [REAL_E2E_20261106.md](evidence/REAL_E2E_20261106.md)。
+- 验证：关闭 Windows 临时目录清理后 Java 246/0/0/0；默认清理模式 1 个临时目录错误；前端 74/74；`mvn -DskipTests package` 成功。
+- 已按用户明确要求提交并推送到 `origin/work/zhanghengyuan1`；未合并 `main`，等待队友评审。

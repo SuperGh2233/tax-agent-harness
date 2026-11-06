@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { ApiError, canVerifyOperation, createAndRunFirstTurn, DemoApi, findOpenTask, isTerminalTaskStatus, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from '../src/api'
+import { ApiError, canVerifyOperation, createAndRunFirstTurn, DemoApi, findOpenTask, friendlyError, isTerminalTaskStatus, provenNotExecuted, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from '../src/api'
 import type { Exchange, Task, TurnView } from '../src/api'
 import { initialOperation } from '../src/App'
 // @ts-expect-error Node built-ins are available in Vitest; this browser project has no @types/node.
@@ -124,6 +124,27 @@ test('static page clears only a matching verified response and persists no finan
   expect(page.warnings[0].textContent).toBe('')
 })
 
+test('static page releases a proven not-executed approval and allows a new save', async () => {
+  const page = await staticPage()
+  page.fetcher.mockImplementationOnce(async () => Response.json({
+    operationId:'op-static', verification:null, errorCode:'WRITE_NOT_EXECUTED',
+    message:'本轮未执行保存；旧批准已结束，如需保存请重新确认', turn:null}))
+  await page.get('approve').onclick()
+  expect(page.storage.has('taxagent-pending-operation')).toBe(false)
+  expect(page.get('approve').disabled).toBe(false)
+  expect(page.get('error').textContent).toContain('本轮未执行保存')
+})
+
+test('static page keeps the lock when a dispatched write is unverified', async () => {
+  const page = await staticPage()
+  page.fetcher.mockImplementationOnce(async () => Response.json({
+    operationId:'op-static', verification:null, errorCode:'WRITE_NOT_VERIFIED',
+    message:'写入结果未核验；保留操作锁，请核查台账与发票', turn:null}))
+  await page.get('approve').onclick()
+  expect(page.storage.has('taxagent-pending-operation')).toBe(true)
+  expect(page.get('approve').disabled).toBe(true)
+})
+
 const pendingVerification = {id:'11111111-1111-4111-8111-111111111111',taskId:'22222222-2222-4222-8222-222222222222',unknown:true}
 const verificationModes = ['NOT_FOUND','DIVERGED','network','HTTP error','invalid JSON','wrong operation','nonboolean verified','false verified','missing status','null','remove failure','VERIFIED']
 function verificationResponse(mode: string) {
@@ -206,6 +227,20 @@ test('approved write remains blocked without matching verified readback, even if
   const verified = {...noHistory, verification: {key:{enterpriseId:'C001',invoiceId:'F002'},purpose:'a',remarks:'',verified:true}}
   expect(verifiedWriteResult(verified, 'different-op')).toBe(false)
   expect(verifiedWriteResult(verified, 'op-1')).toBe(true)
+})
+
+test('proven not-executed terminal receipt is the only non-verified result that releases the approval', () => {
+  const notExecuted: TurnView = {
+    turn: {task: {id: 'task', status: 'ACTIVE', version: 1, goal: 'test', pending: [], supplied: {}, question: null, recentTools: []}, result: {status: 'ERROR', text: '本次请求未成功完成：WRITE_NOT_EXECUTED', errorCode: 'WRITE_NOT_EXECUTED', history: []}},
+    verification: null, errorCode: 'WRITE_NOT_EXECUTED', message: '本轮未执行保存；旧批准已结束，如需保存请重新确认', operationId: 'op-1',
+  }
+  expect(provenNotExecuted(notExecuted, 'op-1')).toBe(true)
+  expect(provenNotExecuted(notExecuted, 'other')).toBe(false)
+  expect(provenNotExecuted({...notExecuted, verification: {key:{enterpriseId:'C001',invoiceId:'F002'},purpose:'a',remarks:'',verified:false}}, 'op-1')).toBe(false)
+  expect(provenNotExecuted({...notExecuted, errorCode: 'TOOL_TIMEOUT'}, 'op-1')).toBe(false)
+  expect(provenNotExecuted({...notExecuted, errorCode: 'WRITE_NOT_VERIFIED'}, 'op-1')).toBe(false)
+  expect(friendlyError('WRITE_NOT_EXECUTED')).toContain('本轮未执行保存')
+  expect(friendlyError('WRITE_NOT_VERIFIED')).toContain('写入结果未核验')
 })
 
 test('only completed and cancelled tasks are terminal history; active and waiting tasks remain resumable', () => {

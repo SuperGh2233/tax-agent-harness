@@ -3,10 +3,15 @@ const $ = id => document.getElementById(id);
 let csrf = '', active = null, selected = null, busy = false;
 const pretty = value => JSON.stringify(value, null, 2);
 const operationKey = 'taxagent-pending-operation';
+const sharedOperationKey = 'taxagent-pending-operation-shared';
+let channel = null;
 function initialOperation() {
   const unknown = {id:'unknown', taskId:'unknown', unknown:true};
   try {
-    const raw = sessionStorage.getItem(operationKey);
+    let raw = sessionStorage.getItem(operationKey);
+    if (raw === null) {
+      try { raw = window.localStorage?.getItem(sharedOperationKey) ?? null; } catch { /* no shared storage */ }
+    }
     if (raw === null) return null;
     const value = JSON.parse(raw);
     if (value && typeof value === 'object' && !Array.isArray(value)
@@ -33,13 +38,50 @@ function renderOperation() {
 }
 function rememberOperation(value) {
   // Do not unlock this page unless the persisted lock was successfully removed.
-  if (!value) sessionStorage.removeItem(operationKey);
+  if (!value) {
+    sessionStorage.removeItem(operationKey);
+    try { window.localStorage?.removeItem(sharedOperationKey); } catch { /* session lock remains */ }
+  }
   operation = value;
   renderOperation();
   // If persistence fails, do not send a write that would lose its lock on reload.
-  if (value) sessionStorage.setItem(operationKey, JSON.stringify(value));
+  if (value) {
+    sessionStorage.setItem(operationKey, JSON.stringify(value));
+    try { window.localStorage?.setItem(sharedOperationKey, JSON.stringify(value)); } catch { /* session lock remains */ }
+  }
+  if (channel) channel.postMessage({operation:value});
+}
+function sharedOperation(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || typeof value.id !== 'string' || !value.id.trim()
+      || typeof value.taskId !== 'string' || !value.taskId.trim() || value.unknown !== true) return null;
+  return {id:value.id, taskId:value.taskId, unknown:true};
+}
+function applySharedOperation(value) {
+  if (value === null) {
+    try { sessionStorage.removeItem(operationKey); } catch { return; }
+    operation = null; renderOperation(); return;
+  }
+  const parsed = sharedOperation(value);
+  if (!parsed) return;
+  try { sessionStorage.setItem(operationKey, JSON.stringify(parsed)); } catch { return; }
+  operation = parsed; renderOperation();
 }
 renderOperation();
+try {
+  if (typeof window.BroadcastChannel !== 'undefined') {
+    channel = new window.BroadcastChannel('taxagent-operation-lock');
+    channel.onmessage = event => applySharedOperation(event.data && typeof event.data === 'object'
+      && 'operation' in event.data ? event.data.operation : null);
+  }
+} catch { channel = null; }
+try {
+  window.addEventListener('storage', event => {
+    if (event.key !== sharedOperationKey) return;
+    if (event.newValue === null) { applySharedOperation(null); return; }
+    try { applySharedOperation(JSON.parse(event.newValue)); } catch { /* ignore malformed */ }
+  });
+} catch { /* tests / older browsers */ }
 function entry(parent, label, content, style = '') {
   const node = document.createElement('div'); node.className = 'entry ' + style;
   node.textContent = label + '\n' + (typeof content === 'string' ? content : pretty(content));
@@ -87,6 +129,31 @@ async function refresh() {
   const events = await api('/audit'); $('audit').replaceChildren();
   events.forEach(event => entry('audit', event.time + ' · ' + event.outcome, event, event.verified ? 'verified' : ''));
 }
+async function loadPreferences() {
+  if (!selected) throw new Error('请先选择身份与企业');
+  const preferences = await api('/preferences');
+  const box = $('preferences'); box.replaceChildren();
+  const entries = Object.entries(preferences);
+  if (!entries.length) { box.textContent = '暂无长期偏好'; return; }
+  entries.forEach(([name, statement]) => {
+    const row = document.createElement('div'); row.className = 'entry';
+    row.textContent = name + '：' + statement.value + '\n原话：' + statement.userRequest;
+    const remove = document.createElement('button'); remove.className = 'btn secondary'; remove.textContent = '删除';
+    remove.onclick = () => action(async () => {
+      await api('/preferences/' + encodeURIComponent(name), 'DELETE');
+      await loadPreferences();
+    });
+    row.append(remove); box.append(row);
+  });
+}
+$('refreshPreferences').onclick = () => action(loadPreferences);
+$('savePreference').onclick = () => action(async () => {
+  const name = $('prefName').value.trim(), value = $('prefValue').value, userRequest = $('prefQuote').value;
+  if (!name || !value.trim() || !userRequest.trim()) throw new Error('名称、明确值和原话都必须填写');
+  await api('/preferences', 'POST', {name, value, userRequest});
+  $('prefName').value = ''; $('prefValue').value = ''; $('prefQuote').value = '';
+  await loadPreferences();
+});
 function requireTask() { if (!active || !selected) throw new Error('请先选择企业并发起或恢复任务'); }
 function preview() {
   $('preview').textContent = pretty({enterprise:selected?.enterprise || '', invoice:$('invoice').value,
@@ -106,6 +173,7 @@ function showTurn(result) {
     });
   }
   $('verification').textContent = result.message + '\n' + pretty({operationId:result.operationId, databaseReadback:result.verification});
+  $('modelInput').textContent = result.modelInput || '尚无';
   if (result.verification?.verified) entry('chat','数据库回读核验 verified=true',result.verification,'verified');
   if (result.errorCode) {
     const modelErrors = {
@@ -164,6 +232,7 @@ $('approve').onclick = () => action(async () => {
     message:'用户在结构化确认面板明确要求现在保存以下精确修改，保存后请查询发票与用途缺口核对：' + pretty(exact),
     approval:{operationId,invoiceId,changes,confirmed:true}});
   if (result?.operationId === operationId && result?.verification?.verified === true) rememberOperation(null);
+  else if (result?.operationId === operationId && result?.errorCode === 'WRITE_NOT_EXECUTED' && result?.verification === null) rememberOperation(null);
   showTurn(result); await refresh();
 });
 action(async () => { identity(await api('/session')); await refresh(); });

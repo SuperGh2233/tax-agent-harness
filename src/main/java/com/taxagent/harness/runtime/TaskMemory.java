@@ -22,7 +22,10 @@ public final class TaskMemory {
     public record Context(Task task, Map<String, Input> preferences) {
         public Context { preferences = Map.copyOf(preferences); }
     }
-    public record Turn(Task task, AgentRuntime.Result result) {}
+    public record Turn(Task task, AgentRuntime.Result result, String memorySource, String modelInput) {
+        public Turn(Task task, AgentRuntime.Result result) { this(task, result, null, null); }
+        public Turn(Task task, AgentRuntime.Result result, String memorySource) { this(task, result, memorySource, null); }
+    }
     private static final ObjectMapper JSON = new ObjectMapper();
     private final String url;
     private final PermissionGuard guard = new PermissionGuard();
@@ -119,9 +122,8 @@ public final class TaskMemory {
         var context = load(session, enterprise, id); var old = context.task(); open(old, old.version());
         if (approval != null && !id.equals(approval.taskId()))
             throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Approval must belong to this task");
-        String memory;
-        try { memory = JSON.writeValueAsString(context); } catch (Exception e) { throw storage(e); }
-        var result = runtime.runScoped(session, enterprise, message, memory, approval);
+        var projection = ContextProjector.project(context, message);
+        var result = runtime.runScoped(session, enterprise, message, projection.memoryJson(), approval);
         return access(session, enterprise, c -> {
             var current = get(c, session, enterprise, id); open(current, old.version());
             var summaries = result.history().stream().map(e -> {
@@ -149,7 +151,9 @@ public final class TaskMemory {
             };
             var next = new Task(id, status, old.version() + 1, old.goal(), pending, old.supplied(),
                     effective.status() == AgentRuntime.Status.NEEDS_INPUT ? effective.text() : null, summaries);
-            save(c, session, enterprise, old, next); return new Turn(next, effective);
+            save(c, session, enterprise, old, next);
+            return new Turn(next, effective, projection.truncated() ? "task-memory+projection" : "task-memory",
+                    projection.memoryJson());
         });
     }
     private static List<String> remainingPending(List<String> pending, AgentRuntime.Result result,

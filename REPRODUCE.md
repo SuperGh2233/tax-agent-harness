@@ -73,7 +73,7 @@ env -u LLM_ENDPOINT -u LLM_API_KEY -u LLM_MODEL TAXAGENT_DATABASE="$T13_DEMO_DB"
   '-Dspring-boot.run.arguments=--server.address=127.0.0.1 --server.port=8080'
 ```
 
-`.env` 不会自动加载；无需创建真实密钥文件。当前 T13 测试目标是 DashScope：`LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.8-flash`，通过 Anthropic Messages API 调用。GPT-6 Luna Max 的 Responses 路径（`reasoning.effort=max`、`store=false`、`parallel_tool_calls=false`）及完整 HTTPS `/chat/completions` 路径仍保留，endpoint 决定协议，不自动回退。`LLM_API_KEY` 仅在可信本机终端安全输入；详细启动步骤见 DEMO_SCRIPT。本轮仅完成离线 stub 测试，没有真实云模型调用；真实 E2E 范围已获用户授权，待撤销已暴露的凭证并在本机配置轮换密钥后执行，只能使用官方合成样本、独立临时 SQLite 与 loopback，不得使用 data/harness.db 或真实财务数据。
+`.env` 不会自动加载；无需把密钥写进仓库。当前真实模型使用百度千帆 Token Plan 个人版：OpenAI 兼容 Base URL `https://qianfan.baidubce.com/v2/tokenplan/personal`、模型 `deepseek-v4.1-flash-1017`、`LLM_PROTOCOL=openai-chat`；Anthropic 兼容 Base URL `https://qianfan.baidubce.com/anthropic/tokenplan/personal` 也保留。客户端会把 OpenAI Base URL 规范化为 `/chat/completions`。`LLM_API_KEY` 只在本机安全终端或工作区 `.tools/model.env` 中输入，绝不粘贴到聊天、日志、截图或仓库。2026-11-06 已通过真实千帆 API 三场景（查询+R004、受控保存、跨轮补充保存）和真实 Chrome 浏览器查询/受控保存；真实浏览器跨轮、视频和最终包仍未验证。只能使用官方合成样本、独立临时 SQLite 与 loopback，不得使用 data/harness.db 或真实财务数据。
 
 ## 5. 故障排查与证据
 
@@ -115,3 +115,32 @@ Qwen 单次 HTTP 请求与 AgentRuntime 等待上限为 60 秒，其他模型默
 - 真实 Qwen Demo API 只读跨轮流程通过：三项只读工具执行后，服务端将仍有 pending 的任务保持 WAITING_USER；用户结构化补充后，第二轮恢复并 COMPLETED。合成数据库财务表前后不变，`invoice_operations=0`，未调用 `update_invoice`。
 - 真实浏览器 UI 只读尝试已成功加载页面、选身份、创建任务、发送消息并执行三项只读工具，但模型最终总结阶段返回 `MODEL_TIMEOUT`；没有完成 UI 补充/恢复流程。最新代码已将首轮 effort 设为 medium、工具结果后的续接 effort 设为 low，但**新 JAR 尚未在真实服务重启后复验**。
 - 当前最新状态、未提交文件列表和下一步顺序见 [docs/agent-handoff.md](docs/agent-handoff.md)。T13 继续保持 IN_PROGRESS。
+
+## Windows / 本地管理 CLI（2026-11-05 补充）
+
+- 仓库已包含 Maven Wrapper：`mvnw.cmd -v` / `./mvnw -v`；首次运行会下载 Maven 3.9.9。
+- 受限沙箱或 Windows 下若 SQLite JDBC 报 `no sqlitejdbc in java.library.path`，给 JVM 指定可写临时目录：
+  `-Djava.io.tmpdir=<可写目录> -Dorg.sqlite.tmpdir=<可写目录>`。测试目录同理。
+- 规则管理 CLI（不启动 Web；命令执行后退出）：
+  ```sh
+  java -Djava.io.tmpdir=<tmp> -Dorg.sqlite.tmpdir=<tmp> -jar target/harness-0.0.1-SNAPSHOT.jar \
+    --taxagent.database=<db> --rules-list --enterprise=C001 --date=2026-09-15
+  java ... --rules-import --rule-id=R005 --version=1.0 --name=<名称> \
+    --effective-from=2026-10-01 --content-file=<正文文件> --enterprises=C001,C002
+  # 更新正文：用 --rules-update 导入新版本（版本不可原地改写）
+  java ... --rules-update --rule-id=R005 --version=1.1 --name=<名称> \
+    --effective-from=2026-10-01 --content-file=<新正文文件> --enterprises=C001,C002
+  java ... --rules-disable --rule-id=R005 --version=1.0
+  ```
+- 长期偏好 CLI（按用户和企业隔离，仅限明确输入）：
+  ```sh
+  java ... --prefs-list --enterprise=C001
+  java ... --prefs-put --enterprise=C001 --name=style --value=简洁 --user-request="用户原话"
+  java ... --prefs-delete --enterprise=C001 --name=style
+  ```
+- 偏好也提供 HTTP：`GET/POST /api/demo/preferences`、`DELETE /api/demo/preferences/{name}`；POST 需要 CSRF。
+- `scripts/secret_scan.py` 只是打包前的模式扫描，不是秘密证明；仍须人工审阅压缩包每个条目。
+- React 主入口（可选，需要 Node/npm）：先启动后端，再执行
+  `powershell -ExecutionPolicy Bypass -File scripts/build_frontend.ps1`。脚本会执行 `npm run verify` 并把 `frontend/dist`
+  暂存到 `src/main/resources/static/react-app/`（该目录在 `.gitignore` 中）；重新 `mvn package` 后，根路径优先跳转
+  `/react-app/`，静态页保留为只读回退。不要把 `frontend/node_modules` 或 `frontend/dist` 放入交付包。

@@ -48,11 +48,28 @@ class RuleServiceTest {
         assertThat(check("C001").missing()).hasSize(4).doesNotContain(new InvoiceKey("C001","F002"));
         assertThat(check("C002").missing()).contains(new InvoiceKey("C002","F002"));
     }
+    @Test void modelRuleLookupReturnsActiveVersionedRulesAndR004() {
+        var c001 = service.queryRules(user, new RuleQuery("C001", september));
+        assertThat(c001.rules()).extracting(r -> r.key().ruleId()+" "+r.key().version())
+                .containsExactlyInAnyOrder("R001 1.0","R002 2.0","R004 1.0");
+        var r004 = c001.rules().stream().filter(r -> r.key().ruleId().equals("R004")).findFirst().orElseThrow();
+        assertThat(r004.name()).isEqualTo("银行资料说明");
+        assertThat(r004.status()).isEqualTo(RuleStatus.启用);
+        assertThat(r004.content()).contains("不能据此推断某张发票已经付款");
+        var c002 = service.queryRules(user, new RuleQuery("C002", september));
+        assertThat(c002.rules()).extracting(r -> r.key().ruleId()+" "+r.key().version())
+                .containsExactlyInAnyOrder("R001 1.0","R003 1.0","R004 1.0");
+        var earlier = service.queryRules(user, new RuleQuery("C001", LocalDate.of(2026, 8, 31)));
+        assertThat(earlier.rules()).extracting(r -> r.key().ruleId()+" "+r.key().version())
+                .containsExactlyInAnyOrder("R001 1.0","R004 1.0");
+    }
     @Test void permissionsAndNoSessionManagement() {
         var reader = new PermissionGuard.Session("U002");
         assertThat(service.checkInvoicePurpose(reader,new PurposeCheck("C001","2026-09")).missing()).hasSize(5);
         assertThat(service.queryRules(reader,"C001",null)).isNotEmpty();
         fails(ErrorCode.PERMISSION_DENIED, () -> service.queryRules(reader,"C002",null));
+        fails(ErrorCode.PERMISSION_DENIED, () -> service.queryRules(reader, new RuleQuery("C002", september)));
+        fails(ErrorCode.PERMISSION_DENIED, () -> service.queryRules(user, new RuleQuery("C999", september)));
         fails(ErrorCode.PERMISSION_DENIED, () -> service.checkInvoicePurpose(reader,new PurposeCheck("C002","2026-09")));
         fails(ErrorCode.AUTHENTICATION_REQUIRED, () -> service.queryRules(null,"C001",null));
         for (String id : new String[]{"U001","U002","admin"})

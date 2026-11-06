@@ -13,7 +13,7 @@ class ToolSchemaTest {
     final ObjectMapper json = new ObjectMapper();
 
     @Test void canonicalDefinitionsMatchRecordsAndAreClosed() {
-        for (var type : List.of(ToolContract.Query.class, ToolContract.PurposeCheck.class,
+        for (var type : List.of(ToolContract.Query.class, ToolContract.PurposeCheck.class, ToolContract.RuleQuery.class,
                 ToolContract.InvoiceKey.class, ToolContract.RuleKey.class, ToolContract.InvoiceUpdate.class,
                 ToolContract.StateRequest.class, ToolContract.RuleDefinition.class, ToolContract.RuleRequest.class)) {
             var definition = root.path("$defs").path(type.getSimpleName());
@@ -44,6 +44,9 @@ class ToolSchemaTest {
             "Query|{\"enterprise_id\":\"C001\",\"month\":\"2026-13\"}|false",
             "Query|{\"enterprise_id\":\"C001\",\"month\":\"2026-09\",\"user_id\":\"U001\"}|false",
             "PurposeCheck|{\"enterprise_id\":\"C001\",\"month\":\"2026-08\"}|false",
+            "RuleQuery|{\"enterprise_id\":\"C001\",\"date\":\"2026-09-15\"}|true",
+            "RuleQuery|{\"enterprise_id\":\"C001\",\"date\":\"2026-13-01\"}|false",
+            "RuleQuery|{\"enterprise_id\":\"C001\",\"date\":\"2026-09-15\",\"user_id\":\"U001\"}|false",
             "InvoiceUpdate|{\"key\":{\"enterprise_id\":\"C001\",\"invoice_id\":\"F001\"},\"changes\":{\"purpose\":\"\"}}|true",
             "InvoiceUpdate|{\"key\":{\"invoice_id\":\"F001\"},\"changes\":{\"purpose\":\"x\"}}|false",
             "InvoiceUpdate|{\"key\":{\"enterprise_id\":\"C001\",\"invoice_id\":\"F001\"},\"changes\":{\"seller\":\"x\"}}|false",

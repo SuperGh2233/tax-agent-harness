@@ -51,4 +51,20 @@ class OpenAiCompatibleClientTest {
             assertThatThrownBy(() -> OpenAiCompatibleClient.parse(invalid)).isInstanceOf(Exception.class);
         }
     }
+    @Test void acceptsProseAfterToolResultsAsFinishButNeverAsWriteEvidence() throws Exception {
+        String prose = "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"查询完成，共 5 张发票缺用途。\"}}]}";
+        assertThat(OpenAiCompatibleClient.parse(prose)).isEqualTo(new Finish("查询完成，共 5 张发票缺用途。"));
+        String fenced = "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"```json\\n{\\\"kind\\\":\\\"finish\\\",\\\"text\\\":\\\"完成\\\"}\\n```\"}}]}";
+        assertThat(OpenAiCompatibleClient.parse(fenced)).isEqualTo(new Finish("完成"));
+    }
+    @Test void parsesParallelChatToolCallsAsABatch() throws Exception {
+        String parallel = "{\"choices\":[{\"finish_reason\":\"tool_calls\",\"message\":{\"tool_calls\":["
+                + "{\"id\":\"a\",\"type\":\"function\",\"function\":{\"name\":\"query_invoices\",\"arguments\":\"{}\"}},"
+                + "{\"id\":\"b\",\"type\":\"function\",\"function\":{\"name\":\"query_bank_entries\",\"arguments\":\"{}\"}},"
+                + "{\"id\":\"c\",\"type\":\"function\",\"function\":{\"name\":\"check_invoice_purpose\",\"arguments\":\"{}\"}}"
+                + "]}}]}";
+        assertThat(OpenAiCompatibleClient.parse(parallel)).isInstanceOfSatisfying(Batch.class,
+                batch -> assertThat(batch.calls()).extracting(Call::name)
+                        .containsExactly("query_invoices", "query_bank_entries", "check_invoice_purpose"));
+    }
 }

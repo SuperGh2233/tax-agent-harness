@@ -17,6 +17,8 @@ public class HarnessApplication {
             System.out.println("Initialized (existing records preserved): " + java.nio.file.Path.of(path).toAbsolutePath());
             return;
         }
+        if (java.util.Arrays.stream(args).anyMatch(arg -> arg.startsWith("--rules-") || arg.startsWith("--prefs-")))
+            System.setProperty("spring.main.web-application-type", "none");
         SpringApplication.run(HarnessApplication.class, args);
     }
 }

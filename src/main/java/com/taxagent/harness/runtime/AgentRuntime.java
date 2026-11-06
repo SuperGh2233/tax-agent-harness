@@ -10,7 +10,8 @@ import static com.taxagent.harness.runtime.LlmClient.*;
 /** Model-driven request loop; trusted identity and write capabilities stay outside model arguments. */
 public final class AgentRuntime {
     private static final Map<String, String> DEFINITIONS = Map.of(
-            "query_invoices", "Query", "query_bank_entries", "Query", "check_invoice_purpose", "PurposeCheck");
+            "query_invoices", "Query", "query_bank_entries", "Query",
+            "check_invoice_purpose", "PurposeCheck", "query_rules", "RuleQuery");
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules()
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
     public record Limits(int maxSteps, Duration timeout, int modelRetries, Set<String> allowedTools) {
@@ -43,11 +44,14 @@ public final class AgentRuntime {
         this.rules = Objects.requireNonNull(rules); this.limits = Objects.requireNonNull(limits);
     }
     public List<Tool> tools() {
+        return tools(false);
+    }
+    private List<Tool> tools(boolean writeAllowed) {
         var defs = ToolContract.schema().required("$defs");
         var tools = new ArrayList<Tool>();
         limits.allowedTools().stream().sorted()
                 .map(name -> new Tool(name, defs.required(DEFINITIONS.get(name)).deepCopy())).forEach(tools::add);
-        if (writer != null) {
+        if (writer != null && writeAllowed) {
             var update = defs.required("InvoiceUpdate").deepCopy();
             // A function parameters document is its own root: resolve the canonical local key ref.
             ((com.fasterxml.jackson.databind.node.ObjectNode) update.required("properties"))
@@ -78,6 +82,7 @@ public final class AgentRuntime {
         if (message == null || message.isBlank()) return error("INVALID_ARGUMENT", history);
         String toolError = null;
         boolean verifiedWrite = false;
+        boolean writeDispatched = false;
         // Per-request worker: cancellation never blocks the caller waiting for an uncooperative client.
         var worker = Executors.newSingleThreadExecutor(r -> { var t = new Thread(r, "agent-request"); t.setDaemon(true); return t; });
         try {
@@ -85,7 +90,7 @@ public final class AgentRuntime {
                 Decision decision = null;
                 for (int attempt = 0; attempt <= limits.modelRetries(); attempt++) {
                     try {
-                        var request = new Request(message, tools(), history);
+                        var request = new Request(message, tools(approval != null), history);
                         decision = bounded(worker, () -> model.next(request));
                         if (decision == null) throw new IllegalArgumentException("Empty model decision");
                         break;
@@ -106,6 +111,7 @@ public final class AgentRuntime {
                         catch (Exception e) { return error("INVALID_ARGUMENT", history); }
                     }
                     for (var call : calls) {
+                    long started = System.nanoTime();
                     ToolContract.Response<?> response;
                     try {
                         if (!limits.allowedTools().contains(call.name()) && !(writer != null && call.name().equals("update_invoice")))
@@ -115,12 +121,17 @@ public final class AgentRuntime {
                                 ? ToolContract.decode(call.arguments(), ToolContract.InvoiceUpdate.class)
                                 : call.name().equals("check_invoice_purpose")
                                 ? ToolContract.decode(call.arguments(), ToolContract.PurposeCheck.class)
+                                : call.name().equals("query_rules")
+                                ? ToolContract.decode(call.arguments(), ToolContract.RuleQuery.class)
                                 : ToolContract.decode(call.arguments(), ToolContract.Query.class);
                         String requestedEnterprise = input instanceof ToolContract.Query q ? q.enterpriseId()
                                 : input instanceof ToolContract.InvoiceUpdate u ? u.key().enterpriseId()
+                                : input instanceof ToolContract.RuleQuery r ? r.enterpriseId()
                                 : ((ToolContract.PurposeCheck) input).enterpriseId();
                         if (enterprise != null && !enterprise.equals(requestedEnterprise))
                             throw new DomainException(ErrorCode.PERMISSION_DENIED, "Tool must use current task enterprise");
+                        if ("update_invoice".equals(call.name()) && approval != null
+                                && approval.update().equals(input)) writeDispatched = true;
                         Object data = bounded(worker, () -> switch (call.name()) {
                             case "update_invoice" -> {
                                 if (approval == null || !approval.update().equals(input))
@@ -130,6 +141,7 @@ public final class AgentRuntime {
                             case "query_invoices" -> finance.queryInvoices(session, (ToolContract.Query) input);
                             case "query_bank_entries" -> finance.queryBankEntries(session, (ToolContract.Query) input);
                             case "check_invoice_purpose" -> rules.checkInvoicePurpose(session, (ToolContract.PurposeCheck) input);
+                            case "query_rules" -> rules.queryRules(session, (ToolContract.RuleQuery) input);
                             default -> throw new IllegalStateException("Unreachable tool");
                         });
                         // Only this turn's server execution can supply evidence. execute above binds
@@ -147,13 +159,15 @@ public final class AgentRuntime {
                     } catch (TimeoutException e) { return error("TOOL_TIMEOUT", history);
                     } catch (InterruptedException e) { Thread.currentThread().interrupt(); return error("INTERRUPTED", history);
                     } catch (Exception e) { return error("TOOL_FAILURE", history); }
-                    history.add(new Exchange(call, JSON.writeValueAsString(response)));
+                    long durationMs = Math.max(0, (System.nanoTime() - started) / 1_000_000);
+                    history.add(new Exchange(call, JSON.writeValueAsString(response), durationMs));
                     }
                 } else {
                     if (toolError != null) return error(toolError, history);
                     if (decision instanceof Ask ask) return new Result(Status.NEEDS_INPUT, ask.text(), null, history);
                     if (decision instanceof Finish finish) {
-                        if (approval != null && !verifiedWrite) return error("WRITE_NOT_VERIFIED", history);
+                        if (approval != null && !verifiedWrite)
+                            return error(writeDispatched ? "WRITE_NOT_VERIFIED" : "WRITE_NOT_EXECUTED", history);
                         return new Result(Status.FINISHED, finish.text(), null, history);
                     }
                     return error("MODEL_FAILURE", history);
@@ -170,8 +184,11 @@ public final class AgentRuntime {
                 throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Batch must be read-only");
             Object input = call.name().equals("check_invoice_purpose")
                     ? ToolContract.decode(call.arguments(), ToolContract.PurposeCheck.class)
+                    : call.name().equals("query_rules")
+                    ? ToolContract.decode(call.arguments(), ToolContract.RuleQuery.class)
                     : ToolContract.decode(call.arguments(), ToolContract.Query.class);
             String requestedEnterprise = input instanceof ToolContract.Query q ? q.enterpriseId()
+                    : input instanceof ToolContract.RuleQuery r ? r.enterpriseId()
                     : ((ToolContract.PurposeCheck) input).enterpriseId();
             if (enterprise != null && !enterprise.equals(requestedEnterprise))
                 throw new DomainException(ErrorCode.PERMISSION_DENIED, "Batch enterprise mismatch");

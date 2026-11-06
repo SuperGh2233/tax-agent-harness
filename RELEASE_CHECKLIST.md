@@ -1,6 +1,6 @@
 # 比赛交付检查单
 
-T13 文档及缓存条件下独立复现已准备；**尚非已完成比赛提交**。截至 2026-11-02，JDK21 Java 全量 223 项、前端 Vitest 71 项通过；真实 Qwen 只读 API 跨轮通过，但真实浏览器 UI 最终回复仍有 MODEL_TIMEOUT，受控写入/核验 UI E2E 和空缓存全新 checkout 仍待验证。本次会将明确列出的代码与交接文档提交并推送到 `origin/main`，供队友从 GitHub 接手；这不代表比赛最终作品包或报名提交已完成。不会打包或推送数据库、密钥或录屏。队友接手先读 [开发交接说明](docs/agent-handoff.md)。完整命令见 [REPRODUCE.md](REPRODUCE.md)，手动演示见 [DEMO_SCRIPT.md](DEMO_SCRIPT.md)。
+T13 文档及缓存条件下独立复现已准备；**尚非已完成比赛提交**。截至 2026-11-06 的本分支：JDK21 Java 全量 246 项（默认 Windows 清理模式 1 个临时目录清理错误；关闭清理 246/0/0/0）、前端 Vitest 74 项通过；真实千帆 DeepSeek-V4.1-flash-1017 API 三场景（查询+R004 1.0、受控保存、跨轮补充保存）已通过，真实模型一轮返回 3 个 tool_use 已验证并适配；真实浏览器查询+R004 与受控保存已通过；浏览器内跨轮补充保存、视频、最终包仍未完成。本轮新增 query_rules/R004、偏好 CLI/API+UI、turn 幂等、跨标签页锁、模型配置化、批量 tool_use/自然语言总结兼容、限流/审计导出、Maven Wrapper；改动已按用户明确要求提交并推送到 `origin/work/zhanghengyuan1`（未合并 `main`）；这不代表比赛最终作品包或报名提交已完成。不会打包或推送数据库、密钥或录屏。队友接手先读 [开发交接说明](docs/agent-handoff.md)。完整命令见 [REPRODUCE.md](REPRODUCE.md)，手动演示见 [DEMO_SCRIPT.md](DEMO_SCRIPT.md)。
 
 ## 官方要求对照
 
@@ -30,10 +30,11 @@ T13 文档及缓存条件下独立复现已准备；**尚非已完成比赛提�
 4. 用户审阅关键运行记录，注明Fake/stub或真实供应商来源；只用官方模拟数据，移除密钥、个人信息和本地敏感路径。运行DB留本机，不进入交付。
 5. 用户依DEMO_SCRIPT在全新独立库预演、手动录≤5分钟视频，展示真实工具及保存回读；无模型时只能展示安全状态，不能剪成成功演示。用户手动回看、检查时长、音画和敏感信息。视频放仓库外、单独加入最终作品附件。
 6. 手工准备全新作品暂存目录，按下面白名单复制，检查每个条目后由用户压缩与提交。不要直接压缩工作目录或使用当前HEAD archive（会漏T12）。本任务不生成最终ZIP、不操作提交入口。
+7. 赛前门禁（必须人工确认）：`target/t10-evidence/scorecard.json` 中 `unauthorizedWrites` 和 `successWithoutVerification` 均为 0；审计中没有“未核验却提示保存成功”的事件；真实浏览器只读/写入 E2E、演示视频和去敏运行记录已人工复核。任一项不满足不得声称比赛提交完成。
 
 ## 文件白名单与禁止项
 
-源码材料：pom.xml、AGENTS.md、TASKS.md、README.md、REPRODUCE.md、RELEASE_CHECKLIST.md、DEMO_SCRIPT.md、.gitignore、无密钥.env.example、src/**、scripts/official_seed.py、docs/**、官方v1.1.0三份原件与既有项目计划书。只复制已人工核对的明确文件，src/docs内如有额外临时文件也要剔除。用户另备设计说明、去敏关键运行记录及手动视频附件；不默认这些已经存在。
+源码材料：pom.xml、mvnw、mvnw.cmd、.mvn/**、AGENTS.md、TASKS.md、README.md、REPRODUCE.md、RELEASE_CHECKLIST.md、DEMO_SCRIPT.md、.gitignore、无密钥.env.example、src/**、scripts/official_seed.py、scripts/secret_scan.py、docs/**、官方v1.1.0三份原件与既有项目计划书；React 工作台材料：frontend/package.json、frontend/package-lock.json、frontend/index.html、frontend/tsconfig.json、frontend/vite.config.ts、frontend/eslint.config.js、frontend/README.md、frontend/src/**、frontend/tests/**。若交付包含由 `scripts/build_frontend.ps1` 暂存的 `src/main/resources/static/react-app/**`，先确认该构建与当前源码一致；不要带入 `frontend/dist`、`frontend/node_modules` 或 `target/**`。只复制已人工核对的明确文件，src/docs/frontend 内如有额外临时文件也要剔除。用户另备设计说明、去敏关键运行记录及手动视频附件；不默认这些已经存在。
 
 禁止：.git、.env及变体（仅.env.example例外）、data/**及任意运行数据库/sidecar、.m2/**、target/**、虚拟环境、IDE缓存、临时财务CSV/XLSX/JSON、未经审阅日志/截图/录屏、真实密钥或证书。官方02_示例数据.xlsx和版本化seed JSON是明确允许的模拟原件/种子；不得一概用*.xlsx忽略误删官方数据。任何新财务导出即使不匹配忽略规则也不得加入白名单。
 

@@ -15,7 +15,7 @@ export interface Context { task: Task; preferences: Record<string, Statement> }
 export interface Exchange { call: {id: string; name: string; arguments: string}; resultJson: string }
 export interface Result { status: 'FINISHED' | 'NEEDS_INPUT' | 'ERROR'; text: string; errorCode: string | null; history: Exchange[] }
 export interface Verification { key: {enterpriseId: string; invoiceId: string}; purpose: string; remarks: string; verified: boolean }
-export interface TurnView { turn: {task: Task; result: Result} | null; verification: Verification | null; errorCode: string | null; message: string; operationId: string | null }
+export interface TurnView { turn: {task: Task; result: Result} | null; verification: Verification | null; errorCode: string | null; message: string; operationId: string | null; modelInput?: string | null }
 export interface Approval { operationId: string; invoiceId: string; changes: Partial<Record<'purpose' | 'remarks', string>>; confirmed: true }
 export interface OperationVerification { operationId: string; status: 'VERIFIED' | 'NOT_FOUND' | 'DIVERGED'; verification: Verification | null }
 export function canVerifyOperation(operation: {id: string; taskId: string} | null): boolean {
@@ -38,6 +38,13 @@ export function verifiedWriteResult(result: TurnView, operationId: string): bool
   return result.operationId === operationId && result.verification?.verified === true
 }
 
+/** A trusted terminal receipt: this approved turn ended without dispatching a write. */
+export function provenNotExecuted(result: TurnView, operationId: string): boolean {
+  return result.operationId === operationId
+    && result.errorCode === 'WRITE_NOT_EXECUTED'
+    && result.verification === null
+}
+
 export class ApiError extends Error {
   constructor(public code: string, public status = 0) { super(friendlyError(code)); }
 }
@@ -53,6 +60,8 @@ export function friendlyError(code: string) {
     TASK_STATE_SAVE_FAILED: '财务结果已返回，但任务状态保存失败；请核查回读，勿重复写入。',
     NETWORK_UNKNOWN: '未收到可确认的响应。结果未知，请核查审计和数据库，勿重复保存。',
     INVALID_RESPONSE: '服务端返回无法识别的响应，请核查服务与实际执行状态。',
+    WRITE_NOT_EXECUTED: '本轮未执行保存；旧批准已结束，如需保存请重新确认。',
+    WRITE_NOT_VERIFIED: '写入结果未核验；保留操作锁，请核查台账与发票。',
   }
   return `${messages[code] ?? '请求未完成，请核查服务、权限与实际执行结果。'} (${code})`
 }
@@ -82,6 +91,9 @@ export class DemoApi {
   load(id: string) { return this.request<Context>(`/tasks/${encodeURIComponent(id)}`) }
   supplement(id: string, version: number, statements: Record<string, Statement>) { return this.request<Task>(`/tasks/${encodeURIComponent(id)}/supplement`, 'POST', {version, statements}) }
   turn(id: string, message: string, approval?: Approval) { return this.request<TurnView>(`/tasks/${encodeURIComponent(id)}/turn`, 'POST', {message, ...(approval ? {approval} : {})}) }
+  preferences() { return this.request<Record<string, Statement>>('/preferences') }
+  putPreference(name: string, value: string, userRequest: string) { return this.request<Record<string, Statement>>('/preferences', 'POST', {name, value, userRequest}) }
+  deletePreference(name: string) { return this.request<Record<string, Statement>>(`/preferences/${encodeURIComponent(name)}`, 'DELETE') }
   verify(taskId: string, operationId: string) { return this.request<OperationVerification>(`/tasks/${encodeURIComponent(taskId)}/operations/${encodeURIComponent(operationId)}/verify`, 'POST') }
   audit() { return this.request<AuditEvent[]>('/audit') }
 }

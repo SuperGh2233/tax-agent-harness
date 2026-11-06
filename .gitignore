@@ -13,6 +13,9 @@
 *.db-wal
 *.log
 
+# Staged React build (scripts/build_frontend.ps1)
+/src/main/resources/static/react-app/
+
 # Local reproduction artifacts, financial exports and recordings (never deliver)
 /tmp/
 /recordings/

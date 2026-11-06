@@ -10,7 +10,9 @@ public interface LlmClient {
     Decision next(Request request) throws Exception;
 
     record Tool(String name, JsonNode parameters) {}
-    record Exchange(Call call, String resultJson) {}
+    record Exchange(Call call, String resultJson, long durationMs) {
+        public Exchange(Call call, String resultJson) { this(call, resultJson, 0); }
+    }
     record Request(String userMessage, List<Tool> tools, List<Exchange> history) {
         public Request { tools = List.copyOf(tools); history = List.copyOf(history); }
     }

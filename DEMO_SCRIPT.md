@@ -109,3 +109,42 @@ unset LLM_API_KEY LLM_ENDPOINT LLM_MODEL
 ```
 
 只使用官方合成样本、独立临时 SQLite 和 loopback（127.0.0.1）。禁止使用 `data/harness.db` 或真实财务数据。写入仅允许 Operator 在当前轮明确确认后执行一次；结果未知时保留 operationId 并走只读核验，禁止自动重试。
+
+## Windows + React 主入口录屏（2026-11-05 补充）
+
+以下命令在本机终端执行；密钥只在本机输入，不要粘贴到聊天、日志或仓库。先用隐藏输入写入当前终端环境：
+
+```powershell
+$env:LLM_ENDPOINT = "https://qianfan.baidubce.com/v2/tokenplan/personal"
+$env:LLM_MODEL = "deepseek-v4.1-flash-1017"
+$env:LLM_PROTOCOL = "openai-chat"
+$secure = Read-Host -AsSecureString "输入当前有效 LLM_API_KEY"
+$env:LLM_API_KEY = [System.Net.NetworkCredential]::new("", $secure).Password
+```
+
+构建 React 主入口、包 JAR 和独立合成库：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\build_frontend.ps1 -SkipInstall
+.\mvnw.cmd -B -ntp -DskipTests package
+$demoDir = Join-Path $env:TEMP ("taxagent-demo-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $demoDir | Out-Null
+$demoDb = Join-Path $demoDir "demo.db"
+java -Djava.io.tmpdir=$demoDir -Dorg.sqlite.tmpdir=$demoDir -jar target\harness-0.0.1-SNAPSHOT.jar --initialize-data "--database=$demoDb"
+```
+
+启动（保持同一终端，录屏时不要重启服务）：
+
+```powershell
+java -Djava.io.tmpdir=$demoDir -Dorg.sqlite.tmpdir=$demoDir -jar target\harness-0.0.1-SNAPSHOT.jar "--taxagent.database=$demoDb" --server.address=127.0.0.1 --server.port=18084
+```
+
+另开终端打开 `http://127.0.0.1:18084/`；存在 React 构建时根路径会跳转 `/react-app/`，否则回退静态页。选择 Operator/C001，按 `DEMO_SCRIPT.md` 演示查询、补充/保存、多轮检查，并展示偏好管理（页头“长期偏好”）、工具时间线、审计和只读核验。≤5 分钟，真实保存后回读；不要用截图或模型文字代替成功。录屏工具可用 OBS 或手机，结束 Ctrl+C 后删除临时库并清除环境变量：
+
+```powershell
+Remove-Item $demoDir -Recurse -Force
+Remove-Item Env:LLM_API_KEY,Env:LLM_ENDPOINT,Env:LLM_MODEL -ErrorAction SilentlyContinue
+```
+
+当前开发机未安装 ffmpeg/OBS，且未配置 `LLM_*`，因此这轮无法实际录制真实视频；上述步骤用于本机有密钥后执行。
