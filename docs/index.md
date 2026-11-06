@@ -30,8 +30,12 @@
 | [T12 计划](plans/active/PLAN-20261030-t12-ui-audit-demo.md) | completed | 本地 UI、安全会话、脱敏审计与演示验证 |
 
 | [T12 演示 API](specs/SPEC-20261030-demo-api.md) | completed | 本地模拟会话、CSRF、最小接口和审计失败语义 |
-| [T12 演示与录屏](../DEMO_SCRIPT.md) | completed | 独立 demo DB、安全启动、演示步骤与 macOS 手动录屏 |
+| [T12 演示与录屏](../DEMO_SCRIPT.md) | completed | 独立 demo DB、安全启动、React 录屏步骤 |
+| [审计保留策略](specs/AUDIT_RETENTION.md) | active | append-only、导出、归档和保留周期 |
+| [依赖安全扫描](specs/DEPENDENCY_SECURITY.md) | active | OSV 运行时依赖 CVE 扫描、修复版本与抑制记录 |
+| [真实 E2E 记录](evidence/REAL_E2E_20261106.md) | current | 千帆 DeepSeek API 三场景和浏览器截图 |
 
 | [T13 计划](plans/active/PLAN-20261030-t13-release-reproduction.md) | active | 独立复现、经用户批准的真实模型E2E范围、证据与待验证边界 |
 | [独立复现](../REPRODUCE.md) | active | JDK21首次在线/后续离线构建、新库、安全启动及排障 |
 | [交付检查单](../RELEASE_CHECKLIST.md) | active | 官方要求对照、白名单、人工设计/记录/录屏待办和T13变更清单 |
+| [初赛提交说明](SUBMISSION_NOTES.md) | active | 截止时间、官方 Qwen3.8-Max 配置、构建/离线、视频脚本和提交门禁 |

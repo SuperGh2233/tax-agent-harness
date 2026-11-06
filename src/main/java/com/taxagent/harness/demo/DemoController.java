@@ -42,10 +42,14 @@ public final class DemoController {
     public record Preference(String name, String value, String userRequest) {}
     public record Cancel(Long version, Boolean confirmed) {}
     public record TurnView(TaskMemory.Turn turn, UpdateResult verification, String errorCode, String message,
-                           String operationId, String modelInput) {
+                           String operationId, String modelInput, AgentRuntime.Trace promptTrace) {
         public TurnView(TaskMemory.Turn turn, UpdateResult verification, String errorCode, String message,
                         String operationId) {
-            this(turn, verification, errorCode, message, operationId, null);
+            this(turn, verification, errorCode, message, operationId, null, null);
+        }
+        public TurnView(TaskMemory.Turn turn, UpdateResult verification, String errorCode, String message,
+                        String operationId, String modelInput) {
+            this(turn, verification, errorCode, message, operationId, modelInput, null);
         }
     }
     public DemoController(@Value("${taxagent.database:data/harness.db}") String database, LlmClient model) {
@@ -270,7 +274,7 @@ public final class DemoController {
             message = "写入结果未核验；保留操作锁，请核查台账与发票";
         else message = "模型文字不是写入证据；请查看实际工具结果";
         var view = new TurnView(turn,verified,turn.result().errorCode(),message,approval == null ? null : approval.operationId(),
-                turn.modelInput());
+                turn.modelInput(), turn.promptTrace());
         if (turnCache.size() >= TURN_CACHE_MAX) turnCache.clear();
         turnCache.put(cacheKey, new CachedTurn(fingerprint, view, System.currentTimeMillis() + TURN_CACHE_TTL_MS));
         return view;

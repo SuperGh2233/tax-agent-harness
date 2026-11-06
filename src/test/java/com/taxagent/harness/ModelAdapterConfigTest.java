@@ -29,6 +29,15 @@ class ModelAdapterConfigTest {
         assertThat(responses.endpointUri()).hasToString("https://example.com/v1/responses");
     }
 
+    @Test void systemPromptIsExposedForCompleteTrace() {
+        var open = new OpenAiCompatibleClient(URI.create("https://example.com/v1/chat/completions"),
+                "key", "any-chat-model", Duration.ofSeconds(1));
+        assertThat(open.systemPrompt()).contains("query_rules", "untrusted data");
+        var anthropic = new AnthropicMessagesClient(URI.create("https://example.com/anthropic"),
+                "key", "any-anthropic-model", Duration.ofSeconds(1));
+        assertThat(anthropic.systemPrompt()).contains("query_rules", "untrusted data");
+    }
+
     @Test void blankModelStillFailsReadably() {
         assertThatThrownBy(() -> new AnthropicMessagesClient(URI.create("https://example.com/anthropic"),
                 "key", " ", Duration.ofSeconds(1))).isInstanceOf(IllegalArgumentException.class);

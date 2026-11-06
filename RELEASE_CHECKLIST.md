@@ -1,6 +1,6 @@
 # 比赛交付检查单
 
-T13 文档及缓存条件下独立复现已准备；**尚非已完成比赛提交**。截至 2026-11-06 的本分支：JDK21 Java 全量 246 项（默认 Windows 清理模式 1 个临时目录清理错误；关闭清理 246/0/0/0）、前端 Vitest 74 项通过；真实千帆 DeepSeek-V4.1-flash-1017 API 三场景（查询+R004 1.0、受控保存、跨轮补充保存）已通过，真实模型一轮返回 3 个 tool_use 已验证并适配；真实浏览器查询+R004 与受控保存已通过；浏览器内跨轮补充保存、视频、最终包仍未完成。本轮新增 query_rules/R004、偏好 CLI/API+UI、turn 幂等、跨标签页锁、模型配置化、批量 tool_use/自然语言总结兼容、限流/审计导出、Maven Wrapper；改动已按用户明确要求提交并推送到 `origin/work/zhanghengyuan1`（未合并 `main`）；这不代表比赛最终作品包或报名提交已完成。不会打包或推送数据库、密钥或录屏。队友接手先读 [开发交接说明](docs/agent-handoff.md)。完整命令见 [REPRODUCE.md](REPRODUCE.md)，手动演示见 [DEMO_SCRIPT.md](DEMO_SCRIPT.md)。
+T13 文档及缓存条件下独立复现已准备；**尚非已完成比赛提交**。截至 2026-11-06 的本分支：JDK21 Java 全量 247 项（默认 Windows 清理模式 1 个临时目录清理错误；关闭清理 247/0/0/0）、前端 Vitest 37 项通过；真实千帆 DeepSeek-V4.1-flash-1017 API 三场景（查询+R004 1.0、受控保存、跨轮补充保存）已通过，真实模型一轮返回 3 个 tool_use 已验证并适配；真实浏览器（React 单一 UI）查询+R004 与完整 prompt trace 已通过；浏览器内保存/跨轮、视频、最终包仍未完成。本轮新增 query_rules/R004、偏好 CLI/API+UI、turn 幂等、跨标签页锁、模型配置化、批量 tool_use/自然语言总结兼容、限流/审计导出、Maven Wrapper、React 单一前端、执行计划/上下文四栏、自然错误提示、完整 prompt trace、审计保留策略、OSV 依赖扫描（0 未抑制）、离线包；改动已按用户明确要求提交并推送到 `origin/work/zhanghengyuan1`（未合并 `main`）；这不代表比赛最终作品包或报名提交已完成。不会打包或推送数据库、密钥或录屏。队友接手先读 [开发交接说明](docs/agent-handoff.md)。完整命令见 [REPRODUCE.md](REPRODUCE.md)，手动演示见 [DEMO_SCRIPT.md](DEMO_SCRIPT.md)。
 
 ## 官方要求对照
 
@@ -8,9 +8,9 @@ T13 文档及缓存条件下独立复现已准备；**尚非已完成比赛提�
 
 | 官方要求 / 出处 | 本仓库证据 | 当前边界 / 用户待办 |
 |---|---|---|
-| 源码、依赖与启动说明（提交内容） | pom.xml、src、REPRODUCE；JDK21全量223项及JAR构建通过 | 当前工作树仍有未提交T12/T13及安全修复；空缓存首次在线及新checkout待验证 |
+| 源码、依赖与启动说明（提交内容） | pom.xml、src、REPRODUCE；JDK21全量247项及JAR构建通过 | 已提交/推送到 work/zhanghengyuan1；空缓存首次在线及新checkout待验证 |
 | 简要设计建议2–3页（提交内容） | README技术路线、现有项目计划书、工具及存储契约可供整理 | 现有长计划书不等同2–3页成稿；用户另写附件，不改原件 |
-| 关键运行记录、查看模型输入/记忆/规则/工具与结果（基础6、提交内容） | FinanceAgentIntegrationTest生成target/t10-evidence；UI工具时间线、脱敏审计 | 测试Fake证据需标注；用户审核去敏后抽取附件，不复制整个target |
+| 关键运行记录、查看模型输入/记忆/规则/工具与结果（基础6、提交内容） | FinanceAgentIntegrationTest生成target/t10-evidence；完整 promptTrace、UI 工具时间线、脱敏审计 | 测试Fake证据需标注；用户审核去敏后抽取附件，不复制整个target |
 | ≤5分钟演示（提交内容） | DEMO_SCRIPT含时序和macOS录屏步骤 | 无视频；用户配置并实测真实模型后手动录制、回看时长和敏感信息 |
 | 查询、补充保存、多轮检查；追问、更正、跨会话、规则选择、真实保存数据（任务范围/提交内容） | T10三场景、T11故障回归、T12 UI和隔离测试；真实 Qwen 只读 API 跨轮通过 | 浏览器 UI 最终总结超时；真实受控写入/核验 UI E2E 尚未完成，不声称完整云演示已通过 |
 | 模型理解决策，程序计算/校验/保存（基础1、5） | Runtime/FinanceAgent、整数分、权限/授权/白名单/幂等/回读测试 | 无关键词生产替代；MODEL_NOT_CONFIGURED不冒充成功 |
@@ -34,7 +34,7 @@ T13 文档及缓存条件下独立复现已准备；**尚非已完成比赛提�
 
 ## 文件白名单与禁止项
 
-源码材料：pom.xml、mvnw、mvnw.cmd、.mvn/**、AGENTS.md、TASKS.md、README.md、REPRODUCE.md、RELEASE_CHECKLIST.md、DEMO_SCRIPT.md、.gitignore、无密钥.env.example、src/**、scripts/official_seed.py、scripts/secret_scan.py、docs/**、官方v1.1.0三份原件与既有项目计划书；React 工作台材料：frontend/package.json、frontend/package-lock.json、frontend/index.html、frontend/tsconfig.json、frontend/vite.config.ts、frontend/eslint.config.js、frontend/README.md、frontend/src/**、frontend/tests/**。若交付包含由 `scripts/build_frontend.ps1` 暂存的 `src/main/resources/static/react-app/**`，先确认该构建与当前源码一致；不要带入 `frontend/dist`、`frontend/node_modules` 或 `target/**`。只复制已人工核对的明确文件，src/docs/frontend 内如有额外临时文件也要剔除。用户另备设计说明、去敏关键运行记录及手动视频附件；不默认这些已经存在。
+源码材料：pom.xml、mvnw、mvnw.cmd、.mvn/**、AGENTS.md、TASKS.md、README.md、REPRODUCE.md、RELEASE_CHECKLIST.md、DEMO_SCRIPT.md、.gitignore、无密钥.env.example、src/**、scripts/official_seed.py、scripts/secret_scan.py、scripts/dependency_scan.ps1、scripts/osv_scan.py、scripts/osv_suppressions.json、scripts/package_offline.ps1、scripts/setup_local_model.ps1、docs/**、官方v1.1.0三份原件与既有项目计划书；React 工作台材料：frontend/package.json、frontend/package-lock.json、frontend/index.html、frontend/tsconfig.json、frontend/vite.config.ts、frontend/eslint.config.js、frontend/README.md、frontend/src/**、frontend/tests/**。React 构建由 `mvn package` 在 prepare-package 自动完成并复制到 JAR 的 `static/react-app/**`；不提交 `src/main/resources/static/react-app/**`，不要带入 `frontend/dist`、`frontend/node_modules` 或 `target/**`。只复制已人工核对的明确文件，src/docs/frontend 内如有额外临时文件也要剔除。用户另备设计说明、去敏关键运行记录及手动视频附件；不默认这些已经存在。
 
 禁止：.git、.env及变体（仅.env.example例外）、data/**及任意运行数据库/sidecar、.m2/**、target/**、虚拟环境、IDE缓存、临时财务CSV/XLSX/JSON、未经审阅日志/截图/录屏、真实密钥或证书。官方02_示例数据.xlsx和版本化seed JSON是明确允许的模拟原件/种子；不得一概用*.xlsx忽略误删官方数据。任何新财务导出即使不匹配忽略规则也不得加入白名单。
 

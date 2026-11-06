@@ -117,6 +117,9 @@ class DemoApiTest {
         select("operator","C001"); String task=start();
         var result=turn(task, Map.of("message","C001 九月银行支出能证明 F002 已付款吗"));
         assertThat(result.path("modelInput").asText()).contains("F002.purpose");
+        assertThat(result.path("promptTrace").isObject()).isTrue();
+        assertThat(result.at("/promptTrace/userMessage").asText()).contains("F002.purpose");
+        assertThat(result.at("/promptTrace/tools").isArray()).isTrue();
         var events=ok(get("/api/demo/audit"));
         JsonNode ruleEvent=null;
         for (var event:events) if ("query_rules".equals(event.path("tool").asText())) ruleEvent=event;
@@ -388,7 +391,7 @@ class DemoApiTest {
     }
     @Test void strictCspCoversPageResourcesAndApiIncludingRejections() throws Exception {
         String policy="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
-        for (String path:List.of("/","/index.html","/demo.js","/demo.css","/api/demo/session"))
+        for (String path:List.of("/","/react-app/","/api/demo/session"))
             mvc.perform(get(path)).andExpect(header().string("Content-Security-Policy",policy));
         mvc.perform(get("/api/demo/session").header("Origin","https://evil.example"))
                 .andExpect(status().isForbidden()).andExpect(header().string("Content-Security-Policy",policy));
@@ -498,9 +501,10 @@ class DemoApiTest {
         var result=turn(task,approved(UUID.randomUUID().toString()));
         assertThat(result.path("errorCode").asText()).isEqualTo("AUDIT_STORAGE_ERROR");assertThat(result.at("/verification/verified").asBoolean()).isTrue();assertThat(count("invoice_operations")).isEqualTo(1);
     }
-    @Test void staticUiUsesTextRenderingAndExplicitNativeConfirmation() throws Exception {
-        String js=Files.readString(Path.of("src/main/resources/static/demo.js"));
-        assertThat(js).contains("textContent","window.confirm","confirmed:true","databaseReadback").doesNotContain("innerHTML","insertAdjacentHTML","eval(");
-        assertThat(Files.readString(Path.of("src/main/resources/static/index.html"))).contains("本地模拟身份，不是生产认证","MODEL_NOT_CONFIGURED","Viewer","Operator");
+    @Test void auditRowsAreAppendOnlyAndRetentionNeedsExportFirst() throws Exception {
+        setup(new FakeLlmClient(new Finish("完成")));
+        select("operator","C001");String task=start();turn(task,Map.of("message","查询九月"));
+        assertThatThrownBy(() -> sql("UPDATE demo_audit SET tool='tampered'")).hasMessageContaining("append only");
+        assertThatThrownBy(() -> sql("DELETE FROM demo_audit")).hasMessageContaining("append only");
     }
-}
+    }

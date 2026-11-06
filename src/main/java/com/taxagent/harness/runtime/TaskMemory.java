@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.sql.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Trusted backend service only. Never expose Session or explicit-input methods as model tools. */
 public final class TaskMemory {
@@ -22,9 +23,13 @@ public final class TaskMemory {
     public record Context(Task task, Map<String, Input> preferences) {
         public Context { preferences = Map.copyOf(preferences); }
     }
-    public record Turn(Task task, AgentRuntime.Result result, String memorySource, String modelInput) {
-        public Turn(Task task, AgentRuntime.Result result) { this(task, result, null, null); }
-        public Turn(Task task, AgentRuntime.Result result, String memorySource) { this(task, result, memorySource, null); }
+    public record Turn(Task task, AgentRuntime.Result result, String memorySource, String modelInput,
+                       AgentRuntime.Trace promptTrace) {
+        public Turn(Task task, AgentRuntime.Result result) { this(task, result, null, null, null); }
+        public Turn(Task task, AgentRuntime.Result result, String memorySource) { this(task, result, memorySource, null, null); }
+        public Turn(Task task, AgentRuntime.Result result, String memorySource, String modelInput) {
+            this(task, result, memorySource, modelInput, null);
+        }
     }
     private static final ObjectMapper JSON = new ObjectMapper();
     private final String url;
@@ -123,7 +128,8 @@ public final class TaskMemory {
         if (approval != null && !id.equals(approval.taskId()))
             throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Approval must belong to this task");
         var projection = ContextProjector.project(context, message);
-        var result = runtime.runScoped(session, enterprise, message, projection.memoryJson(), approval);
+        var trace = new AtomicReference<AgentRuntime.Trace>();
+        var result = runtime.runScoped(session, enterprise, message, projection.memoryJson(), approval, trace::set);
         return access(session, enterprise, c -> {
             var current = get(c, session, enterprise, id); open(current, old.version());
             var summaries = result.history().stream().map(e -> {
@@ -153,7 +159,7 @@ public final class TaskMemory {
                     effective.status() == AgentRuntime.Status.NEEDS_INPUT ? effective.text() : null, summaries);
             save(c, session, enterprise, old, next);
             return new Turn(next, effective, projection.truncated() ? "task-memory+projection" : "task-memory",
-                    projection.memoryJson());
+                    projection.memoryJson(), trace.get());
         });
     }
     private static List<String> remainingPending(List<String> pending, AgentRuntime.Result result,
@@ -184,9 +190,9 @@ public final class TaskMemory {
         return pending.stream().filter(field -> !resolved.contains(field)).toList();
     }
     private static String pendingQuestion(List<String> pending) {
-        return "任务仍有未补充的必填信息：" + String.join("、", pending)
-                + "。请在“补充 / 更正明确事实”中逐项填写字段、明确值和你的原话。"
-                + "补充只记录用户声明，不会修改发票。全部补充后再继续。";
+        return "还需要你确认这些信息：" + String.join("、", pending)
+                + "。可以在“补充 / 更正明确事实”里逐项填写字段、明确值和你的原话；"
+                + "我只记录你的声明，不会直接修改发票。补充完我再继续核对。";
     }
     private static String withPendingQuestion(String modelQuestion, List<String> pending) {
         var required = pendingQuestion(pending);

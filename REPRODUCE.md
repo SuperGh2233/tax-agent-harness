@@ -60,7 +60,7 @@ env -u LLM_ENDPOINT -u LLM_API_KEY -u LLM_MODEL \
 ```sh
 curl --fail --show-error --silent http://127.0.0.1:8080/api/health
 # 预期 {"status":"UP"}；仅证明应用存活，不证明数据库/模型就绪。
-curl --fail --show-error --silent -o /dev/null http://127.0.0.1:8080/demo.js
+curl --fail --show-error --silent -o /dev/null http://127.0.0.1:8080/react-app/
 ```
 
 浏览器打开 http://127.0.0.1:8080/，显示“本地模拟身份，不是生产认证”。选择 Operator/C001，创建查询任务后发送消息，应明确显示 MODEL_NOT_CONFIGURED；这不是模型查询成功，不会回退 Fake。Viewer/C001 只读，Viewer/C002 拒绝。详细演示、精确确认、超时只读回查见 [DEMO_SCRIPT.md](DEMO_SCRIPT.md)。结束在启动终端 Ctrl+C，确认健康地址已无法连接；保留独立目录用于检查，不自动清理。
@@ -140,7 +140,12 @@ Qwen 单次 HTTP 请求与 AgentRuntime 等待上限为 60 秒，其他模型默
   ```
 - 偏好也提供 HTTP：`GET/POST /api/demo/preferences`、`DELETE /api/demo/preferences/{name}`；POST 需要 CSRF。
 - `scripts/secret_scan.py` 只是打包前的模式扫描，不是秘密证明；仍须人工审阅压缩包每个条目。
-- React 主入口（可选，需要 Node/npm）：先启动后端，再执行
-  `powershell -ExecutionPolicy Bypass -File scripts/build_frontend.ps1`。脚本会执行 `npm run verify` 并把 `frontend/dist`
-  暂存到 `src/main/resources/static/react-app/`（该目录在 `.gitignore` 中）；重新 `mvn package` 后，根路径优先跳转
-  `/react-app/`，静态页保留为只读回退。不要把 `frontend/node_modules` 或 `frontend/dist` 放入交付包。
+- 依赖 CVE：`scripts/dependency_scan.ps1` 生成 Maven runtime 清单并调用 Google OSV；报告在 `target/osv-report.json`，0 个未抑制漏洞，2 条 Spring 6.2.19 风险接受记录见 `docs/specs/DEPENDENCY_SECURITY.md`。
+- 审计保留：`demo_audit` 只追加，禁止 UPDATE/DELETE；演示结束前导出 CSV，再整库归档/删除，详见 `docs/specs/AUDIT_RETENTION.md`。
+- React 是唯一前端：`mvn package` 在 `prepare-package` 阶段通过 `frontend-maven-plugin` 安装 Node/npm、执行
+  `npm ci`/`npm run build`，再由 `maven-resources-plugin` 把 `frontend/dist` 复制到 JAR 的 `static/react-app/`；
+  根路径固定跳转 `/react-app/`，不再保留静态回退。`mvn test` 不触发前端构建；开发热更新仍可在 `frontend/` 执行
+  `npm run dev`。不要把 `frontend/node_modules` 或 `frontend/dist` 放入交付包。
+- 离线/评委环境：联网机器先执行一次 `mvn -DskipTests package`（或 `npm run build`），之后有 `frontend/dist` 时可运行
+  `scripts/package_offline.ps1`（内部使用 `mvn -o -Dfrontend.skip=true package`）；也可直接提交已构建 JAR。不要在没有
+  `frontend/dist` 时跳过前端构建，否则 JAR 没有 UI。

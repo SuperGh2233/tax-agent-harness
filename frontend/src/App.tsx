@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { ArrowUp, ArrowUpRight, Check, ChevronRight, CircleDashed, FileCheck2, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
-import { ApiError, canVerifyOperation, createAndRunFirstTurn, DemoApi, findOpenTask, friendlyError, isTerminalTaskStatus, parseTool, provenNotExecuted, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from './api'
-import type { Approval, AuditEvent, Exchange, Invoice, Session, Statement, Task, TurnView } from './api'
+import { ApiError, canVerifyOperation, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, findOpenTask, friendlyError, isTerminalTaskStatus, parseTool, provenNotExecuted, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from './api'
+import type { Approval, AuditEvent, Exchange, Invoice, PlanStep, Session, Statement, Task, TurnView } from './api'
 import { Button, Modal } from './ui'
 
 const api = new DemoApi()
@@ -114,7 +114,13 @@ export default function App() {
   const selected = !!session?.profile
   const openTask = findOpenTask(tasks)
   const history = turn?.turn?.result.history ?? []
+  const verification = turn?.verification ?? null
   const invoices = queriedInvoices(history, session?.enterprise ?? '')
+  async function openInspector() {
+    setInspector(true)
+    if (!selected) return
+    try { setPreferences(await api.preferences()) } catch { /* task inspector remains usable */ }
+  }
   function reset() { setTask(null); setCancelCandidate(null); setLoadedHistoricalTask(false); setSourceTaskId(null); setMessages([]); setTurn(null); setAudit(null); setTasks([]); setInspector(false); setPage('home'); setPreferences({}); setPreferencesOpen(false) }
   async function load(id: string) {
     await run(async () => {
@@ -315,7 +321,7 @@ export default function App() {
       </div>}
       {page === 'history' && <section className="content-page"><div className="page-heading"><div><span className="eyebrow">YOUR TASKS</span><h1 ref={heading} tabIndex={-1}>任务历史</h1><p className="muted">恢复上下文，重新核对当前数据。</p></div><Button disabled={!selected || busy} onClick={() => void run(async () => setTasks(await api.tasks()))}>刷新任务</Button></div>{taskList()}</section>}
       {page === 'workspace' && task && <>
-        <header className="workspace-heading"><div><button className="back" onClick={() => navigate('home')}>工作台 /</button><h1 ref={heading} tabIndex={-1}>{task.goal}</h1><span className="muted">{statusLabel[task.status]} · {session?.enterprise} · {task.id.slice(0,8)}</span></div><div className="workspace-actions"><Button disabled={busy || !turn || (loadedHistoricalTask && isTerminalTaskStatus(task.status))} onClick={() => navigate('review')}><FileCheck2 size={16}/>审核与结果</Button><Button aria-label="打开检查器" onClick={() => setInspector(true)}><PanelRight size={17}/></Button></div></header>
+        <header className="workspace-heading"><div><button className="back" onClick={() => navigate('home')}>工作台 /</button><h1 ref={heading} tabIndex={-1}>{task.goal}</h1><span className="muted">{statusLabel[task.status]} · {session?.enterprise} · {task.id.slice(0,8)}</span></div><div className="workspace-actions"><Button disabled={busy || !turn || (loadedHistoricalTask && isTerminalTaskStatus(task.status))} onClick={() => navigate('review')}><FileCheck2 size={16}/>审核与结果</Button><Button aria-label="打开检查器" onClick={() => void openInspector()}><PanelRight size={17}/></Button></div></header>
         {loadedHistoricalTask && isTerminalTaskStatus(task.status) ? <TerminalTaskPanel task={task} onCreateNew={startNewFromHistory}/> : <>
           <Thread messages={messages} busy={busy}/>
           {isTerminalTaskStatus(task.status) ? <div className="terminal-inline"><span>当前任务{statusLabel[task.status]}，已禁用后续写入。可查看本轮结果，或创建新的独立任务。</span><Button variant="primary" onClick={startNewFromHistory}>基于原任务新建查询 <ArrowUpRight size={14}/></Button></div> : <><Composer disabled={busy || !selected} onSend={m => void send(m)}/>
@@ -357,10 +363,50 @@ export default function App() {
       </div>
     </Modal>
     <Modal open={inspector} onOpenChange={setInspector} title="任务检查器" description="计划、实际执行与审计，按需展开。" drawer>
-      {task && <><h3>任务计划 / 待办</h3><p>{task.goal}</p>{task.pending.length ? <ul>{task.pending.map(p => <li key={p}>{p}</li>)}</ul> : <p className="muted">没有结构化待办。当前 API 未提供实时计划事件。</p>}<p className="muted">状态：{statusLabel[task.status]} · 版本 {task.version}</p><details><summary>历史工具摘要（不是当前执行证据）</summary><pre>{pretty(task.recentTools)}</pre></details><details><summary>本轮模型输入（记忆投影）</summary><pre>{turn?.modelInput ?? '无'}</pre></details><ToolGroup history={history}/><details><summary>任务原始数据（可能包含敏感字段）</summary><pre>{pretty(task)}</pre></details></>}
+      {task && <><h3>任务计划 / 待办</h3><p>{task.goal}</p>{task.pending.length ? <ul>{task.pending.map(p => <li key={p}>{p}</li>)}</ul> : <p className="muted">没有结构化待办。当前 API 未提供实时计划事件。</p>}<p className="muted">状态：{statusLabel[task.status]} · 版本 {task.version}</p><ExecutionPlan task={task} history={history} verification={verification}/><ContextSources task={task} history={history} preferences={preferences} enterprise={session?.enterprise ?? ''} role={session?.profile ?? ''}/><details><summary>历史工具摘要（不是当前执行证据）</summary><pre>{pretty(task.recentTools)}</pre></details><details><summary>本轮模型输入（记忆投影）</summary><pre>{turn?.modelInput ?? '无'}</pre></details><details><summary>完整模型输入（系统提示 + 用户消息 + 工具 schema）</summary><pre>{turn?.promptTrace ? pretty(turn.promptTrace) : '无'}</pre></details><ToolGroup history={history}/><details><summary>任务原始数据（可能包含敏感字段）</summary><pre>{pretty(task)}</pre></details></>}
       <details onToggle={e => { if (e.currentTarget.open && audit === null && selected && !busy) void showAudit() }}><summary>真实审计</summary><Button disabled={!selected || busy} onClick={() => void showAudit()}>刷新审计</Button><Audit events={audit}/></details>
     </Modal>
   </div>
+}
+
+const planStateLabel: Record<PlanStep['state'], string> = {
+  done: '已完成', current: '进行中', waiting: '等待用户', optional: '本次不需要'
+}
+
+function ExecutionPlan({task,history,verification}: {task:Task; history:Exchange[]; verification:TurnView['verification']}) {
+  const steps = deriveExecutionPlan(task,history,verification)
+  return <section className="context-block execution-plan" aria-label="执行计划">
+    <h3>执行计划</h3>
+    <p className="hint">由后端任务状态和工具历史推导，不是模型自述；模型文字不能替代保存核验。</p>
+    <ol className="plan-list">{steps.map((step, index) => <li key={step.key} data-state={step.state}>
+      <span className="plan-index">{index + 1}</span>
+      <div><strong>{step.title}</strong><p>{step.detail}</p></div>
+      <span className="plan-state">{planStateLabel[step.state]}</span>
+    </li>)}</ol>
+  </section>
+}
+
+function ContextSources({task,history,preferences,enterprise,role}: {
+  task:Task; history:Exchange[]; preferences:Record<string, Statement>; enterprise:string; role:string
+}) {
+  const rules = citedRules(history)
+  return <section className="context-sources" aria-label="上下文来源">
+    <h3>上下文来源（分开查看）</h3>
+    <div className="context-grid">
+      <section><h4>任务进度</h4><p>{statusLabel[task.status]} · 版本 {task.version}</p>
+        <p>待补：{task.pending.length ? task.pending.join('、') : '无'}</p>
+        <p>最近工具：{task.recentTools.length ? task.recentTools.map(tool => `${tool.tool}(${tool.outcome})`).join('、') : '无'}</p></section>
+      <section><h4>长期偏好</h4>{Object.keys(preferences).length
+        ? <ul>{Object.entries(preferences).map(([name, statement]) => <li key={name}><code>{name}</code> = {statement.value}</li>)}</ul>
+        : <p>暂无，或尚未刷新。</p>}</section>
+      <section><h4>规则</h4>{rules.length
+        ? <div className="rule-chips">{rules.map(rule => <span className="rule-chip" key={`${rule.id}@${rule.version}`}>{rule.id}@{rule.version}</span>)}</div>
+        : <p>本轮尚未调用 query_rules；模型引用不单独算证据。</p>}
+        <p className="hint">来自本轮 query_rules 工具结果。</p></section>
+      <section><h4>企业上下文</h4><p>{enterprise || '未选择'} · {role === 'operator' ? 'Operator' : role === 'viewer' ? 'Viewer' : '未选择'}</p>
+        <p>{task.goal}</p></section>
+    </div>
+  </section>
 }
 
 function TerminalTaskPanel({task,onCreateNew}: {task:Task; onCreateNew:()=>void}) {

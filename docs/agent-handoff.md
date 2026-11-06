@@ -5,7 +5,7 @@
 
 ## 1. 一句话结论
 
-项目已经具备可运行的财税 Agent 主链：模型决策、只读财务工具、规则检查、跨轮任务记忆、精确授权写入、写后回读、未知结果只读核验，以及静态页 / React 两套 UI。
+项目已经具备可运行的财税 Agent 主链：模型决策、只读财务工具、规则检查、跨轮任务记忆、精确授权写入、写后回读、未知结果只读核验，以及单一 React UI（静态页已移除）。
 
 本轮重点完成了三项安全闭环修复：
 
@@ -32,8 +32,8 @@
 ## 3. 当前项目结构与主链
 
 - 后端：Java 21、Spring Boot 3.5.16、Maven、SQLite。
-- 模型协议：DashScope Anthropic-compatible Messages（当前目标 Qwen3.8 Flash）；保留 OpenAI-compatible Responses / Chat Completions，按 endpoint 显式选择，不自动回退。
-- 前端：原生静态演示页 `src/main/resources/static/index.html + demo.js`；独立 React + TypeScript 工作台在 `frontend/`。
+- 模型协议：百度千帆 OpenAI-compatible Chat Completions（当前目标 DeepSeek-V4.1-flash-1017，`LLM_PROTOCOL=openai-chat`）；保留 Anthropic Messages / OpenAI Responses，按 endpoint/协议显式选择，不自动回退。
+- 前端：唯一 React + TypeScript 工作台在 `frontend/`；`mvn package` 通过 `frontend-maven-plugin` 构建并复制到 JAR 的 `static/react-app/`，根路径固定跳转 `/react-app/`。
 - 主链：`DemoController → FinanceAgent → TaskMemory / AgentRuntime → LlmClient → 财税工具`。
 - 工具：`query_invoices`、`query_bank_entries`、`check_invoice_purpose`、`update_invoice`。金额计算和业务规则由程序执行，不依赖模型心算。
 - 关键实现：`InvoiceWriteService` 管理事务、权限、精确字段、幂等台账和回读；`DemoAudit` 记录脱敏审计；`TaskMemory` 管理任务状态和待补字段。
@@ -51,7 +51,7 @@
 - 核验端点：`POST /api/demo/tasks/{taskId}/operations/{operationId}/verify`。
 - 核验受 task、user、enterprise、operation 精确绑定；使用只读事务，不执行更新。
 - 仅精确 VERIFIED 且持久化锁成功清除后才解除前端操作锁；NOT_FOUND、DIVERGED、异常或审计失败均保留锁。
-- 静态页和 React 均有恢复后手动核验能力；不会自动重试写入。
+- React 有恢复后手动核验能力；不会自动重试写入。
 - `invoice_operations` 仅新增可空 `task_id` 关联列；旧记录不猜测回填。
 
 ### P0-3 — 多工具调用和回放
@@ -75,10 +75,10 @@
 | Java 全量测试 | 223 / 0 / 0 / 0 | JDK 21，Maven 离线 |
 | Maven package | BUILD SUCCESS | 当前 JAR 为 34,131,390 bytes |
 | 前端 `npm run verify` | Vitest 71 项通过 | Typecheck、ESLint、测试、Vite build 均通过 |
-| 静态脚本 | `node --check` 通过 | `src/main/resources/static/demo.js` |
+| 前端构建 | `npm ci` + `npm run build` | Maven `frontend-maven-plugin`（prepare-package） |
 | Git whitespace | `git diff --check` 通过 | 最近一次文档修改前后均需复查 |
-| 真实 Qwen API 只读跨轮 | 通过 | NEEDS_INPUT → supplement → COMPLETED；未执行 update_invoice |
-| 真实浏览器 UI | 未通过完整链路 | 页面、会话、任务、消息和三个只读工具成功；最终模型回复 MODEL_TIMEOUT |
+| 真实 DeepSeek API | 通过 | 查询+R004、受控保存、跨轮补充保存 |
+| 真实浏览器 | 查询+R004、受控保存通过 | Chrome + Playwright；浏览器内跨轮未验证 |
 | 真实写入 / operationId UI 核验 | 未做真实浏览器 E2E | 仅自动化回归覆盖 |
 | 空缓存首次在线 / 全新 checkout | 未验证 | 既有隔离 Maven 缓存下验证成功 |
 
@@ -116,7 +116,7 @@ npm run verify
 
 - 先运行 `git status --short`、`git diff --check`，保存当前状态。
 - 不要 `git reset --hard`、`git clean`、覆盖文件或从 HEAD 重建工作树。
-- 不要把当前工作树误认为干净 checkout；现有代码和文档仍有未提交内容，见第 9 节。
+- 本轮变更已提交/推送到 `origin/work/zhanghengyuan1`；后续改动仍需先保存工作树状态。
 - 确认 18084 进程实际加载的 JAR；如需重启，先确认用户允许并保留现有临时 DB。
 
 ### 第二步：完成真实浏览器只读跨轮链路
@@ -176,7 +176,7 @@ npm run verify
 - `src/main/java/com/taxagent/harness/demo/DemoController.java`。
 - `src/main/java/com/taxagent/harness/runtime/AgentRuntime.java`、`AnthropicMessagesClient.java`、`FinanceAgent.java`、`LlmClient.java`、`TaskMemory.java`。
 - `src/main/java/com/taxagent/harness/tool/InvoiceWriteService.java`。
-- `src/main/resources/invoice-operations.sql`、`static/demo.js`、`static/index.html`。
+- `src/main/resources/invoice-operations.sql`。
 - `src/test/java/com/taxagent/harness/DemoApiTest.java`、`FinanceAgentIntegrationTest.java`、`InvoiceWriteServiceTest.java`、`TaskMemoryTest.java`、`runtime/AnthropicMessagesClientTest.java`。
 
 两个新文件已随本次交接提交纳入 GitHub 版本历史：
@@ -194,11 +194,12 @@ npm run verify
 - 能解释 P0-1 / P0-2 / P0-3 的安全边界，并在修改时保留回归测试。
 - 所有未完成事项仍保持可见；只有证据完整后才把 T13 / 后续任务标为 DONE。
 
-## 11. 2026-11-06 本分支补充（未提交）
+## 11. 2026-11-06 本分支补充（已提交/推送）
 
 - 模型：百度千帆 Token Plan 个人版，OpenAI 兼容 Base URL `https://qianfan.baidubce.com/v2/tokenplan/personal`，模型 `deepseek-v4.1-flash-1017`，`LLM_PROTOCOL=openai-chat`；客户端自动追加 `/chat/completions`，超时 60 秒。密钥只在本机 `.tools/model.env`，不入库、不写入本文件。
 - 适配真实供应商：DeepSeek 一轮返回 3 个 `tool_calls`（`parallel_tool_calls=false` 未生效）已按 `Batch` 执行；工具结果后的自然语言总结按 `Finish` 接受，但不构成写入证据。
-- 新增：`query_rules`/R004 引用；按本轮批准发布写工具；`ContextProjector` 记忆投影；审计 `ruleVersion/memorySource/durationMs` 与 scorecard；偏好 CLI/HTTP API/两套前端入口；turn 级 `requestId` 幂等；跨标签页操作锁；限速/请求体上限；审计 CSV 导出；Maven Wrapper；React 主入口 `/react-app/`（静态页回退）。
-- 真实 E2E：千帆 API 查询+R004、受控保存、跨轮补充保存通过；真实 Chrome 浏览器查询+R004、受控保存通过；浏览器内跨轮、≤5 分钟视频和最终包未完成。证据见 [REAL_E2E_20261106.md](evidence/REAL_E2E_20261106.md)。
-- 验证：关闭 Windows 临时目录清理后 Java 246/0/0/0；默认清理模式 1 个临时目录错误；前端 74/74；`mvn -DskipTests package` 成功。
+- 新增：`query_rules`/R004 引用；按本轮批准发布写工具；`ContextProjector` 记忆投影；审计 `ruleVersion/memorySource/durationMs` 与 scorecard；偏好 CLI/HTTP API/React 入口；turn 级 `requestId` 幂等；跨标签页操作锁；限速/请求体上限；审计 CSV 导出；Maven Wrapper；React 单一入口 `/react-app/`（静态页移除、Maven 自动构建）；完整 `promptTrace`；审计保留策略；OSV 依赖 CVE 扫描（0 未抑制，2 条风险接受）。
+- 真实 E2E：千帆 API 查询+R004、受控保存、跨轮补充保存通过；真实 Chrome/React 查询+R004 与完整 prompt trace 通过；浏览器内保存/跨轮、≤5 分钟视频和最终包未完成。证据见 [REAL_E2E_20261106.md](evidence/REAL_E2E_20261106.md)。
+- 验证：关闭 Windows 临时目录清理后 Java 247/0/0/0；默认清理模式 1 个临时目录错误；前端 37/37；`mvn clean package` 成功（自动构建 React）。
+- 官方跑测模型 Qwen3.8-Max 尚未实测：适配器不硬编码模型名，Anthropic/OpenAI-compatible 路径均可用；提交前必须用官方 endpoint/model/key 复跑三场景并记录，供应商差异可能影响工具调用和 JSON 决策。
 - 已按用户明确要求提交并推送到 `origin/work/zhanghengyuan1`；未合并 `main`，等待队友评审。

@@ -8,6 +8,8 @@ import java.util.HashSet;
 @FunctionalInterface
 public interface LlmClient {
     Decision next(Request request) throws Exception;
+    /** The static system prompt is part of the exact model input trace; never contains secrets. */
+    default String systemPrompt() { return ""; }
 
     record Tool(String name, JsonNode parameters) {}
     record Exchange(Call call, String resultJson, long durationMs) {

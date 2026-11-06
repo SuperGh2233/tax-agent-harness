@@ -122,11 +122,9 @@ $secure = Read-Host -AsSecureString "输入当前有效 LLM_API_KEY"
 $env:LLM_API_KEY = [System.Net.NetworkCredential]::new("", $secure).Password
 ```
 
-构建 React 主入口、包 JAR 和独立合成库：
+构建 JAR（`prepare-package` 自动安装 Node/npm 并构建 React）和独立合成库：
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\build_frontend.ps1 -SkipInstall
 .\mvnw.cmd -B -ntp -DskipTests package
 $demoDir = Join-Path $env:TEMP ("taxagent-demo-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $demoDir | Out-Null
@@ -140,7 +138,7 @@ java -Djava.io.tmpdir=$demoDir -Dorg.sqlite.tmpdir=$demoDir -jar target\harness-
 java -Djava.io.tmpdir=$demoDir -Dorg.sqlite.tmpdir=$demoDir -jar target\harness-0.0.1-SNAPSHOT.jar "--taxagent.database=$demoDb" --server.address=127.0.0.1 --server.port=18084
 ```
 
-另开终端打开 `http://127.0.0.1:18084/`；存在 React 构建时根路径会跳转 `/react-app/`，否则回退静态页。选择 Operator/C001，按 `DEMO_SCRIPT.md` 演示查询、补充/保存、多轮检查，并展示偏好管理（页头“长期偏好”）、工具时间线、审计和只读核验。≤5 分钟，真实保存后回读；不要用截图或模型文字代替成功。录屏工具可用 OBS 或手机，结束 Ctrl+C 后删除临时库并清除环境变量：
+另开终端打开 `http://127.0.0.1:18084/`；根路径固定跳转 `/react-app/`（React 是唯一前端，静态页已移除）。选择 Operator/C001，按 `DEMO_SCRIPT.md` 演示查询、补充/保存、多轮检查，并展示偏好管理（页头“长期偏好”）、工具时间线、审计和只读核验。≤5 分钟，真实保存后回读；不要用截图或模型文字代替成功。录屏工具可用 OBS 或手机，结束 Ctrl+C 后删除临时库并清除环境变量：
 
 ```powershell
 Remove-Item $demoDir -Recurse -Force

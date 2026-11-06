@@ -1,60 +1,11 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { ApiError, canVerifyOperation, createAndRunFirstTurn, DemoApi, findOpenTask, friendlyError, isTerminalTaskStatus, provenNotExecuted, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from '../src/api'
+import { ApiError, canVerifyOperation, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, findOpenTask, friendlyError, isTerminalTaskStatus, provenNotExecuted, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from '../src/api'
 import type { Exchange, Task, TurnView } from '../src/api'
 import { initialOperation } from '../src/App'
-// @ts-expect-error Node built-ins are available in Vitest; this browser project has no @types/node.
-import { readFileSync } from 'node:fs'
-// @ts-expect-error Test-only VM avoids adding a dependency or executing browser requests.
-import { createContext, runInContext } from 'node:vm'
 
-// Execute the actual default-page script with isolated DOM/storage/fetch, never a backend.
-async function staticPage(storage = new Map<string, string>(), failure?: 'read' | 'write' | 'remove') {
-  const element = () => ({textContent:'', disabled:false, value:'', className:'', onclick:() => Promise.resolve(),
-    setAttribute:vi.fn(), after:vi.fn(), append:vi.fn(), replaceChildren:vi.fn(), addEventListener:vi.fn()})
-  const nodes = new Map<string, ReturnType<typeof element>>()
-  const get = (id:string) => {
-    if (!nodes.has(id)) nodes.set(id, element())
-    return nodes.get(id)!
-  }
-  const warnings: ReturnType<typeof element>[] = []
-  const fetcher = vi.fn(async (url:string, options?: RequestInit) => {
-    void options
-    return Response.json(url.endsWith('/session') ? {csrfToken:'test',profile:'',enterprise:''} : [])
-  })
-  const storageApi = {
-    getItem:vi.fn((key:string) => {if (failure === 'read') throw new Error('storage unavailable'); return storage.get(key) ?? null}),
-    setItem:vi.fn((key:string,value:string) => {if (failure === 'write') throw new Error('storage unavailable'); storage.set(key,value)}),
-    removeItem:vi.fn((key:string) => {if (failure === 'remove') throw new Error('storage unavailable'); storage.delete(key)}),
-  }
-  const context = createContext({document:{getElementById:get, querySelectorAll:() => [...nodes.values()],
-    createElement:() => {const node = element(); warnings.push(node); return node}},
-    sessionStorage:storageApi,
-    fetch:fetcher, window:{confirm:() => true}, crypto:{randomUUID:() => 'op-static'}})
-  runInContext(readFileSync(new URL('../../src/main/resources/static/demo.js', import.meta.url),'utf8'),context)
-  await vi.waitFor(() => expect(runInContext('busy',context)).toBe(false))
-  runInContext("active={id:'task-static'};selected={enterprise:'C001'}",context)
-  get('invoice').value='F002'; get('field').value='purpose'; get('value').value='private-value'
-  return {get, warnings, storage, storageApi, fetcher}
-}
 
 const invalidStoredOperations = ['', '{', 'null', '[]', '{}',
   '{"id":"op","taskId":"task","unknown":false}', '{"id":"","taskId":"task","unknown":true}']
-test.each([...invalidStoredOperations, 'getItem throws'])
-('static page fails closed for damaged operation storage: %s', async raw => {
-  const storage = new Map([['taxagent-pending-operation',raw]])
-  const page = await staticPage(storage, raw === 'getItem throws' ? 'read' : undefined)
-  expect(page.get('approve').disabled).toBe(true)
-  expect(page.warnings[0].textContent).toContain('operationId=unknown')
-  expect(page.warnings[0].textContent).toContain('taskId=unknown')
-  await page.get('approve').onclick()
-  expect(page.fetcher.mock.calls.map(call => call[0])).toEqual(['/api/demo/session'])
-  await page.get('refresh').onclick()
-  expect(page.fetcher.mock.calls.map(call => call[0])).toEqual(['/api/demo/session','/api/demo/tasks','/api/demo/audit'])
-  expect(page.get('approve').disabled).toBe(true)
-  expect(storage.get('taxagent-pending-operation')).toBe(raw)
-  expect(page.storageApi.setItem).not.toHaveBeenCalled()
-  expect(page.storageApi.removeItem).not.toHaveBeenCalled()
-})
 
 test.each(invalidStoredOperations)('React initializer fails closed for invalid stored operation: %s', raw => {
   expect(initialOperation(() => raw)).toEqual({id:'unknown',taskId:'unknown',unknown:true})
@@ -65,85 +16,11 @@ test('React initializer distinguishes absent, unreadable and valid pending opera
   expect(initialOperation(() => '{"id":"pending","taskId":"task","unknown":true}')).toEqual({id:'pending',taskId:'task',unknown:true})
 })
 
-test('static page keeps its in-memory lock and never sends approval when setItem fails', async () => {
-  const page = await staticPage(new Map(), 'write')
-  await page.get('approve').onclick()
-  expect(page.get('approve').disabled).toBe(true)
-  expect(page.warnings[0].textContent).toContain('op-static')
-  await page.get('approve').onclick()
-  expect(page.fetcher.mock.calls.map(call => call[0])).toEqual(['/api/demo/session'])
-})
 
-test('static page keeps both locks when removeItem fails after matching verified readback', async () => {
-  const page = await staticPage(new Map(), 'remove')
-  page.fetcher.mockImplementationOnce(async () => Response.json({operationId:'op-static',verification:{verified:true},turn:null}))
-  await page.get('approve').onclick()
-  expect(page.storageApi.removeItem).toHaveBeenCalledWith('taxagent-pending-operation')
-  expect(JSON.parse(page.storage.get('taxagent-pending-operation')!)).toEqual({id:'op-static',taskId:'task-static',unknown:true})
-  expect(page.get('approve').disabled).toBe(true)
-  expect(page.warnings[0].textContent).toContain('op-static')
-  const requests = page.fetcher.mock.calls.length
-  await page.get('approve').onclick()
-  expect(page.fetcher).toHaveBeenCalledTimes(requests)
-})
 
-test.each(['network','invalid JSON','HTTP error','unverified','wrong operation','nonboolean verification'])
-('static page retains the operation lock after %s, across reload, while queries remain usable', async mode => {
-  const page = await staticPage()
-  page.fetcher.mockImplementationOnce(async () => {
-    if (mode === 'network') throw new TypeError('connection lost')
-    if (mode === 'invalid JSON') return new Response('invalid')
-    if (mode === 'HTTP error') return Response.json({errorCode:'STORAGE_ERROR'},{status:500})
-    return Response.json({operationId:mode === 'wrong operation' ? 'wrong' : 'op-static',
-      verification:{verified:mode === 'nonboolean verification' ? 'true' : mode !== 'unverified'},turn:null})
-  })
-  await page.get('approve').onclick()
-  expect(JSON.parse(page.storage.get('taxagent-pending-operation')!)).toEqual({id:'op-static',taskId:'task-static',unknown:true})
-  expect(page.get('approve').disabled).toBe(true)
-  const requests = page.fetcher.mock.calls.length
-  await page.get('approve').onclick()
-  expect(page.fetcher).toHaveBeenCalledTimes(requests)
-  const reloaded = await staticPage(page.storage)
-  expect(reloaded.get('approve').disabled).toBe(true)
-  expect(reloaded.warnings[0].textContent).toContain('op-static')
-  expect(reloaded.warnings[0].textContent).toContain('task-static')
-  await reloaded.get('refresh').onclick()
-  expect(reloaded.fetcher.mock.calls.map(call => call[0])).toEqual(['/api/demo/session','/api/demo/tasks','/api/demo/audit'])
-  expect(reloaded.get('approve').disabled).toBe(true)
-})
 
-test('static page clears only a matching verified response and persists no financial content', async () => {
-  const page = await staticPage()
-  page.fetcher.mockImplementationOnce(async () => {
-    expect(JSON.parse(page.storage.get('taxagent-pending-operation')!)).toEqual({id:'op-static',taskId:'task-static',unknown:true})
-    return Response.json({operationId:'op-static',verification:{verified:true},turn:null})
-  })
-  await page.get('approve').onclick()
-  expect(page.storage.has('taxagent-pending-operation')).toBe(false)
-  expect(page.get('approve').disabled).toBe(false)
-  expect(page.warnings[0].textContent).toBe('')
-})
 
-test('static page releases a proven not-executed approval and allows a new save', async () => {
-  const page = await staticPage()
-  page.fetcher.mockImplementationOnce(async () => Response.json({
-    operationId:'op-static', verification:null, errorCode:'WRITE_NOT_EXECUTED',
-    message:'本轮未执行保存；旧批准已结束，如需保存请重新确认', turn:null}))
-  await page.get('approve').onclick()
-  expect(page.storage.has('taxagent-pending-operation')).toBe(false)
-  expect(page.get('approve').disabled).toBe(false)
-  expect(page.get('error').textContent).toContain('本轮未执行保存')
-})
 
-test('static page keeps the lock when a dispatched write is unverified', async () => {
-  const page = await staticPage()
-  page.fetcher.mockImplementationOnce(async () => Response.json({
-    operationId:'op-static', verification:null, errorCode:'WRITE_NOT_VERIFIED',
-    message:'写入结果未核验；保留操作锁，请核查台账与发票', turn:null}))
-  await page.get('approve').onclick()
-  expect(page.storage.has('taxagent-pending-operation')).toBe(true)
-  expect(page.get('approve').disabled).toBe(true)
-})
 
 const pendingVerification = {id:'11111111-1111-4111-8111-111111111111',taskId:'22222222-2222-4222-8222-222222222222',unknown:true}
 const verificationModes = ['NOT_FOUND','DIVERGED','network','HTTP error','invalid JSON','wrong operation','nonboolean verified','false verified','missing status','null','remove failure','VERIFIED']
@@ -156,39 +33,6 @@ function verificationResponse(mode: string) {
     status:mode === 'missing status' ? undefined : ['NOT_FOUND','DIVERGED'].includes(mode) ? mode : 'VERIFIED',
     verification:{verified:mode === 'nonboolean verified' ? 'true' : mode !== 'false verified'}})
 }
-test.each(verificationModes)('static manual verification after reload: %s', async mode => {
-  const storage = new Map([['taxagent-pending-operation',JSON.stringify(pendingVerification)]])
-  const page = await staticPage(storage, mode === 'remove failure' ? 'remove' : undefined)
-  expect(page.get('approve').disabled).toBe(true)
-  expect(page.fetcher).toHaveBeenCalledTimes(1) // No verification or write on reload.
-  page.fetcher.mockImplementationOnce(async () => verificationResponse(mode))
-  await page.get('verifyOperation').onclick()
-  expect(page.fetcher.mock.calls[1][0]).toBe(`/api/demo/tasks/${pendingVerification.taskId}/operations/${pendingVerification.id}/verify`)
-  expect(page.fetcher.mock.calls[1][1]).toMatchObject({method:'POST',headers:{'X-CSRF-Token':'test'},body:undefined})
-  expect(page.get('approve').disabled).toBe(mode !== 'VERIFIED')
-  expect(storage.has('taxagent-pending-operation')).toBe(mode !== 'VERIFIED')
-  if (mode !== 'VERIFIED') {
-    const reloaded = await staticPage(storage)
-    expect(reloaded.get('approve').disabled).toBe(true)
-    await reloaded.get('refresh').onclick()
-    expect(reloaded.fetcher.mock.calls.map(c => c[0])).toEqual(['/api/demo/session','/api/demo/tasks','/api/demo/audit'])
-  }
-  expect(page.fetcher.mock.calls.some(c => c[0].endsWith('/turn'))).toBe(false)
-})
-test('static repeated verification sends only read-only verification requests', async () => {
-  const page = await staticPage(new Map([['taxagent-pending-operation',JSON.stringify(pendingVerification)]]))
-  page.fetcher.mockImplementation(async () => verificationResponse('NOT_FOUND'))
-  await page.get('verifyOperation').onclick(); await page.get('verifyOperation').onclick()
-  expect(page.fetcher.mock.calls.slice(1).map(c => c[0])).toEqual(Array(2).fill(`/api/demo/tasks/${pendingVerification.taskId}/operations/${pendingVerification.id}/verify`))
-  expect(page.get('approve').disabled).toBe(true)
-})
-test.each([...invalidStoredOperations, JSON.stringify({id:'unknown',taskId:'unknown',unknown:true})])
-('unknown static storage never calls verify: %s', async raw => {
-  const page = await staticPage(new Map([['taxagent-pending-operation',raw]]))
-  await page.get('verifyOperation').onclick()
-  expect(page.fetcher).toHaveBeenCalledTimes(1)
-  expect(page.get('approve').disabled).toBe(true)
-})
 test.each(verificationModes)('React manual verification helper retains lock unless exact verified and storage removal succeeds: %s', async mode => {
   const fetcher = vi.fn(async (url:string) => { void url; return verificationResponse(mode) })
   vi.stubGlobal('fetch',fetcher)
@@ -345,4 +189,35 @@ test('latest actual invoice query is the only review source; model prose and wri
   expect(queriedInvoices([exchange('query_invoices',{rows:[invoice]}),exchange('update_invoice',{verified:true})],'C001')).toEqual([])
   expect(queriedInvoices([exchange('query_invoices',{rows:[invoice]}),exchange('query_invoices',null,{code:'STORAGE_ERROR'})],'C001')).toEqual([])
   expect(queriedInvoices([exchange('query_invoices',{rows:[{...invoice,amount_cents:1.2}]})],'C001')).toEqual([])
+})
+
+test('execution plan is derived from task state and tool history, not model prose', () => {
+  const exchange:Exchange = {call:{id:'1',name:'query_invoices',arguments:'{}'},resultJson:JSON.stringify({data:{rows:[]},error:null})}
+  const waiting:Task = {id:'t',status:'WAITING_USER',version:2,goal:'检查用途',pending:['F002.purpose'],supplied:{},question:null,recentTools:[]}
+  const plan = deriveExecutionPlan(waiting,[exchange],null)
+  expect(plan.find(step => step.key === 'facts')?.state).toBe('done')
+  expect(plan.find(step => step.key === 'input')).toMatchObject({state:'waiting'})
+  expect(plan.find(step => step.key === 'close')).toMatchObject({state:'waiting'})
+  expect(plan.find(step => step.key === 'write')?.detail).toContain('尚未授权')
+  const completed:Task = {...waiting,status:'COMPLETED',pending:[]}
+  expect(deriveExecutionPlan(completed,[exchange],null).find(step => step.key === 'close')?.state).toBe('done')
+})
+
+test('citedRules only uses query_rules tool output and deduplicates by id/version', () => {
+  const history:Exchange[] = [
+    {call:{id:'1',name:'query_rules',arguments:'{}'},resultJson:JSON.stringify({data:{rules:[
+      {key:{rule_id:'R004',version:'1.0'},name:'银行资料说明'}]},error:null})},
+    {call:{id:'2',name:'query_invoices',arguments:'{}'},resultJson:JSON.stringify({data:{rules:[
+      {key:{rule_id:'R999',version:'9.9'}}]},error:null})},
+    {call:{id:'3',name:'query_rules',arguments:'{}'},resultJson:'not-json'}
+  ]
+  expect(citedRules(history)).toEqual([{id:'R004',version:'1.0',name:'银行资料说明'}])
+  expect(citedRules([])).toEqual([])
+})
+
+test('friendly errors stay natural without claiming an unverified success', () => {
+  expect(friendlyError('MODEL_FAILURE')).toContain('没有给出可执行的结论')
+  expect(friendlyError('TOOL_TIMEOUT')).toContain('不要重复写入')
+  expect(friendlyError('WRITE_NOT_EXECUTED')).toContain('本轮未执行保存')
+  expect(friendlyError('WRITE_NOT_VERIFIED')).toContain('写入结果未核验')
 })

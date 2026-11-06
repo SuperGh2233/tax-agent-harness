@@ -15,7 +15,8 @@ export interface Context { task: Task; preferences: Record<string, Statement> }
 export interface Exchange { call: {id: string; name: string; arguments: string}; resultJson: string }
 export interface Result { status: 'FINISHED' | 'NEEDS_INPUT' | 'ERROR'; text: string; errorCode: string | null; history: Exchange[] }
 export interface Verification { key: {enterpriseId: string; invoiceId: string}; purpose: string; remarks: string; verified: boolean }
-export interface TurnView { turn: {task: Task; result: Result} | null; verification: Verification | null; errorCode: string | null; message: string; operationId: string | null; modelInput?: string | null }
+export interface PromptTrace { systemPrompt: string; userMessage: string; tools: {name: string; parameters: unknown}[]; historySize: number }
+export interface TurnView { turn: {task: Task; result: Result} | null; verification: Verification | null; errorCode: string | null; message: string; operationId: string | null; modelInput?: string | null; promptTrace?: PromptTrace | null }
 export interface Approval { operationId: string; invoiceId: string; changes: Partial<Record<'purpose' | 'remarks', string>>; confirmed: true }
 export interface OperationVerification { operationId: string; status: 'VERIFIED' | 'NOT_FOUND' | 'DIVERGED'; verification: Verification | null }
 export function canVerifyOperation(operation: {id: string; taskId: string} | null): boolean {
@@ -48,14 +49,80 @@ export function provenNotExecuted(result: TurnView, operationId: string): boolea
 export class ApiError extends Error {
   constructor(public code: string, public status = 0) { super(friendlyError(code)); }
 }
+export type PlanState = 'done' | 'current' | 'waiting' | 'optional'
+export interface PlanStep { key: string; title: string; state: PlanState; detail: string }
+export interface RuleCitation { id: string; version: string; name?: string }
+
+const QUERY_TOOLS = new Set(['query_invoices', 'query_bank_entries', 'check_invoice_purpose', 'query_rules'])
+
+function hasVerifiedUpdate(history: Exchange[]) {
+  return history.some(exchange => {
+    if (exchange.call.name !== 'update_invoice') return false
+    try { return JSON.parse(exchange.resultJson)?.data?.verified === true } catch { return false }
+  })
+}
+
+/** Deterministic plan derived from backend task state and tool history, never from model prose. */
+export function deriveExecutionPlan(task: Task | null, history: Exchange[], verification: Verification | null): PlanStep[] {
+  if (!task) return []
+  const toolNames = new Set([...history.map(exchange => exchange.call.name), ...task.recentTools.map(tool => tool.tool)])
+  const queried = [...QUERY_TOOLS].some(name => toolNames.has(name))
+  const pending = task.pending.length > 0
+  const completed = task.status === 'COMPLETED'
+  const waiting = task.status === 'WAITING_USER'
+  const verified = verification?.verified === true || hasVerifiedUpdate(history)
+  const writeAttempted = history.some(exchange => exchange.call.name === 'update_invoice')
+  return [
+    {key:'scope', title:'确认企业与任务范围', state:'done', detail:task.goal},
+    {key:'facts', title:'查询当前事实', state:queried ? 'done' : (completed || waiting) ? 'done' : 'current',
+      detail:queried ? '已调用发票、银行或规则工具' : '尚未查询当前数据库'},
+    {key:'rules', title:'核对规则与用途缺口', state:queried ? 'done' : 'current',
+      detail:queried ? '以工具结果为准，不采用模型心算' : '等待查询规则/用途'},
+    {key:'input', title:'补充或更正明确事实', state:pending ? 'waiting' : 'done',
+      detail:pending ? `待补：${task.pending.join('、')}` : '没有待补字段'},
+    {key:'write', title:'保存并回读核验', state:verified ? 'done' : pending ? 'optional' : writeAttempted ? 'current' : 'optional',
+      detail:verified ? 'verified=true，数据库回读一致' : writeAttempted ? '已发起写入但未核验，禁止重复保存' : '只读、尚未授权保存'},
+    {key:'close', title:'结项证据门', state:completed ? 'done' : waiting ? 'waiting' : 'current',
+      detail:completed ? '任务完成且证据门通过' : waiting ? '等待用户补充，不能提前结项' : '执行中，禁止用模型文字结项'}
+  ]
+}
+
+/** Rules actually returned by query_rules in this turn; model citations are never evidence by themselves. */
+export function citedRules(history: Exchange[]): RuleCitation[] {
+  const found = new Map<string, RuleCitation>()
+  for (const exchange of history) {
+    if (exchange.call.name !== 'query_rules') continue
+    try {
+      const rules = JSON.parse(exchange.resultJson)?.data?.rules
+      if (!Array.isArray(rules)) continue
+      for (const rule of rules) {
+        const id = rule?.key?.rule_id
+        const version = rule?.key?.version
+        if (typeof id === 'string' && typeof version === 'string') {
+          found.set(`${id}@${version}`, {id, version, name:typeof rule.name === 'string' ? rule.name : undefined})
+        }
+      }
+    } catch { /* malformed historical result is not a citation */ }
+  }
+  return [...found.values()]
+}
+
 export function friendlyError(code: string) {
   const messages: Record<string, string> = {
     MODEL_NOT_CONFIGURED: '真实模型未配置。请在服务端设置 LLM_ENDPOINT、LLM_API_KEY 和 LLM_MODEL；当前没有模拟回复。',
+    MODEL_FAILURE: '模型没有给出可执行的结论；本轮没有据此执行保存。请重试，或查看工具与审计记录确认已发生的只读操作。',
+    MODEL_TIMEOUT: '模型响应超时；本轮不能据此声明成功。请以工具和审计记录为准，勿重复写入。',
     CONFLICT: '任务版本或进行中的任务存在冲突，请重新加载任务核对。',
+    CONFIRMATION_REQUIRED: '保存需要本轮明确确认；当前没有获得授权。',
     PERMISSION_DENIED: '当前身份没有该企业或操作权限。',
     AUTHENTICATION_REQUIRED: '请先选择本地身份与企业。',
     CSRF_REQUIRED: '会话校验已失效，请重新连接或选择身份。',
-    MODEL_TIMEOUT: '模型响应超时，请先核查实际工具与审计状态。',
+    INVALID_ARGUMENT: '请求或工具参数不完整；请补充企业、月份和明确值。',
+    TOOL_FAILURE: '工具执行失败，结果不能作为业务结论；请核查参数或权限后重试只读查询。',
+    TOOL_TIMEOUT: '工具执行超时，结果未知；请先只读核验，不要重复写入。',
+    MAX_STEPS: '本轮工具步骤过多，系统已停止；请缩小查询范围后重试，不要重复写入。',
+    RUNTIME_FAILURE: '执行过程中出现未分类异常；请以审计和数据库回读为准，不要重复保存。',
+    INTERRUPTED: '请求被中断，结果未知；请核查审计与数据库回读。',
     AUDIT_STORAGE_ERROR: '审计存储失败，不能声明整体成功；请核查数据库回读。',
     TASK_STATE_SAVE_FAILED: '财务结果已返回，但任务状态保存失败；请核查回读，勿重复写入。',
     NETWORK_UNKNOWN: '未收到可确认的响应。结果未知，请核查审计和数据库，勿重复保存。',

@@ -337,3 +337,19 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 
 - 本次补修验收：DONE（T15整体仍IN_PROGRESS）。静态页和React仅键缺失返回null；读取异常、损坏JSON、无效形状均生成{id:unknown,taskId:unknown,unknown:true}保守占位锁，不改写原存储、不发送财务请求。合法已有对象继续锁定。React同时修复setItem失败时不得继续发送；两页均先建立内存锁再setItem，清锁则先成功removeItem再清内存/渲染，removeItem异常保持锁。
 - 2026-10-31最终npm run verify退出0：typecheck/lint/build通过，Vitest 1文件36/36（原18+本次18）；覆盖静态损坏JSON/getItem异常/无效形状后approve零请求且只读刷新可用、存储不被覆盖清除、setItem和removeItem失败保持锁，以及React纯初始化函数的缺失/异常/合法/无效形状。node --check src/main/resources/static/demo.js、git diff --check均退出0。首次Vitest被系统临时缓存沙箱权限阻断，获准原命令离线重跑通过。未运行Maven或应用、未联网、未操作数据库、未读取密钥、未暂存/提交/推送；仅指定五文件内容变更。
+
+### T16 — 初赛评审对齐收尾（2026-11-06）
+- 状态：IN_PROGRESS；承接 T15/T13。目标：让任务规划、上下文来源、自然表达、离线构建和提交材料可见、可验收；不改变业务边界。
+- 已完成：
+  - React 单一前端：删除旧 `static/index.html`、`demo.js`、`demo.css` 和 vendor；根路径固定跳转 `/react-app/`；`mvn package` 在 `prepare-package` 自动安装 Node/npm、构建并复制到 JAR，`mvn test` 不触发前端。
+  - 检查器新增“执行计划”（由后端任务状态/工具历史推导，不是模型自述）和“上下文来源”四栏：任务进度、长期偏好、规则（仅 `query_rules` 工具结果）、企业上下文。
+  - 错误码增加自然提示；`WRITE_NOT_EXECUTED`/`WRITE_NOT_VERIFIED` 文案保留证据门，不把失败说成成功。
+  - 待补提示改为第一人称自然措辞，仍不展示模型“已完成”的错误结论。
+  - 完整模型输入 trace：系统提示、完整用户消息、四个工具 schema、初始历史计数；React 检查器可展开。
+  - OSV 依赖 CVE 扫描：35 个 runtime 依赖，Jackson 2.21.7、Tomcat 10.1.59、Log4j 2.25.5；0 未抑制，2 条 Spring 6.2.19 风险接受，见 `docs/specs/DEPENDENCY_SECURITY.md`。
+  - 审计保留策略：append-only、禁止 UPDATE/DELETE、导出后整库归档，见 `docs/specs/AUDIT_RETENTION.md`；测试覆盖触发器拒绝。
+  - 离线包：`scripts/package_offline.ps1` 使用已有 `frontend/dist` + `mvn -o -Dfrontend.skip=true package`；README/REPRODUCE 已写明联网首次构建、预构建 JAR 和 Node 缓存边界。
+  - 最终提交说明草稿：`docs/SUBMISSION_NOTES.md`。
+- 验证：Java 247/0/0/0（关闭 Windows 临时目录清理）；前端 37/37（typecheck、ESLint、Vite build）；`mvn clean package` 成功；OSV 0 未抑制；React 真实查询+R004 与完整 prompt trace 通过。
+- 未完成：官方 Qwen3.8-Max 复测、React 浏览器内受控保存/跨轮、≤5 分钟视频、最终作品 zip。
+- 已按用户明确要求将本轮 P1/P2 改动提交并推送到 `origin/work/zhanghengyuan1`；此前 `5b19cdd` 也已在同一分支。
