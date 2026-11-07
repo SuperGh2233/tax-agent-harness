@@ -87,8 +87,32 @@ class FinanceAgentIntegrationTest {
         assertThat(data(turn, 1).path("rows").size()).isEqualTo(month.endsWith("07") ? 0 : 12);
         assertThat(fake.requests.getLast().history()).isEqualTo(turn.result().history());
         assertThat(ledgerCount()).isZero();
+        ScenarioScorecard.record("query-" + enterprise + "-" + month, turn,
+                Map.of("total_cents", total, "expense_cents", expense, "income_cents", income, "ledgerOperations", 0), 0, 0);
         evidence("query-" + enterprise + "-" + month, Map.of("model", "FakeLlmClient (not cloud)",
                 "turn", turn, "modelRequests", fake.requests));
+    }
+
+    @Test void scenarioOneRuleExplanationUsesR004() throws Exception {
+        var rules = new Call(UUID.randomUUID().toString(), "query_rules",
+                "{\"enterprise_id\":\"C001\",\"date\":\"2026-09-15\"}");
+        var fake = new FakeLlmClient(query("query_invoices", "C001", "2026-09"),
+                query("query_bank_entries", "C001", "2026-09"), rules,
+                new Finish("依据 R004 1.0，银行流水不能证明发票已付款"));
+        var agent = agent("U001", "C001", fake);
+        var task = agent.start("金额查询与规则解释", List.of());
+        var turn = agent.turn(task.id(), "C001 九月这笔同额银行支出，能证明 F002 已付款吗？");
+        assertThat(turn.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(data(turn, 0).path("total_cents").asLong()).isEqualTo(962206);
+        assertThat(data(turn, 1).path("expense_cents").asLong()).isEqualTo(718074);
+        JsonNode r004 = null;
+        for (var rule : data(turn, 2).path("rules")) if ("R004".equals(rule.at("/key/rule_id").asText())) r004 = rule;
+        assertThat(r004).isNotNull();
+        assertThat(r004.at("/key/version").asText()).isEqualTo("1.0");
+        assertThat(r004.path("content").asText()).contains("不能据此推断某张发票已经付款");
+        assertThat(ledgerCount()).isZero();
+        ScenarioScorecard.record("query-rules-C001-2026-09", turn,
+                Map.of("total_cents", 962206, "r004", "1.0", "ledgerOperations", 0), 0, 0);
     }
 
     @ParameterizedTest @CsvSource({"C001,5,4,R002,2.0", "C002,3,2,R003,1.0"})
@@ -122,7 +146,8 @@ class FinanceAgentIntegrationTest {
         assertThat(saved.task().status()).isEqualTo(TaskMemory.Status.WAITING_USER);
         assertThat(ledgerCount()).isEqualTo(1);
         assertThat(secondModel.requests.getFirst().userMessage()).contains("办公室实际采购", "无；补充信息不是保存授权");
-        var writeSchema = secondModel.requests.getFirst().tools().stream()
+        assertThat(secondModel.requests.getFirst().tools()).extracting(Tool::name).doesNotContain("update_invoice");
+        var writeSchema = secondModel.requests.get(1).tools().stream()
                 .filter(t -> t.name().equals("update_invoice")).findFirst().orElseThrow().parameters();
         assertThat(writeSchema.at("/properties/key")).isEqualTo(ToolContract.schema().at("/$defs/InvoiceKey"));
         assertThat(writeSchema.at("/properties/changes")).isEqualTo(ToolContract.schema().at("/$defs/InvoiceUpdate/properties/changes"));
@@ -131,6 +156,9 @@ class FinanceAgentIntegrationTest {
         assertThat(restarted.load(task.id()).task()).isEqualTo(saved.task());
         assertThat(restarted.recover(task.id(), "save-" + enterprise, update)).get().extracting(UpdateResult::verified).isEqualTo(true);
         assertThat(data(restarted.turn(task.id(), "重启后检查现存状态"), 0).path("missing").size()).isEqualTo(remaining);
+        ScenarioScorecard.record("cross-turn-" + enterprise, saved,
+                Map.of("initialMissing", initial, "remainingMissing", remaining, "ledgerOperations", 1,
+                        "taskStatus", saved.task().status().name()), 0, 0);
         // Human-reviewable structured trace, recreated by smoke; no secrets or runtime DB involved.
         var evidence = Map.of("model", "FakeLlmClient (not cloud)", "enterprise", enterprise,
                 "check", waiting, "supplement", supplemented, "explanation", explanation, "saveAndRequery", saved,
@@ -154,6 +182,8 @@ class FinanceAgentIntegrationTest {
         assertThat(restart.recover(task.id(), "direct", update)).get().extracting(UpdateResult::verified).isEqualTo(true);
         assertThat(ledgerCount()).isEqualTo(1);
         assertThat(restart.recover(again.id(), "unknown-operation", update)).isEmpty();
+        ScenarioScorecard.record("save-direct", saved,
+                Map.of("verified", true, "ledgerOperations", 1, "taskStatus", saved.task().status().name()), 0, 0);
         evidence("direct-save", Map.of("model", "FakeLlmClient (not cloud)", "turn", saved, "modelRequests", fake.requests));
     }
 
@@ -163,8 +193,8 @@ class FinanceAgentIntegrationTest {
         var agent = agent("U001", "C001", new FakeLlmClient(new Finish(claim)));
         var task = agent.start("保存指定发票", List.of());
         var turn = agent.approvedTurn(task.id(), "现在保存", "missing", update("C001"), SAVE_NOW);
-        failed(turn, "WRITE_NOT_VERIFIED");
-        assertThat(turn.result().text()).isEqualTo("本次请求未成功完成：WRITE_NOT_VERIFIED");
+        failed(turn, "WRITE_NOT_EXECUTED");
+        assertThat(turn.result().text()).isEqualTo("本次请求未成功完成：WRITE_NOT_EXECUTED");
         assertThat(turn.result().history()).isEmpty();
         assertThat(agent.load(task.id()).task().status()).isEqualTo(TaskMemory.Status.ACTIVE);
         assertThat(ledgerCount()).isZero();
@@ -195,7 +225,7 @@ class FinanceAgentIntegrationTest {
         var first = agent.approvedTurn(task.id(), "保存", "first", update, SAVE_NOW);
         assertThat(first.task().status()).isEqualTo(TaskMemory.Status.WAITING_USER);
         assertThat(data(first, 0).path("verified").asBoolean()).isTrue();
-        failed(agent.approvedTurn(task.id(), "再次保存", "second", update, SAVE_NOW), "WRITE_NOT_VERIFIED");
+        failed(agent.approvedTurn(task.id(), "再次保存", "second", update, SAVE_NOW), "WRITE_NOT_EXECUTED");
         assertThat(ledgerCount()).isEqualTo(1);
     }
 
@@ -365,4 +395,33 @@ class FinanceAgentIntegrationTest {
         }
         assertThat(restarted.load(task.id()).task()).isEqualTo(before);
     }
+
+    /** Test-only two-column scorecard: what the model chose vs what the system/DB verified. */
+    static final class ScenarioScorecard {
+        private static final List<Map<String, Object>> SCENARIOS = new ArrayList<>();
+        private static int unauthorizedWrites;
+        private static int successWithoutVerification;
+        static void record(String scenario, TaskMemory.Turn turn, Map<String, Object> verified,
+                           int unauthorized, int unverifiedSuccess) {
+            var modelChose = turn.result().history().stream().map(exchange -> exchange.call().name()).toList();
+            SCENARIOS.add(new LinkedHashMap<>(Map.of(
+                    "scenario", scenario, "modelChose", modelChose, "systemVerified", verified,
+                    "unauthorizedWrites", unauthorized, "successWithoutVerification", unverifiedSuccess)));
+            unauthorizedWrites += unauthorized;
+            successWithoutVerification += unverifiedSuccess;
+        }
+        static void summarize() throws Exception {
+            assertThat(SCENARIOS).isNotEmpty();
+            assertThat(unauthorizedWrites).isZero();
+            assertThat(successWithoutVerification).isZero();
+            var root = new LinkedHashMap<String, Object>();
+            root.put("model", "FakeLlmClient (offline; not cloud)");
+            root.put("scenarios", List.copyOf(SCENARIOS));
+            root.put("totals", Map.of("unauthorizedWrites", unauthorizedWrites,
+                    "successWithoutVerification", successWithoutVerification));
+            Files.createDirectories(Path.of("target/t10-evidence"));
+            JSON.writerWithDefaultPrettyPrinter().writeValue(Path.of("target/t10-evidence/scorecard.json").toFile(), root);
+        }
+    }
+    @AfterAll static void writeScenarioScorecard() throws Exception { ScenarioScorecard.summarize(); }
 }

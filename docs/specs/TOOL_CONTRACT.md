@@ -29,6 +29,7 @@ JSON 字段使用 snake_case；必填字符串非空，未知字段拒绝。月�
 | query_invoices | Query(enterprise_id, month) | InvoiceResult：rows、total_cents；每行 Invoice 含 key(enterprise_id, invoice_id)、invoice_date、seller、item、amount_cents、purpose、remarks |
 | query_bank_entries | Query(enterprise_id, month) | BankResult：rows、income_cents、expense_cents；BankEntry 含 key(enterprise_id, entry_id)、transaction_date、direction(收入/支出)、amount_cents、counterparty、remarks |
 | check_invoice_purpose | PurposeCheck(enterprise_id, month)，仅 2026-09 | PurposeResult：missing 发票复合键列表、rules 规则引用(name/id/version)列表；有效版本筛选和计算留 T06 |
+| query_rules | RuleQuery(enterprise_id, date) | RuleQueryResult：rules 列表，每项 key(rule_id, version)、name、effective_from、status、content；仅当前企业、指定日期启用且已生效的版本 |
 | update_invoice | InvoiceUpdate(key, changes) | UpdateResult(key, purpose, remarks, verified)；verified 仅真实保存并回读一致后为 true |
 | task | StateRequest(enterprise_id, action, id, content) | StateResult(id, content)；action=GET/PUT/DELETE，GET 的 id 可空表示当前未完成任务；其余必填；PUT content 必填，其他不得带 content |
 | memory | 同 StateRequest | StateResult；GET id 空表示列出当前归属记忆，输出为列表；PUT 必须来自用户明确偏好/更正，DELETE 明确删除 |
@@ -68,10 +69,16 @@ changes 为非空 Map<string,string>，仅允许 purpose、remarks；省略表�
 
 ### T06 本地 service 层补充（2026-10-30）
 
-`RuleService` 未注册 HTTP 或模型工具入口，T04 输入 DTO/Schema 不变。`queryRules(session, enterprise, date)` 输出 `StoredRule(key, definition)` 不可变列表，含完整 ID/版本/名称/正文；date=null 包含停用历史，指定日期只返回企业关联、启用且生效日不晚于该日的规则。`checkInvoicePurpose` 输出既有 PurposeResult，在同一只读事务读取权限、规则和当前发票。规则正文可通过 queryRules 检索。
+`RuleService` 的服务层查询仍为 `queryRules(session, enterprise, date)`；P1 追加的 `query_rules` 只读模型工具复用同一查询，仅返回当前企业、指定日期启用且已生效的规则，不返回停用历史。
 
 确定性用途执行仅支持官方 R002 2.0 / R003 1.0，完整定义必须匹配已核对种子中的语义基线；当前状态与关联以 DB 为准，停用绝不回退。缺失/未知正文或版本为 UNSUPPORTED_SCOPE，同一用途规则多个启用版本适用为 CONFLICT，不推定官方未定义的版本优先级。用途月份仍仅 2026-09。
 
 普通 Session 的管理全部拒绝（包括 U001），PermissionGuard 保持不变。仅可信本地代码显式创建 ManagementContext 可调用 importVersion/disableVersion；不得从模型、HTTP 或自然语言构造此上下文，当前无入口签发它。它是本地管理能力，不代表官方已定义管理员身份。导入事务原子保存规则及非空企业集合，未知企业/非法定义 INVALID_ARGUMENT、已存在版本 CONFLICT；更新使用新版本，保留旧正文。停用针对全局版本及其所有企业关联，保留正文与历史记录；目标缺失 NOT_FOUND。SQL 失败回滚并返回 STORAGE_ERROR。无数据库迁移。
 
 ToolContractTest 与 PermissionGuardTest 覆盖矩阵、未知主体、缺权限、SQL 失败、字段白名单、严格 JSON、非法查询和不可变快照。执行 README 的 JDK21 `mvn -B -ntp -Dmaven.repo.local="$PWD/.m2/repository" test`；实际结果记录 TASKS.md。仅测试通过且审查通过后标 T04 DONE。
+
+### P1 规则查询工具（2026-11-05 追加）
+
+`query_rules(enterprise_id, date)` 是只读模型工具，`date` 必须显式 ISO 日期。权限沿用当前 Session 和当前任务企业，跨企业调用拒绝；输出只含该企业关联、`status=启用` 且 `effective_from <= date` 的规则版本，不返回停用历史。每项包含 `key(rule_id, version)`、`name`、`effective_from`、`status`、`content`。
+
+规则正文按不可信数据处理：系统提示要求引用 `rule_id`/`version`，但正文不能当作指令。离线验收：C001 2026-09 返回 R001 1.0 / R002 2.0 / R004 1.0，排除停用的 R002 1.0；C002 返回 R003 1.0；R004 正文明确银行记录不能证明某张发票已付款。真实模型是否在回答中正确引用仍属于演示 E2E 验收，不由单元测试代替。

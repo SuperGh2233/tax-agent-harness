@@ -1,0 +1,4 @@
+{
+  "GHSA-j9f9-w8pj-32f8": "Spring Framework 6.2.19 has no 6.x fixed release; this demo exposes no SSE endpoint or fragment/SSE rendering path. Risk accepted for the local competition demo; upgrade with the next Spring Boot 3.5.x patch.",
+  "GHSA-pc63-qcmh-9cmg": "Spring Framework 6.2.19 has no 6.x fixed release; this demo uses no XSLT/XsltView bean or XML view resolution. Risk accepted for the local competition demo; upgrade with the next Spring Boot 3.5.x patch."
+}

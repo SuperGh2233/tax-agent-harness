@@ -13,6 +13,8 @@
 *.db-wal
 *.log
 
+
+
 # Local reproduction artifacts, financial exports and recordings (never deliver)
 /tmp/
 /recordings/

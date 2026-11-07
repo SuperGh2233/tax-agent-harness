@@ -45,7 +45,7 @@ TaskMemory 自身仍按 T08 保存任务目标、明确补充及原话；Invoice
 
 带 taskId 的 request 在任何 REQUESTED 审计前以当前 DemoPrincipal 调用 FinanceAgent.load 预检所有权/权限；NOT_FOUND/PERMISSION_DENIED 拒绝事件仅保留 requestId/action/errorCode，taskId=null，不保存目标 UUID。load/supplement 共用此入口；turn 保持先 load 后记录。权限已撤销而无法追加审计时仍拒绝访问，不以审计授予权限。既有 append-only 记录不由本次修正迁移或删除。
 
-页面、静态资源和 demo API（含拒绝响应）返回严格 CSP：`default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`。无外部资源，API 原有来源和 CSRF 限制不变。
+React 页面资源和 demo API（含拒绝响应）返回严格 CSP：`default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`。无外部资源，API 原有来源和 CSRF 限制不变。
 
 验收见 DemoApiTest、TASKS.md 和 T12 计划；2026-10-30 安全修正后真实 JDK21 全量187/0/0/0通过，恢复目标任务 UUID 隔离强断言并验证 CSP；原有服务契约不改。
 
@@ -67,4 +67,4 @@ unset LLM_API_KEY
 
 ## T15 单实例并发与未知写入边界
 既有 DemoController 使用固定64个进程内 lock stripes，按可信 principal 的 userId+enterprise 选择。turn、cancel、supplement 共用此锁，覆盖读取、模型/工具执行、任务CAS与审计；同一用户企业即使来自不同 HttpSession 也串行。任务作用域、权限、CSRF和数据库乐观版本校验保留。取消等待已开始的turn结束后重新检查版本/终态，已完成任务返回409。条带碰撞仅降低并发；这是 loopback 单 JVM demo，不提供跨 JVM 或不响应中断的超时 worker 强制停止保证。
-默认静态页与React共用 sessionStorage 键 taxagent-pending-operation，仅保存 {id,taskId,unknown:true}。批准请求发送前持久化；只有该请求响应 operationId 精确匹配且 verification.verified===true 才清锁。网络/解析/HTTP错误及未核验结果均禁止再次approve，重载恢复警告，只读查询可用，不自动重试。
+React 使用 sessionStorage 键 taxagent-pending-operation，仅保存 {id,taskId,unknown:true}。批准请求发送前持久化；只有该请求响应 operationId 精确匹配且 verification.verified===true 才清锁。网络/解析/HTTP错误及未核验结果均禁止再次approve，重载恢复警告，只读查询可用，不自动重试。

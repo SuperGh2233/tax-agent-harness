@@ -13,8 +13,11 @@ public class DemoConfiguration {
         if (endpoint == null || endpoint.isBlank() || key == null || key.isBlank() || model == null || model.isBlank())
             return request -> { throw new OpenAiCompatibleClient.ModelException("MODEL_NOT_CONFIGURED"); };
         // Construction performs no network request. Never log configuration or exception payloads.
-        if (URI.create(endpoint).getPath().replaceAll("/+$", "").endsWith("/anthropic"))
-            return new AnthropicMessagesClient(URI.create(endpoint), key, model, Duration.ofSeconds(60));
-        return new OpenAiCompatibleClient(URI.create(endpoint), key, model, Duration.ofSeconds(15));
+        var protocol = env.getProperty("LLM_PROTOCOL");
+        var path = URI.create(endpoint).getPath();
+        var anthropic = "anthropic".equalsIgnoreCase(protocol) || path.contains("/anthropic");
+        var timeout = Duration.ofSeconds(60);
+        if (anthropic) return new AnthropicMessagesClient(URI.create(endpoint), key, model, timeout);
+        return new OpenAiCompatibleClient(URI.create(endpoint), key, model, timeout);
     }
 }

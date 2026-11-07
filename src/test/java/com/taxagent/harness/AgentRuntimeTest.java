@@ -84,6 +84,26 @@ class AgentRuntimeTest {
         assertThat(result.errorCode()).isEqualTo("INVALID_ARGUMENT");
         assertThat(result.history().get(0).resultJson()).contains("\"data\":null");
     }
+    @Test void modelCanQueryRulesForCurrentEnterpriseAndDate() throws Exception {
+        var fake = new FakeLlmClient(
+                new Call("rules", "query_rules", "{\"enterprise_id\":\"C001\",\"date\":\"2026-09-15\"}"),
+                new Finish("依据 R004 1.0，银行流水不能证明发票已付款"));
+        var result = runtime(fake).run(user, "C001 九月银行支出能证明 F002 已付款吗");
+        assertThat(result.status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(fake.requests.get(0).tools()).extracting(Tool::name).contains("query_rules");
+        var response = new ObjectMapper().readTree(result.history().get(0).resultJson());
+        var keys = new ArrayList<String>();
+        response.at("/data/rules").forEach(r -> keys.add(r.at("/key/rule_id").asText()+" "+r.at("/key/version").asText()));
+        assertThat(keys).containsExactlyInAnyOrder("R001 1.0","R002 2.0","R004 1.0");
+        assertThat(response.at("/data/rules").toString()).contains("银行资料说明","不能据此推断某张发票已经付款");
+    }
+    @Test void ruleQueryCannotCrossEnterprise() {
+        var fake = new FakeLlmClient(
+                new Call("rules", "query_rules", "{\"enterprise_id\":\"C002\",\"date\":\"2026-09-15\"}"),
+                new Finish("成功"));
+        var result = runtime(fake).run(user, "查询乙企业规则");
+        assertThat(result.errorCode()).isEqualTo("PERMISSION_DENIED");
+    }
     @Test void stepLimitWhitelistAndCanonicalSchemas() {
         var limits = new AgentRuntime.Limits(2, Duration.ofSeconds(2), 0, Set.of("query_invoices"));
         var fake = new FakeLlmClient(call("query_invoices"), call("query_invoices"), new Finish("结束"));

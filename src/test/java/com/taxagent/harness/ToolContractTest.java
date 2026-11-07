@@ -30,6 +30,10 @@ class ToolContractTest {
     @Test void validQueryAndCompositeKeys() {
         assertThat(ToolContract.decode("{\"enterprise_id\":\"C001\",\"month\":\"2026-09\"}", Query.class))
                 .isEqualTo(new Query("C001", "2026-09"));
+        assertThat(ToolContract.decode("{\"enterprise_id\":\"C001\",\"date\":\"2026-09-15\"}", RuleQuery.class))
+                .isEqualTo(new RuleQuery("C001", java.time.LocalDate.of(2026, 9, 15)));
+        fails(ErrorCode.INVALID_ARGUMENT, () -> ToolContract.decode("{\"enterprise_id\":\"C001\"}", RuleQuery.class));
+        fails(ErrorCode.INVALID_ARGUMENT, () -> new RuleQuery("C001", null));
         assertThat(new InvoiceKey("C001", "F001")).isNotEqualTo(new InvoiceKey("C002", "F001"));
         fails(ErrorCode.INVALID_ARGUMENT, () -> new InvoiceKey(null, "F001"));
         fails(ErrorCode.INVALID_ARGUMENT, () -> new BankKey("C001", ""));

@@ -97,6 +97,90 @@ class DemoApiTest {
         assertThat(event.path("tool").asText()).isEqualTo("verify");
         assertThat(event.toString()).doesNotContain("private-purpose");
     }
+    @Test void approvedFinishWithoutWriteIsTerminalNotExecutedAndKeepsTaskOpen() throws Exception {
+        setup(new FakeLlmClient(new Finish("已保存")));
+        select("operator","C001"); String task=start(), op=UUID.randomUUID().toString();
+        String before=purpose();
+        var result=turn(task,approved(op));
+        assertThat(result.path("errorCode").asText()).isEqualTo("WRITE_NOT_EXECUTED");
+        assertThat(result.path("verification").isNull()).isTrue();
+        assertThat(result.path("operationId").asText()).isEqualTo(op);
+        assertThat(result.path("message").asText()).contains("本轮未执行保存");
+        assertThat(result.at("/turn/task/status").asText()).isEqualTo("ACTIVE");
+        assertThat(result.at("/turn/result/status").asText()).isEqualTo("ERROR");
+        assertThat(purpose()).isEqualTo(before);
+        assertThat(count("invoice_operations")).isZero();
+        assertThat(ok(get("/api/demo/audit")).findValuesAsText("tool")).doesNotContain("update_invoice");
+    }
+    @Test void ruleQueryIsAuditedWithVersionDurationAndMemorySource() throws Exception {
+        setup(new FakeLlmClient(new Call("rules","query_rules","{\"enterprise_id\":\"C001\",\"date\":\"2026-09-15\"}"), new Finish("依据 R004 1.0")));
+        select("operator","C001"); String task=start();
+        var result=turn(task, Map.of("message","C001 九月银行支出能证明 F002 已付款吗"));
+        assertThat(result.path("modelInput").asText()).contains("F002.purpose");
+        assertThat(result.path("promptTrace").isObject()).isTrue();
+        assertThat(result.at("/promptTrace/userMessage").asText()).contains("F002.purpose");
+        assertThat(result.at("/promptTrace/tools").isArray()).isTrue();
+        var events=ok(get("/api/demo/audit"));
+        JsonNode ruleEvent=null;
+        for (var event:events) if ("query_rules".equals(event.path("tool").asText())) ruleEvent=event;
+        assertThat(ruleEvent).isNotNull();
+        assertThat(ruleEvent.path("ruleVersion").asText()).contains("R004@1.0");
+        assertThat(ruleEvent.path("durationMs").isNumber()).isTrue();
+        assertThat(ruleEvent.path("memorySource").asText()).isEqualTo("task-memory");
+    }
+    @Test void sameRequestIdReplaysApprovedWriteWithoutSecondExecution() throws Exception {
+        var fake = new FakeLlmClient(new Call("save","update_invoice",WRITE), new Finish("saved"));
+        setup(fake); select("operator","C001"); String task=start();
+        String op=UUID.randomUUID().toString(), rid=UUID.randomUUID().toString();
+        var input = new HashMap<String,Object>(approved(op)); input.put("requestId",rid);
+        var first=turn(task,input);
+        int modelCalls=fake.seen.size();
+        var second=turn(task,input);
+        assertThat(second).isEqualTo(first);
+        assertThat(fake.seen).hasSize(modelCalls);
+        assertThat(count("invoice_operations")).isEqualTo(1);
+        var changed = new HashMap<String,Object>(input); changed.put("message","完全不同的请求");
+        mvc.perform(postJson("/tasks/"+task+"/turn",changed).session(session).header("X-CSRF-Token",csrf))
+                .andExpect(status().isConflict());
+        assertThat(fake.seen).hasSize(modelCalls);
+    }
+    @Test void preferencesAreExplicitScopedAndDeletable() throws Exception {
+        select("operator","C001");
+        assertThat(ok(get("/api/demo/preferences")).size()).isZero();
+        var saved=ok(postJson("/preferences",Map.of("name","style","value","简洁","userRequest","用户喜欢简洁")));
+        assertThat(saved.path("style").path("value").asText()).isEqualTo("简洁");
+        var updated=ok(postJson("/preferences",Map.of("name","style","value","详细","userRequest","用户改为详细")));
+        assertThat(updated.path("style").path("value").asText()).isEqualTo("详细");
+        assertThat(ok(get("/api/demo/audit")).toString()).doesNotContain("用户喜欢简洁","简洁","详细");
+        mvc.perform(delete("/api/demo/preferences/style").session(session).header("X-CSRF-Token",csrf)).andExpect(status().isOk());
+        assertThat(ok(get("/api/demo/preferences")).size()).isZero();
+    }
+    @Test void auditExportIsASanitizedCsv() throws Exception {
+        setup(new FakeLlmClient(new Finish("查询完成")));
+        select("operator","C001"); String task=start();
+        turn(task, Map.of("message","查询说明"));
+        var result=mvc.perform(get("/api/demo/audit/export").session(session)).andExpect(status().isOk()).andReturn();
+        assertThat(result.getResponse().getContentType()).contains("text/csv");
+        assertThat(result.getResponse().getHeader("Content-Disposition")).contains("taxagent-audit.csv");
+        var csv=result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(csv).contains("requestId","turn","taskId").doesNotContain("private-purpose");
+    }
+    @Test void ordinaryTurnHidesWriteToolAndApprovedTurnPublishesIt() throws Exception {
+        var fake = new FakeLlmClient(new Finish("查询完成"), new Finish("已保存"));
+        setup(fake); select("operator","C001"); String task=start();
+        turn(task, Map.of("message","查询说明"));
+        assertThat(fake.seen.get(0).tools()).extracting(Tool::name).doesNotContain("update_invoice");
+        turn(task, approved(UUID.randomUUID().toString()));
+        assertThat(fake.seen.get(1).tools()).extracting(Tool::name).contains("update_invoice");
+    }
+    @Test void viewerCannotRequestApprovedWrite() throws Exception {
+        setup(new FakeLlmClient(new Call("save","update_invoice",WRITE), new Finish("saved")));
+        select("viewer","C001"); String task=start();
+        mvc.perform(postJson("/tasks/"+task+"/turn", approved(UUID.randomUUID().toString()))
+                        .session(session).header("X-CSRF-Token",csrf))
+                .andExpect(status().isForbidden());
+        assertThat(count("invoice_operations")).isZero();
+    }
     @Test void verificationFailsClosedForMissingMismatchedLegacyAndDriftedOperations() throws Exception {
         setup(new FakeLlmClient(new Call("save","update_invoice",WRITE),new Finish("saved")));
         select("operator","C001"); String task=start(), op=UUID.randomUUID().toString();
@@ -225,8 +309,10 @@ class DemoApiTest {
         select("viewer","C001"); String task=start();
         var queried=turn(task,Map.of("message","查询九月"));
         assertThat(queried.at("/turn/result/history/0/resultJson").asText()).contains("962206");
-        var denied=turn(task,approved(UUID.randomUUID().toString()));
-        assertThat(denied.path("errorCode").asText()).isEqualTo("PERMISSION_DENIED"); assertThat(count("invoice_operations")).isZero();
+        var denied=mvc.perform(postJson("/tasks/"+task+"/turn",approved(UUID.randomUUID().toString()))
+                .session(session).header("X-CSRF-Token",csrf)).andExpect(status().isForbidden()).andReturn();
+        assertThat(body(denied).path("errorCode").asText()).isEqualTo("PERMISSION_DENIED");
+        assertThat(count("invoice_operations")).isZero();
         mvc.perform(postJson("/session",Map.of("profile","viewer","enterprise","C002")).session(session).header("X-CSRF-Token",csrf)).andExpect(status().isForbidden());
     }
     @Test void tasksAndAuditIsolateUsersEnterprisesAndMissingSessions() throws Exception {
@@ -305,7 +391,7 @@ class DemoApiTest {
     }
     @Test void strictCspCoversPageResourcesAndApiIncludingRejections() throws Exception {
         String policy="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
-        for (String path:List.of("/","/index.html","/demo.js","/demo.css","/api/demo/session"))
+        for (String path:List.of("/","/react-app/","/api/demo/session"))
             mvc.perform(get(path)).andExpect(header().string("Content-Security-Policy",policy));
         mvc.perform(get("/api/demo/session").header("Origin","https://evil.example"))
                 .andExpect(status().isForbidden()).andExpect(header().string("Content-Security-Policy",policy));
@@ -415,9 +501,10 @@ class DemoApiTest {
         var result=turn(task,approved(UUID.randomUUID().toString()));
         assertThat(result.path("errorCode").asText()).isEqualTo("AUDIT_STORAGE_ERROR");assertThat(result.at("/verification/verified").asBoolean()).isTrue();assertThat(count("invoice_operations")).isEqualTo(1);
     }
-    @Test void staticUiUsesTextRenderingAndExplicitNativeConfirmation() throws Exception {
-        String js=Files.readString(Path.of("src/main/resources/static/demo.js"));
-        assertThat(js).contains("textContent","window.confirm","confirmed:true","databaseReadback").doesNotContain("innerHTML","insertAdjacentHTML","eval(");
-        assertThat(Files.readString(Path.of("src/main/resources/static/index.html"))).contains("本地模拟身份，不是生产认证","MODEL_NOT_CONFIGURED","Viewer","Operator");
+    @Test void auditRowsAreAppendOnlyAndRetentionNeedsExportFirst() throws Exception {
+        setup(new FakeLlmClient(new Finish("完成")));
+        select("operator","C001");String task=start();turn(task,Map.of("message","查询九月"));
+        assertThatThrownBy(() -> sql("UPDATE demo_audit SET tool='tampered'")).hasMessageContaining("append only");
+        assertThatThrownBy(() -> sql("DELETE FROM demo_audit")).hasMessageContaining("append only");
     }
-}
+    }

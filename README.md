@@ -39,13 +39,13 @@ Tax Agent Harness 是一个面向财税业务场景的 Agent 应用项目。它�
 - **跨轮任务记忆：** 任务状态、待补充信息和用户明确提供的内容持久化到 SQLite，支持恢复、补充和取消。
 - **受控财务写入：** 写入仅允许白名单字段，并要求本轮明确授权；保存后通过操作台账和数据库回读核验。
 - **可审计执行：** 记录任务与工具操作的脱敏审计摘要，便于追踪操作结果。
-- **双前端入口：** 保留原生静态演示页面，并提供独立的 React + TypeScript 工作台。
+- **单一 React 前端：** React + TypeScript 工作台是唯一 UI；`mvn package` 自动安装 Node/npm、构建并复制到 JAR 的 `/react-app/`。
 
 ## 系统架构
 
 ```mermaid
 flowchart LR
-    U[用户 / 浏览器] --> UI[静态演示页或 React 工作台]
+    U[用户 / 浏览器] --> UI[React 工作台]
     UI --> API[DemoController<br/>Loopback HTTP API]
     API --> FA[FinanceAgent]
     FA --> AR[AgentRuntime]
@@ -118,6 +118,14 @@ mvn test
 mvn -DskipTests package
 ```
 
+首次构建会下载 Node/npm 并执行 `npm ci`，需要网络。若评委环境离线，可在联网机器先完成一次构建，再使用预构建 JAR，或在已有 `frontend/dist` 的机器执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package_offline.ps1
+```
+
+`mvn test` 不触发前端构建；正常 `mvn package` 才会在 `prepare-package` 阶段构建 React。
+
 ### 2. 初始化独立演示数据库
 
 **建议每次演示使用新建的临时数据库。不要将真实财务数据或已有的 `data/harness.db` 用作演示库。**
@@ -183,7 +191,7 @@ npm run dev
 
 开发地址：<http://127.0.0.1:5173/react-app/>
 
-Vite 开发服务器只监听本机回环地址，并将同源 `/api` 请求代理到本地 Spring Boot 服务。前端生产构建输出到 `frontend/dist/`；**构建产物不会自动复制到 Spring Boot 静态资源目录**，部署时需要单独执行并审核发布步骤。
+Vite 开发服务器只监听本机回环地址，并将同源 `/api` 请求代理到本地 Spring Boot 服务。前端生产构建输出到 `frontend/dist/`；`mvn package` 在 `prepare-package` 阶段自动构建并复制到 JAR 的 `static/react-app/`，根路径固定跳转 `/react-app/`，不再保留静态页回退。
 
 更多前端说明见 [frontend/README.md](frontend/README.md)。
 
@@ -193,16 +201,21 @@ Vite 开发服务器只监听本机回环地址，并将同源 `/api` 请求代�
 
 | 环境变量 | 说明 |
 | --- | --- |
-| `LLM_ENDPOINT` | 模型服务地址 |
+| `LLM_ENDPOINT` | 模型服务地址（OpenAI-compatible Base URL 会规范化为 `/chat/completions`） |
 | `LLM_API_KEY` | 模型服务凭证 |
-| `LLM_MODEL` | 模型名称 |
+| `LLM_MODEL` | 模型名称，如官方评审模型 `qwen3.8-max` 或当前开发验证模型 `deepseek-v4.1-flash-1017` |
+| `LLM_PROTOCOL` | `anthropic` 或 `openai-chat`；不填时按 endpoint 路径选择 |
 
 当前适配路径包括：
 
-- **DashScope Messages：** 当前开发目标为 `qwen3.8-flash`，使用 Anthropic-compatible Messages API。
+- **官方评审模型 Qwen3.8-Max：** 使用 DashScope Anthropic-compatible Messages：
+  `LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.8-max`、`LLM_PROTOCOL=anthropic`；
+  若使用 OpenAI-compatible 网关，则把 endpoint 改为对应 Base URL 并设 `LLM_PROTOCOL=openai-chat`。
+- **当前开发验证：** 百度千帆 Token Plan 的 DeepSeek-V4.1-flash-1017，OpenAI-compatible Chat Completions。
 - **OpenAI-compatible API：** 支持 Responses 和 Chat Completions 路径，由配置的 endpoint 显式选择。
+- 模型名称不硬编码；换模型只需改环境变量，工具、规则、证据门和审计不依赖具体供应商。
 
-三项配置缺少任意一项时，模型能力保持未配置状态。密钥只应通过本机安全环境配置，不要写入 README、源码、日志、截图或 Git。
+关键配置缺少任意一项时，模型能力保持未配置状态。密钥只应通过本机安全环境配置，不要写入 README、源码、日志、截图或 Git。
 
 ## 安全与可靠性设计
 
@@ -229,7 +242,7 @@ Vite 开发服务器只监听本机回环地址，并将同源 `/api` 请求代�
 | TypeScript 类型检查 | 通过 |
 | ESLint | 通过 |
 | Vite 生产构建 | 通过 |
-| 静态演示脚本语法检查 | 通过 |
+| Maven 前端构建（Node/npm + Vite） | 通过（prepare-package） |
 | Git diff whitespace 检查 | 通过 |
 
 常用命令：
@@ -248,7 +261,7 @@ npm run build
 npm run verify
 ```
 
-自动化测试使用合成样例数据和隔离测试数据库。真实 Qwen 的只读 API 跨轮流程（查询、必填追问、用户补充、恢复完成）已通过；真实浏览器 UI 在工具成功后最终总结阶段仍发生 MODEL_TIMEOUT，真实受控写入及 UI 核验 E2E 尚未完成。不要把 API 验证写成浏览器 UI 验证。
+自动化测试使用合成样例数据和隔离测试数据库。真实千帆 DeepSeek-V4.1-flash-1017 的 API 三场景（查询+R004、受控保存、跨轮补充保存）已通过；真实 Chrome/React 查询+R004 与完整 prompt trace 已通过。真实浏览器内的受控保存/跨轮和 ≤5 分钟视频仍未完成。不要把 API 验证写成浏览器 UI 验证；官方评审模型 Qwen3.8-Max 仍需在提交前用官方凭证复测。
 
 ## 项目结构
 
@@ -259,7 +272,7 @@ npm run verify
 │   └── tests/                # 前端测试
 ├── src/
 │   ├── main/java/             # Spring Boot、Agent、工具与业务服务
-│   ├── main/resources/        # 配置、SQL、静态演示页面
+│   ├── main/resources/        # 配置、SQL、模型/工具契约
 │   └── test/java/             # Java 单元与集成测试
 ├── docs/
 │   ├── plans/                 # 阶段计划与验收记录
@@ -289,9 +302,9 @@ npm run verify
 ## 当前状态与限制
 
 - 后端核心流程、任务记忆、受控写入、演示 API 与本地 UI 已实现。
-- React 工作台与前端安全保护已实现；T15 的完整浏览器和部署验收仍在进行。
+- React 是唯一 UI；T15 的真实浏览器受控保存/跨轮及最终录屏仍在进行。
 - 独立复现和交付材料核验仍在进行；队友接手请先阅读 [开发交接说明](docs/agent-handoff.md)，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
-- 最新 JDK21 全量 223 项、前端 Vitest 71 项自动化测试通过；真实 Qwen 只读 API 跨轮流程通过，但浏览器 UI 最终回复仍超时，受控写入 UI E2E 未完成。
+- 最新 JDK21 全量 247 项、前端 Vitest 37 项自动化测试通过；真实 DeepSeek API 三场景和 React 查询+R004 已通过，但官方 Qwen3.8-Max 复测、浏览器保存/跨轮和视频未完成。
 - 当前系统用于比赛演示与技术验证，不应视为具备生产环境所需的认证、部署、审计防篡改和运维能力。
 
 ---

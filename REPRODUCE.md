@@ -60,7 +60,7 @@ env -u LLM_ENDPOINT -u LLM_API_KEY -u LLM_MODEL \
 ```sh
 curl --fail --show-error --silent http://127.0.0.1:8080/api/health
 # 预期 {"status":"UP"}；仅证明应用存活，不证明数据库/模型就绪。
-curl --fail --show-error --silent -o /dev/null http://127.0.0.1:8080/demo.js
+curl --fail --show-error --silent -o /dev/null http://127.0.0.1:8080/react-app/
 ```
 
 浏览器打开 http://127.0.0.1:8080/，显示“本地模拟身份，不是生产认证”。选择 Operator/C001，创建查询任务后发送消息，应明确显示 MODEL_NOT_CONFIGURED；这不是模型查询成功，不会回退 Fake。Viewer/C001 只读，Viewer/C002 拒绝。详细演示、精确确认、超时只读回查见 [DEMO_SCRIPT.md](DEMO_SCRIPT.md)。结束在启动终端 Ctrl+C，确认健康地址已无法连接；保留独立目录用于检查，不自动清理。
@@ -73,7 +73,7 @@ env -u LLM_ENDPOINT -u LLM_API_KEY -u LLM_MODEL TAXAGENT_DATABASE="$T13_DEMO_DB"
   '-Dspring-boot.run.arguments=--server.address=127.0.0.1 --server.port=8080'
 ```
 
-`.env` 不会自动加载；无需创建真实密钥文件。当前 T13 测试目标是 DashScope：`LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.8-flash`，通过 Anthropic Messages API 调用。GPT-6 Luna Max 的 Responses 路径（`reasoning.effort=max`、`store=false`、`parallel_tool_calls=false`）及完整 HTTPS `/chat/completions` 路径仍保留，endpoint 决定协议，不自动回退。`LLM_API_KEY` 仅在可信本机终端安全输入；详细启动步骤见 DEMO_SCRIPT。本轮仅完成离线 stub 测试，没有真实云模型调用；真实 E2E 范围已获用户授权，待撤销已暴露的凭证并在本机配置轮换密钥后执行，只能使用官方合成样本、独立临时 SQLite 与 loopback，不得使用 data/harness.db 或真实财务数据。
+`.env` 不会自动加载；无需把密钥写进仓库。当前真实模型使用百度千帆 Token Plan 个人版：OpenAI 兼容 Base URL `https://qianfan.baidubce.com/v2/tokenplan/personal`、模型 `deepseek-v4.1-flash-1017`、`LLM_PROTOCOL=openai-chat`；Anthropic 兼容 Base URL `https://qianfan.baidubce.com/anthropic/tokenplan/personal` 也保留。客户端会把 OpenAI Base URL 规范化为 `/chat/completions`。`LLM_API_KEY` 只在本机安全终端或工作区 `.tools/model.env` 中输入，绝不粘贴到聊天、日志、截图或仓库。2026-11-06 已通过真实千帆 API 三场景（查询+R004、受控保存、跨轮补充保存）和真实 Chrome 浏览器查询/受控保存；真实浏览器跨轮、视频和最终包仍未验证。只能使用官方合成样本、独立临时 SQLite 与 loopback，不得使用 data/harness.db 或真实财务数据。
 
 ## 5. 故障排查与证据
 
@@ -115,3 +115,37 @@ Qwen 单次 HTTP 请求与 AgentRuntime 等待上限为 60 秒，其他模型默
 - 真实 Qwen Demo API 只读跨轮流程通过：三项只读工具执行后，服务端将仍有 pending 的任务保持 WAITING_USER；用户结构化补充后，第二轮恢复并 COMPLETED。合成数据库财务表前后不变，`invoice_operations=0`，未调用 `update_invoice`。
 - 真实浏览器 UI 只读尝试已成功加载页面、选身份、创建任务、发送消息并执行三项只读工具，但模型最终总结阶段返回 `MODEL_TIMEOUT`；没有完成 UI 补充/恢复流程。最新代码已将首轮 effort 设为 medium、工具结果后的续接 effort 设为 low，但**新 JAR 尚未在真实服务重启后复验**。
 - 当前最新状态、未提交文件列表和下一步顺序见 [docs/agent-handoff.md](docs/agent-handoff.md)。T13 继续保持 IN_PROGRESS。
+
+## Windows / 本地管理 CLI（2026-11-05 补充）
+
+- 仓库已包含 Maven Wrapper：`mvnw.cmd -v` / `./mvnw -v`；首次运行会下载 Maven 3.9.9。
+- 受限沙箱或 Windows 下若 SQLite JDBC 报 `no sqlitejdbc in java.library.path`，给 JVM 指定可写临时目录：
+  `-Djava.io.tmpdir=<可写目录> -Dorg.sqlite.tmpdir=<可写目录>`。测试目录同理。
+- 规则管理 CLI（不启动 Web；命令执行后退出）：
+  ```sh
+  java -Djava.io.tmpdir=<tmp> -Dorg.sqlite.tmpdir=<tmp> -jar target/harness-0.0.1-SNAPSHOT.jar \
+    --taxagent.database=<db> --rules-list --enterprise=C001 --date=2026-09-15
+  java ... --rules-import --rule-id=R005 --version=1.0 --name=<名称> \
+    --effective-from=2026-10-01 --content-file=<正文文件> --enterprises=C001,C002
+  # 更新正文：用 --rules-update 导入新版本（版本不可原地改写）
+  java ... --rules-update --rule-id=R005 --version=1.1 --name=<名称> \
+    --effective-from=2026-10-01 --content-file=<新正文文件> --enterprises=C001,C002
+  java ... --rules-disable --rule-id=R005 --version=1.0
+  ```
+- 长期偏好 CLI（按用户和企业隔离，仅限明确输入）：
+  ```sh
+  java ... --prefs-list --enterprise=C001
+  java ... --prefs-put --enterprise=C001 --name=style --value=简洁 --user-request="用户原话"
+  java ... --prefs-delete --enterprise=C001 --name=style
+  ```
+- 偏好也提供 HTTP：`GET/POST /api/demo/preferences`、`DELETE /api/demo/preferences/{name}`；POST 需要 CSRF。
+- `scripts/secret_scan.py` 只是打包前的模式扫描，不是秘密证明；仍须人工审阅压缩包每个条目。
+- 依赖 CVE：`scripts/dependency_scan.ps1` 生成 Maven runtime 清单并调用 Google OSV；报告在 `target/osv-report.json`，0 个未抑制漏洞，2 条 Spring 6.2.19 风险接受记录见 `docs/specs/DEPENDENCY_SECURITY.md`。
+- 审计保留：`demo_audit` 只追加，禁止 UPDATE/DELETE；演示结束前导出 CSV，再整库归档/删除，详见 `docs/specs/AUDIT_RETENTION.md`。
+- React 是唯一前端：`mvn package` 在 `prepare-package` 阶段通过 `frontend-maven-plugin` 安装 Node/npm、执行
+  `npm ci`/`npm run build`，再由 `maven-resources-plugin` 把 `frontend/dist` 复制到 JAR 的 `static/react-app/`；
+  根路径固定跳转 `/react-app/`，不再保留静态回退。`mvn test` 不触发前端构建；开发热更新仍可在 `frontend/` 执行
+  `npm run dev`。不要把 `frontend/node_modules` 或 `frontend/dist` 放入交付包。
+- 离线/评委环境：联网机器先执行一次 `mvn -DskipTests package`（或 `npm run build`），之后有 `frontend/dist` 时可运行
+  `scripts/package_offline.ps1`（内部使用 `mvn -o -Dfrontend.skip=true package`）；也可直接提交已构建 JAR。不要在没有
+  `frontend/dist` 时跳过前端构建，否则 JAR 没有 UI。

@@ -13,6 +13,13 @@
     <version>0.0.1-SNAPSHOT</version>
     <properties>
         <java.version>21</java.version>
+        <node.version>v22.12.0</node.version>
+        <npm.version>10.9.0</npm.version>
+        <frontend.skip>false</frontend.skip>
+        <!-- OSV fixes: Jackson 2.21.7, Tomcat 10.1.59, Log4j 2.25.5. -->
+        <jackson-bom.version>2.21.7</jackson-bom.version>
+        <tomcat.version>10.1.59</tomcat.version>
+        <log4j2.version>2.25.5</log4j2.version>
     </properties>
     <dependencies>
         <dependency>
@@ -36,6 +43,55 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>1.15.4</version>
+                <configuration>
+                    <workingDirectory>frontend</workingDirectory>
+                    <installDirectory>target/frontend</installDirectory>
+                    <skip>${frontend.skip}</skip>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install-node-and-npm</id>
+                        <phase>prepare-package</phase>
+                        <goals><goal>install-node-and-npm</goal></goals>
+                        <configuration>
+                            <nodeVersion>${node.version}</nodeVersion>
+                            <npmVersion>${npm.version}</npmVersion>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-ci</id>
+                        <phase>prepare-package</phase>
+                        <goals><goal>npm</goal></goals>
+                        <configuration><arguments>ci --no-audit --no-fund</arguments></configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-build</id>
+                        <phase>prepare-package</phase>
+                        <goals><goal>npm</goal></goals>
+                        <configuration><arguments>run build</arguments></configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-react-build</id>
+                        <phase>prepare-package</phase>
+                        <goals><goal>copy-resources</goal></goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/static/react-app</outputDirectory>
+                            <resources>
+                                <resource><directory>frontend/dist</directory></resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

@@ -33,7 +33,7 @@ npm run build
 
 构建输出 `frontend/dist/`，资源 base 固定为 `/react-app/`；无 CDN、无内联脚本、无密钥。所有页面在单个入口内导航，不依赖后端 SPA fallback。`node_modules`、`dist`、`.verification` 被本目录忽略。
 
-本次按授权不向 `src/main/resources/static/` 写入构建产物。后续部署可在单独审核的发布步骤将 dist 内容复制到 `static/react-app/`，然后重新打包；不要替换 `static/index.html`。无需新增 Java Controller。
+`mvn package` 在 `prepare-package` 阶段自动执行 `npm ci`/`npm run build`，并把 `frontend/dist` 复制到 JAR 的 `static/react-app/`；不再手工写入 `src/main/resources/static/`，静态页已移除。
 
 也可在仓库根目录临时挂载外部资源，保留已有 classpath 首页：
 

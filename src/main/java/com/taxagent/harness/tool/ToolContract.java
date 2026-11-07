@@ -37,7 +37,7 @@ public final class ToolContract {
 
     public static <T> T decode(String json, Class<T> type) {
         // An allowlist prevents callers from deserializing trusted server context.
-        if (!Set.of(Query.class, PurposeCheck.class, InvoiceUpdate.class,
+        if (!Set.of(Query.class, PurposeCheck.class, RuleQuery.class, InvoiceUpdate.class,
                 StateRequest.class, RuleRequest.class).contains(type)) throw invalid("Unsupported tool input");
         try {
             T value = MAPPER.readValue(json, type);
@@ -128,6 +128,16 @@ public final class ToolContract {
         public BankResult { rows = List.copyOf(rows); }
     }
     public record RuleReference(RuleKey key, String name) {}
+    public record RuleQuery(String enterpriseId, LocalDate date) {
+        public RuleQuery {
+            required(enterpriseId);
+            if (date == null) throw invalid("Rule date required");
+        }
+    }
+    public record RuleSummary(RuleKey key, String name, LocalDate effectiveFrom, RuleStatus status, String content) {}
+    public record RuleQueryResult(List<RuleSummary> rules) {
+        public RuleQueryResult { rules = List.copyOf(rules); }
+    }
     public record PurposeResult(List<InvoiceKey> missing, List<RuleReference> rules) {
         public PurposeResult { missing = List.copyOf(missing); rules = List.copyOf(rules); }
     }

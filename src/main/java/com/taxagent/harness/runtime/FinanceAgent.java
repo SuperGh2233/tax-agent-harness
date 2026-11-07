@@ -25,9 +25,13 @@ public final class FinanceAgent {
     }
     static AgentRuntime.Limits runtimeLimits(LlmClient model) {
         var defaults = AgentRuntime.Limits.defaults();
-        if (!(model instanceof AnthropicMessagesClient)) return defaults;
-        return new AgentRuntime.Limits(defaults.maxSteps(), AnthropicMessagesClient.DEFAULT_TIMEOUT,
-                defaults.modelRetries(), defaults.allowedTools());
+        if (model instanceof AnthropicMessagesClient)
+            return new AgentRuntime.Limits(defaults.maxSteps(), AnthropicMessagesClient.DEFAULT_TIMEOUT,
+                    defaults.modelRetries(), defaults.allowedTools());
+        if (model instanceof OpenAiCompatibleClient openai)
+            return new AgentRuntime.Limits(defaults.maxSteps(), openai.timeout(),
+                    defaults.modelRetries(), defaults.allowedTools());
+        return defaults;
     }
     public TaskMemory.Task start(String goal, List<String> pending) {
         return memory.start(session, enterprise, goal, pending);
@@ -39,6 +43,16 @@ public final class FinanceAgent {
     /** Explicit user statements only. This never creates financial write approval. */
     public TaskMemory.Task supplement(String id, long version, Map<String, TaskMemory.Input> statements) {
         return memory.supplement(session, enterprise, id, version, statements);
+    }
+    public Map<String, TaskMemory.Input> preferences() {
+        return memory.preferences(session, enterprise);
+    }
+    /** Explicit user preference only; never derived from model inference or task text. */
+    public void putPreference(String name, TaskMemory.Input input) {
+        memory.putPreference(session, enterprise, name, input);
+    }
+    public void deletePreference(String name) {
+        memory.deletePreference(session, enterprise, name);
     }
     public TaskMemory.Turn turn(String id, String message) {
         return memory.continueTask(session, enterprise, id, message, runtime);

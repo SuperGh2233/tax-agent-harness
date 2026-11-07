@@ -37,6 +37,25 @@
       ],
       "additionalProperties": false
     },
+    "RuleQuery": {
+      "type": "object",
+      "properties": {
+        "enterprise_id": {
+          "type": "string",
+          "pattern": ".*\\S.*"
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        }
+      },
+      "required": [
+        "enterprise_id",
+        "date"
+      ],
+      "additionalProperties": false
+    },
     "InvoiceKey": {
       "type": "object",
       "properties": {

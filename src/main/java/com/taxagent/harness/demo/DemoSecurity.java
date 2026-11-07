@@ -5,6 +5,7 @@ import jakarta.servlet.http.*;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -13,6 +14,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public final class DemoSecurity extends OncePerRequestFilter {
     static final String CSRF = DemoSecurity.class.getName() + ".csrf";
     static final String PRINCIPAL = DemoSecurity.class.getName() + ".principal";
+    private static final long MAX_BODY_BYTES = 64 * 1024;
+    private static final int MAX_REQUESTS_PER_MINUTE = 600;
+    private static final ConcurrentHashMap<String, long[]> RATE = new ConcurrentHashMap<>();
     static String token(HttpSession session) {
         synchronized (session) {
             if (session.getAttribute(CSRF) == null) session.setAttribute(CSRF, UUID.randomUUID().toString());
@@ -40,6 +44,8 @@ public final class DemoSecurity extends OncePerRequestFilter {
                 || req.getHeader("X-Forwarded-Host") != null || "cross-site".equals(req.getHeader("Sec-Fetch-Site"))) {
             reject(res, "LOOPBACK_REQUIRED"); return;
         }
+        if (req.getContentLengthLong() > MAX_BODY_BYTES) { reject(res, "REQUEST_TOO_LARGE", 413); return; }
+        if (!rateAllows(req.getRemoteAddr())) { reject(res, "RATE_LIMITED", 429); return; }
         String origin = req.getHeader("Origin");
         if (origin != null) {
             try {
@@ -59,8 +65,21 @@ public final class DemoSecurity extends OncePerRequestFilter {
         }
         chain.doFilter(req, res);
     }
+    private static boolean rateAllows(String remote) {
+        long now = System.currentTimeMillis();
+        var window = RATE.computeIfAbsent(remote == null ? "unknown" : remote, ignored -> new long[]{now, 0});
+        synchronized (window) {
+            if (now - window[0] >= 60_000) { window[0] = now; window[1] = 0; }
+            if (window[1] >= MAX_REQUESTS_PER_MINUTE) return false;
+            window[1]++;
+            return true;
+        }
+    }
     private static void reject(HttpServletResponse res, String code) throws IOException {
-        res.setStatus(403); res.setContentType("application/json");
+        reject(res, code, 403);
+    }
+    private static void reject(HttpServletResponse res, String code, int status) throws IOException {
+        res.setStatus(status); res.setContentType("application/json");
         res.getWriter().write("{\"errorCode\":\"" + code + "\"}");
     }
 }
