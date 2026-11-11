@@ -66,16 +66,33 @@ public final class OpenAiCompatibleClient implements LlmClient {
                 function.set("parameters", tool.parameters());
             }
             if (responses) body = responsesBody(request, body, model);
-            var httpRequest = HttpRequest.newBuilder(endpoint).timeout(timeout)
-                    .header("Authorization", "Bearer " + apiKey).header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body))).build();
-            var response = http.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            var response = send(body);
             if (response.statusCode() < 200 || response.statusCode() >= 300) throw new ModelException("MODEL_HTTP_ERROR");
-            return responses ? parseResponses(response.body()) : parse(response.body());
+            try {
+                return responses ? parseResponses(response.body()) : parse(response.body());
+            } catch (Exception parseFailure) {
+                // One corrective retry for a malformed assistant reply (prose, too many calls, ...).
+                if (responses) throw parseFailure;
+                var retry = body.deepCopy();
+                ((ArrayNode) retry.get("messages")).insert(1, JSON.createObjectNode()
+                        .put("role", "system").put("content",
+                                "上一次回复无法被解析。请严格遵守：没有工具调用时只输出 JSON "
+                                        + "{\"kind\":\"ask\" 或 \"finish\",\"text\":\"...\"}；"
+                                        + "单轮工具调用不得超过 8 个；需要更多月份时先追问，不要一次并行发起。"));
+                var second = send(retry);
+                if (second.statusCode() < 200 || second.statusCode() >= 300) throw new ModelException("MODEL_HTTP_ERROR");
+                return parse(second.body());
+            }
         } catch (ModelException e) { throw e;
         } catch (HttpTimeoutException e) { throw new ModelException("MODEL_TIMEOUT");
         } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new ModelException("INTERRUPTED");
         } catch (Exception e) { throw new ModelException("MODEL_FAILURE"); }
+    }
+    private HttpResponse<String> send(ObjectNode body) throws java.io.IOException, InterruptedException {
+        var httpRequest = HttpRequest.newBuilder(endpoint).timeout(timeout)
+                .header("Authorization", "Bearer " + apiKey).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body))).build();
+        return http.send(httpRequest, HttpResponse.BodyHandlers.ofString());
     }
     private static ObjectNode responsesBody(Request request, ObjectNode chat, String model) {
         var body = JSON.createObjectNode().put("model", model)

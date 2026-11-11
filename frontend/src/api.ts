@@ -1,7 +1,7 @@
 // Mirrors DemoController, TaskMemory, LlmClient and ToolContract. Tool JSON uses snake_case.
 export interface Session { csrfToken: string; profile: string; enterprise: string; identityNotice: string }
 export interface Statement { value: string; userRequest: string }
-export interface Task { id: string; status: 'ACTIVE' | 'WAITING_USER' | 'COMPLETED' | 'CANCELLED'; version: number; goal: string; pending: string[]; supplied: Record<string, Statement>; question: string | null; recentTools: {tool: string; outcome: string}[] }
+export interface Task { id: string; status: 'ACTIVE' | 'WAITING_USER' | 'COMPLETED' | 'CANCELLED'; version: number; goal: string; pending: string[]; supplied: Record<string, Statement>; question: string | null; recentTools: {tool: string; outcome: string}[]; plan?: {steps: PlanStep[]} | null }
 
 /** Terminal tasks are historical context only; create a new task to continue work. */
 export function isTerminalTaskStatus(status: Task['status']): boolean {

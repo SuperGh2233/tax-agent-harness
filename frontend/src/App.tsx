@@ -249,13 +249,22 @@ export default function App() {
       }
     })
   }
-  async function send(message: string, approval?: Approval) {
+  async function send(message: string, approval?: Approval, continueNew = false) {
     if (!task) return
     await run(async () => {
-      setMessages(old => [...old, {role:'user', text:message}]); setTurn(null); clearStream()
-      if (approval) rememberOperation({id:approval.operationId, taskId:task.id, unknown:true})
+      clearStream(); setTurn(null)
+      let target = task
+      if (continueNew) {
+        target = await api.start(`${task.goal}（继续）`, [])
+        setTask(target)
+        setTasks(old => [target, ...old.filter(t => t.id !== target.id)])
+        setMessages([{role:'notice', text:'原任务已结束，已基于原目标新建任务；本轮写入仍需重新确认。'}, {role:'user', text:message}])
+      } else {
+        setMessages(old => [...old, {role:'user', text:message}])
+      }
+      if (approval) rememberOperation({id:approval.operationId, taskId:target.id, unknown:true})
       let result: TurnView
-      try { result = await api.streamTurn(task.id, message, approval, streamHandlers) }
+      try { result = await api.streamTurn(target.id, message, approval, streamHandlers) }
       catch (e) {
         clearStream()
         if (approval) throw new Error(`operationId=${approval.operationId} · 写入结果未确认，禁止自动重试。请核查审计与数据库。原始错误：${e instanceof Error ? e.message : '请求异常'}`)
@@ -337,8 +346,9 @@ export default function App() {
         <header className="workspace-heading"><div><button className="back" onClick={() => navigate('home')}>工作台 /</button><h1 ref={heading} tabIndex={-1}>{task.goal}</h1><span className="muted">{statusLabel[task.status]} · {session?.enterprise} · {task.id.slice(0,8)}</span></div><div className="workspace-actions"><Button disabled={busy || !turn || (loadedHistoricalTask && isTerminalTaskStatus(task.status))} onClick={() => navigate('review')}><FileCheck2 size={16}/>审核与结果</Button><Button aria-label="打开检查器" onClick={() => void openInspector()}><PanelRight size={17}/></Button></div></header>
         {loadedHistoricalTask && isTerminalTaskStatus(task.status) ? <TerminalTaskPanel task={task} onCreateNew={startNewFromHistory}/> : <>
           <Thread messages={messages} busy={busy} streaming={streamingText} progress={liveProgress}/>
-          {isTerminalTaskStatus(task.status) ? <div className="terminal-inline"><span>当前任务{statusLabel[task.status]}，已禁用后续写入。可查看本轮结果，或创建新的独立任务。</span><Button variant="primary" onClick={startNewFromHistory}>基于原任务新建查询 <ArrowUpRight size={14}/></Button></div> : <><Composer disabled={busy || !selected} onSend={m => void send(m)}/>
-          <details className="supplement"><summary>补充 / 更正明确事实</summary><Supplement key={task.id + ':' + task.version} busy={busy} onSubmit={(key, value, userRequest) => void run(async () => { const updated = await api.supplement(task.id, task.version, {[key]:{value,userRequest}}); setTask(updated); setTurn(null); setMessages(old => [...old,{role:'notice',text:'明确事实已记录，发票未保存。请重新查询当前数据后审核。'}]); setTasks(await api.tasks()) })}/></details></>}
+          {isTerminalTaskStatus(task.status) && <div className="terminal-inline"><span>当前任务{statusLabel[task.status]}，本轮结果已固定。继续提问会自动基于原目标新建任务，写入仍需重新确认。</span><Button variant="primary" onClick={startNewFromHistory}>基于原任务新建查询 <ArrowUpRight size={14}/></Button></div>}
+          <Composer disabled={busy || !selected} onSend={m => void send(m, undefined, isTerminalTaskStatus(task.status))}/>
+          {!isTerminalTaskStatus(task.status) && <details className="supplement"><summary>补充 / 更正明确事实</summary><Supplement key={task.id + ':' + task.version} busy={busy} onSubmit={(key, value, userRequest) => void run(async () => { const updated = await api.supplement(task.id, task.version, {[key]:{value,userRequest}}); setTask(updated); setTurn(null); setMessages(old => [...old,{role:'notice',text:'明确事实已记录，发票未保存。请重新查询当前数据后审核。'}]); setTasks(await api.tasks()) })}/></details>}
         </>}
       </>}
       {page === 'review' && task && <section className="content-page review"><div className="page-heading"><div><span className="eyebrow">HUMAN IN THE LOOP</span><h1 ref={heading} tabIndex={-1}>审核与结果</h1><p className="muted">Agent 建议不等于授权。每一项修改，由你决定。</p></div><Button onClick={() => navigate('workspace')}>返回对话</Button></div>
@@ -387,10 +397,10 @@ const planStateLabel: Record<PlanStep['state'], string> = {
 }
 
 function ExecutionPlan({task,history,verification}: {task:Task; history:Exchange[]; verification:TurnView['verification']}) {
-  const steps = deriveExecutionPlan(task,history,verification)
+  const steps = task.plan?.steps?.length ? task.plan.steps : deriveExecutionPlan(task,history,verification)
   return <section className="context-block execution-plan" aria-label="执行计划">
     <h3>执行计划</h3>
-    <p className="hint">由后端任务状态和工具历史推导，不是模型自述；模型文字不能替代保存核验。</p>
+    <p className="hint">由后端根据持久化任务状态与真实工具历史推导并随每轮更新；模型文字不能替代保存核验。</p>
     <ol className="plan-list">{steps.map((step, index) => <li key={step.key} data-state={step.state}>
       <span className="plan-index">{index + 1}</span>
       <div><strong>{step.title}</strong><p>{step.detail}</p></div>
