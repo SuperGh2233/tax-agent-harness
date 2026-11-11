@@ -414,3 +414,11 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 验证：后端 `mvn test` 252/0/0/0 BUILD SUCCESS；前端 `tsc --noEmit` 0 错、`vitest` 37/37。
 - 已知缺口（未在本轮补）：队友 6 个提交未附自动化测试，`POST /api/demo/tasks/{id}/turn/stream` 目前零测试覆盖，建议后续补一个 SSE 冒烟用例（断言末帧 `done` 携带 `verified`）。
 - 文档同步：`DEMO_SCRIPT.md` 第 2 段补一句「流式呈现属正常，最终只认末帧 `done`」。
+
+### T23 — 合并后重启验证与推送（2026-11-12 00:50）
+- 状态：DONE；认领人：Coding Agent；依据用户指示「帮我把最新的代码直接推送到 GitHub main 分支」。
+- 重启：停掉三个合并前旧进程（18085/18086/18084 各自绑定旧库），用 00:15 构建的合并版 JAR 在 `127.0.0.1:18084` 起新进程，库为全新临时库 `demo.db`。基线 `invoices 40 / bank_entries 48 / rules 5`，C001 2026-09 缺用途 5 张（F002/F004/F003/F006/F009），与 DEMO_SCRIPT 口径一致。
+- 模型连通性：直接请求 DashScope `/apps/anthropic/v1/messages` 最小载荷 → HTTP 200、`model=qwen3.7-flash`、回复 `OK`；不落库、不回显密钥。
+- SSE 路由：`POST /api/demo/tasks/{id}/turn/stream` 无会话返回 403（非 404），确认合并进来的流式端点已注册。
+- 已知陷阱：`--initialize-data` 只接受 `--database=`，混用 `--taxagent.database=` 会抛 `Unknown initialization argument`；`nohup ... &` 起的进程会在命令结束后被回收，需用常驻后台任务方式持有。
+- 文档：`DEMO_SCRIPT.md` 密钥注入改为主用 `set -a; . ./.env; set +a`，并补充两套参数不可混用的说明；新增 `CLAUDE.md`（贡献者命令与架构说明，密钥均为占位符）。

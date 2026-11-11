@@ -49,13 +49,20 @@ sessionStorage.removeItem('taxagent-pending-operation');
 **4. 启动服务（保持这个终端，录制中不要重启）。** `.env` 不会自动加载，密钥必须显式注入：
 
 ```sh
-read -rs "LLM_API_KEY?DashScope API key (hidden): "; print
-export LLM_API_KEY
-export LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic
-export LLM_MODEL=qwen3.7-flash
+# 方式 A（推荐，密钥不出现在画面、也不需要手输）：本机已有 .env
+set -a; . ./.env; set +a
+
+# 方式 B（临时手输，隐藏回显）
+# read -rs "LLM_API_KEY?DashScope API key (hidden): "; print
+# export LLM_API_KEY
+# export LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic
+# export LLM_MODEL=qwen3.7-flash
+
 java -jar target/harness-0.0.1-SNAPSHOT.jar \
   --taxagent.database="$DEMO_DB" --server.address=127.0.0.1 --server.port=18084
 ```
+
+注意参数分两套：初始化模式只认 `--database=`（`--taxagent.database=` 会直接报 `Unknown initialization argument`），服务模式才用 `--taxagent.database=`。
 
 浏览器打开 `http://127.0.0.1:18084/`，根路径固定跳转 `/react-app/`。
 
