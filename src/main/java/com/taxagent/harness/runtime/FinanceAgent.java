@@ -5,6 +5,7 @@ import com.taxagent.harness.tool.PermissionGuard.Session;
 import com.taxagent.harness.tool.ToolContract.InvoiceUpdate;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.function.Consumer;
 
 /** Local service entry point. Caller supplies authenticated/trusted identity, never HTTP/model userId. */
 public final class FinanceAgent {
@@ -55,7 +56,11 @@ public final class FinanceAgent {
         memory.deletePreference(session, enterprise, name);
     }
     public TaskMemory.Turn turn(String id, String message) {
-        return memory.continueTask(session, enterprise, id, message, runtime);
+        return turn(id, message, progress -> {});
+    }
+    /** Same turn semantics; progress is presentation only and never part of evidence. */
+    public TaskMemory.Turn turn(String id, String message, Consumer<AgentRuntime.Progress> progress) {
+        return memory.continueTask(session, enterprise, id, message, runtime, null, progress);
     }
     /** Trusted application action, never a model tool or natural-language intent classifier.
      * Caller has verified user explicitly requested this exact save/clear now.
@@ -63,12 +68,18 @@ public final class FinanceAgent {
      */
     public TaskMemory.Turn approvedTurn(String id, String message, String operationId,
                                        InvoiceUpdate update, InvoiceWriteService.Intent explicitIntent) {
+        return approvedTurn(id, message, operationId, update, explicitIntent, progress -> {});
+    }
+    /** Trusted approved turn with live progress; the authorization and verification rules are unchanged. */
+    public TaskMemory.Turn approvedTurn(String id, String message, String operationId,
+                                       InvoiceUpdate update, InvoiceWriteService.Intent explicitIntent,
+                                       Consumer<AgentRuntime.Progress> progress) {
         load(id);
         if (update == null || !enterprise.equals(update.key().enterpriseId()))
             throw new DomainException(ErrorCode.PERMISSION_DENIED, "Selected enterprise required");
         var authorization = InvoiceWriteService.authorizeExplicitRequest(session, id, operationId, update, explicitIntent);
         return memory.continueTask(session, enterprise, id, message, runtime,
-                new AgentRuntime.ApprovedWrite(id, operationId, update, authorization));
+                new AgentRuntime.ApprovedWrite(id, operationId, update, authorization), progress);
     }
     /** Unknown write outcome: query only; empty is never automatic retry permission. */
     public Optional<ToolContract.UpdateResult> recover(String id, String operationId, InvoiceUpdate update) {

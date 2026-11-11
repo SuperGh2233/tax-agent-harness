@@ -8,6 +8,7 @@ import java.sql.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /** Trusted backend service only. Never expose Session or explicit-input methods as model tools. */
 public final class TaskMemory {
@@ -123,13 +124,17 @@ public final class TaskMemory {
     }
     public Turn continueTask(Session session, String enterprise, String id, String message, AgentRuntime runtime,
                              AgentRuntime.ApprovedWrite approval) {
+        return continueTask(session, enterprise, id, message, runtime, approval, progress -> {});
+    }
+    public Turn continueTask(Session session, String enterprise, String id, String message, AgentRuntime runtime,
+                             AgentRuntime.ApprovedWrite approval, Consumer<AgentRuntime.Progress> progressSink) {
         text(message);
         var context = load(session, enterprise, id); var old = context.task(); open(old, old.version());
         if (approval != null && !id.equals(approval.taskId()))
             throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Approval must belong to this task");
         var projection = ContextProjector.project(context, message);
         var trace = new AtomicReference<AgentRuntime.Trace>();
-        var result = runtime.runScoped(session, enterprise, message, projection.memoryJson(), approval, trace::set);
+        var result = runtime.runScoped(session, enterprise, message, projection.memoryJson(), approval, trace::set, progressSink);
         return access(session, enterprise, c -> {
             var current = get(c, session, enterprise, id); open(current, old.version());
             var summaries = result.history().stream().map(e -> {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { ArrowUp, ArrowUpRight, Check, ChevronRight, CircleDashed, FileCheck2, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
 import { ApiError, canVerifyOperation, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, findOpenTask, friendlyError, isTerminalTaskStatus, parseTool, provenNotExecuted, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from './api'
-import type { Approval, AuditEvent, Exchange, Invoice, PlanStep, Session, Statement, Task, TurnView } from './api'
+import type { Approval, AuditEvent, Exchange, Invoice, PlanStep, Session, Statement, Task, ToolProgress, TurnView } from './api'
 import { Button, Modal } from './ui'
 
 const api = new DemoApi()
@@ -50,6 +50,8 @@ export default function App() {
   const [inspector, setInspector] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [turn, setTurn] = useState<TurnView | null>(null)
+  const [streamingText, setStreamingText] = useState('')
+  const [liveProgress, setLiveProgress] = useState('')
   const [operation, setOperation] = useState<Operation | null>(initialOperation)
   const [audit, setAudit] = useState<AuditEvent[] | null>(null)
   const [goal, setGoal] = useState('')
@@ -102,6 +104,13 @@ export default function App() {
     try { await work() } catch (e) { setError(e instanceof Error ? e.message : '请求未完成') }
     finally { lock.current = false; setBusy(false) }
   }
+  const streamHandlers = {
+    onText: (delta: string) => { setStreamingText(old => old + delta); setLiveProgress('') },
+    onTool: (event: ToolProgress) => setLiveProgress(event.phase === 'tool_start'
+      ? `正在调用 ${event.name}…`
+      : `${event.name} 已返回${event.outcome && event.outcome !== 'SUCCESS' ? ` · ${event.outcome}` : ''}`),
+  }
+  function clearStream() { setStreamingText(''); setLiveProgress('') }
   useEffect(() => {
     let mounted = true
     void api.session().then(async s => {
@@ -182,6 +191,7 @@ export default function App() {
     if (!requestedGoal) return
     const requestedPending = pending.split(',').map(s => s.trim()).filter(Boolean)
     await run(async () => {
+      clearStream()
       let launch: Awaited<ReturnType<typeof createAndRunFirstTurn>>
       try {
         launch = await createAndRunFirstTurn(api, requestedGoal, requestedPending, created => {
@@ -193,7 +203,7 @@ export default function App() {
           setSourceTaskId(null)
           setPage('workspace')
           setTasks(old => [created, ...old.filter(t => t.id !== created.id)])
-        })
+        }, streamHandlers)
       } catch (e) {
         if (e instanceof ApiError && e.code === 'CONFLICT') {
           try {
@@ -230,6 +240,7 @@ export default function App() {
         setError(launch.executionError.message)
         setMessages(old => [...old, {role:'notice', text:'任务已创建，但首轮执行没有成功完成。请检查错误与审计，确认状态后再决定是否继续；不会自动重试。'}])
       }
+      clearStream()
       try {
         setTasks(await api.tasks())
       } catch {
@@ -241,14 +252,16 @@ export default function App() {
   async function send(message: string, approval?: Approval) {
     if (!task) return
     await run(async () => {
-      setMessages(old => [...old, {role:'user', text:message}]); setTurn(null)
+      setMessages(old => [...old, {role:'user', text:message}]); setTurn(null); clearStream()
       if (approval) rememberOperation({id:approval.operationId, taskId:task.id, unknown:true})
       let result: TurnView
-      try { result = await api.turn(task.id, message, approval) }
+      try { result = await api.streamTurn(task.id, message, approval, streamHandlers) }
       catch (e) {
+        clearStream()
         if (approval) throw new Error(`operationId=${approval.operationId} · 写入结果未确认，禁止自动重试。请核查审计与数据库。原始错误：${e instanceof Error ? e.message : '请求异常'}`)
         throw e
       }
+      clearStream()
       setTurn(result)
       setLoadedHistoricalTask(false)
       const notExecuted = approval !== undefined && provenNotExecuted(result, approval.operationId)
@@ -323,7 +336,7 @@ export default function App() {
       {page === 'workspace' && task && <>
         <header className="workspace-heading"><div><button className="back" onClick={() => navigate('home')}>工作台 /</button><h1 ref={heading} tabIndex={-1}>{task.goal}</h1><span className="muted">{statusLabel[task.status]} · {session?.enterprise} · {task.id.slice(0,8)}</span></div><div className="workspace-actions"><Button disabled={busy || !turn || (loadedHistoricalTask && isTerminalTaskStatus(task.status))} onClick={() => navigate('review')}><FileCheck2 size={16}/>审核与结果</Button><Button aria-label="打开检查器" onClick={() => void openInspector()}><PanelRight size={17}/></Button></div></header>
         {loadedHistoricalTask && isTerminalTaskStatus(task.status) ? <TerminalTaskPanel task={task} onCreateNew={startNewFromHistory}/> : <>
-          <Thread messages={messages} busy={busy}/>
+          <Thread messages={messages} busy={busy} streaming={streamingText} progress={liveProgress}/>
           {isTerminalTaskStatus(task.status) ? <div className="terminal-inline"><span>当前任务{statusLabel[task.status]}，已禁用后续写入。可查看本轮结果，或创建新的独立任务。</span><Button variant="primary" onClick={startNewFromHistory}>基于原任务新建查询 <ArrowUpRight size={14}/></Button></div> : <><Composer disabled={busy || !selected} onSend={m => void send(m)}/>
           <details className="supplement"><summary>补充 / 更正明确事实</summary><Supplement key={task.id + ':' + task.version} busy={busy} onSubmit={(key, value, userRequest) => void run(async () => { const updated = await api.supplement(task.id, task.version, {[key]:{value,userRequest}}); setTask(updated); setTurn(null); setMessages(old => [...old,{role:'notice',text:'明确事实已记录，发票未保存。请重新查询当前数据后审核。'}]); setTasks(await api.tasks()) })}/></details></>}
         </>}
@@ -426,10 +439,10 @@ function Identity({busy,session,onSelect}: {busy:boolean; session:Session|null; 
   const [profile,setProfile] = useState(session?.profile || 'operator'), [enterprise,setEnterprise] = useState(session?.enterprise || 'C001')
   return <form className="stack" onSubmit={e => { e.preventDefault(); onSelect(profile,enterprise) }}><label>本地角色<select value={profile} onChange={e => setProfile(e.target.value)}><option value="operator">操作员 · U001</option><option value="viewer">只读成员 · U002</option></select></label><label>企业<select value={enterprise} onChange={e => setEnterprise(e.target.value)}><option value="C001">C001 · 甲企业</option><option value="C002">C002 · 乙企业</option></select></label><p className="muted">U002 对 C001 只读，无权访问 C002。</p><Button variant="primary" disabled={busy} type="submit">进入工作空间</Button></form>
 }
-function Thread({messages,busy}: {messages:Message[]; busy:boolean}) {
+function Thread({messages,busy,streaming,progress}: {messages:Message[]; busy:boolean; streaming:string; progress:string}) {
   const bottom = useRef<HTMLDivElement>(null)
-  useEffect(() => { bottom.current?.scrollIntoView({block:'nearest'}) }, [messages, busy])
-  return <section className="thread" aria-label="任务对话"><div className="thread-inner" role="log" aria-live="polite">{messages.map((m,i) => <article key={i} className={`message ${m.role}`}><div className="message-label">{m.role === 'agent' ? <><Sparkles size={15}/>财税 Agent <span>模型生成 · 不代表保存成功</span></> : m.role === 'user' ? '你' : <><ShieldCheck size={14}/>工作空间</>}</div><p>{m.text}</p>{m.history && <ToolGroup history={m.history}/>}</article>)}{busy && <p className="request-state" role="status"><CircleDashed size={16}/>请求处理中，等待后端完整响应…</p>}<div ref={bottom}/></div></section>
+  useEffect(() => { bottom.current?.scrollIntoView({block:'nearest'}) }, [messages, busy, streaming, progress])
+  return <section className="thread" aria-label="任务对话"><div className="thread-inner" role="log" aria-live="polite">{messages.map((m,i) => <article key={i} className={`message ${m.role}`}><div className="message-label">{m.role === 'agent' ? <><Sparkles size={15}/>财税 Agent <span>模型生成 · 不代表保存成功</span></> : m.role === 'user' ? '你' : <><ShieldCheck size={14}/>工作空间</>}</div><p>{m.text}</p>{m.history && <ToolGroup history={m.history}/>}</article>)}{streaming && <article className="message agent"><div className="message-label"><Sparkles size={15}/>财税 Agent <span>模型生成 · 不代表保存成功</span></div><p>{streaming}</p></article>}{busy && <p className="request-state" role="status"><CircleDashed size={16}/>{progress || '请求处理中，等待后端完整响应…'}</p>}<div ref={bottom}/></div></section>
 }
 function Composer({disabled,onSend}: {disabled:boolean; onSend:(m:string)=>void}) {
   const [message,setMessage] = useState('')
