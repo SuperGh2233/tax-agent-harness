@@ -34,6 +34,9 @@ public final class DemoSecurity extends OncePerRequestFilter {
             throws ServletException, IOException {
         res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
         if (!req.getRequestURI().startsWith("/api/demo/")) {
+            // Hashed assets may cache; the HTML entry must not, or an upgrade keeps serving stale JS.
+            var path = req.getRequestURI();
+            if (path.endsWith("/") || path.endsWith(".html")) res.setHeader("Cache-Control", "no-cache");
             chain.doFilter(req, res); return;
         }
         res.setHeader("Cache-Control", "no-store");

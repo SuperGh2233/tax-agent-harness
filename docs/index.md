@@ -33,9 +33,13 @@
 | [T12 演示与录屏](../DEMO_SCRIPT.md) | completed | 独立 demo DB、安全启动、React 录屏步骤 |
 | [审计保留策略](specs/AUDIT_RETENTION.md) | active | append-only、导出、归档和保留周期 |
 | [依赖安全扫描](specs/DEPENDENCY_SECURITY.md) | active | OSV 运行时依赖 CVE 扫描、修复版本与抑制记录 |
-| [真实 E2E 记录](evidence/REAL_E2E_20261106.md) | current | 千帆 DeepSeek API 三场景和浏览器截图 |
+| [关键运行记录索引](evidence/README.md) | current | 四份运行记录、22 张截图、数字口径表（缺口随写入变化，必须带时点） |
+| [提交前测试报告](evidence/TEST_REPORT_20261111.md) | current | 252 项回归、API 受控保存/幂等、负例、浏览器 E2E、日期序列化修复 |
+| [演示重录记录](evidence/DEMO_RERUN_20261111.md) | current | 先保存后补充的六段实测与 14 张分镜截图 |
+| [风险修复记录](evidence/FIXES_20261111.md) | current | 规则变更即时生效、`agent_trace` 持久化、`finish` 伪工具归一化 |
+| [真实 E2E 记录（历史）](evidence/REAL_E2E_20261106.md) | archived | 2026-11-06 千帆 DeepSeek API 三场景；当前口径为 `qwen3.7-flash` |
 
 | [T13 计划](plans/active/PLAN-20261030-t13-release-reproduction.md) | active | 独立复现、经用户批准的真实模型E2E范围、证据与待验证边界 |
 | [独立复现](../REPRODUCE.md) | active | JDK21首次在线/后续离线构建、新库、安全启动及排障 |
 | [交付检查单](../RELEASE_CHECKLIST.md) | active | 官方要求对照、白名单、人工设计/记录/录屏待办和T13变更清单 |
-| [初赛提交说明](SUBMISSION_NOTES.md) | active | 截止时间、官方 Qwen3.8-Max 配置、构建/离线、视频脚本和提交门禁 |
+| [初赛提交说明](SUBMISSION_NOTES.md) | active | 截止时间、模型口径（统一 `qwen3.7-flash`，官方未指定型号）、构建/离线、视频脚本和提交门禁 |

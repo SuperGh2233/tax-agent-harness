@@ -203,15 +203,15 @@ Vite 开发服务器只监听本机回环地址，并将同源 `/api` 请求代�
 | --- | --- |
 | `LLM_ENDPOINT` | 模型服务地址（OpenAI-compatible Base URL 会规范化为 `/chat/completions`） |
 | `LLM_API_KEY` | 模型服务凭证 |
-| `LLM_MODEL` | 模型名称，如官方评审模型 `qwen3.8-max` 或当前开发验证模型 `deepseek-v4.1-flash-1017` |
+| `LLM_MODEL` | 模型名称；本项目统一使用 `qwen3.7-flash`（官方材料未指定型号，换模型只需改此变量） |
 | `LLM_PROTOCOL` | `anthropic` 或 `openai-chat`；不填时按 endpoint 路径选择 |
 
 当前适配路径包括：
 
-- **官方评审模型 Qwen3.8-Max：** 使用 DashScope Anthropic-compatible Messages：
-  `LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.8-max`、`LLM_PROTOCOL=anthropic`；
+- **本项目默认模型 `qwen3.7-flash`：** 使用 DashScope Anthropic-compatible Messages：
+  `LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.7-flash`、`LLM_PROTOCOL=anthropic`；
   若使用 OpenAI-compatible 网关，则把 endpoint 改为对应 Base URL 并设 `LLM_PROTOCOL=openai-chat`。
-- **当前开发验证：** 百度千帆 Token Plan 的 DeepSeek-V4.1-flash-1017，OpenAI-compatible Chat Completions。
+- **历史验证记录：** 百度千帆 Token Plan 的 DeepSeek-V4.1-flash-1017，OpenAI-compatible Chat Completions。
 - **OpenAI-compatible API：** 支持 Responses 和 Chat Completions 路径，由配置的 endpoint 显式选择。
 - 模型名称不硬编码；换模型只需改环境变量，工具、规则、证据门和审计不依赖具体供应商。
 
@@ -261,7 +261,7 @@ npm run build
 npm run verify
 ```
 
-自动化测试使用合成样例数据和隔离测试数据库。真实千帆 DeepSeek-V4.1-flash-1017 的 API 三场景（查询+R004、受控保存、跨轮补充保存）已通过；真实 Chrome/React 查询+R004 与完整 prompt trace 已通过。真实浏览器内的受控保存/跨轮和 ≤5 分钟视频仍未完成。不要把 API 验证写成浏览器 UI 验证；官方评审模型 Qwen3.8-Max 仍需在提交前用官方凭证复测。
+自动化测试使用合成样例数据和隔离测试数据库。真实 `qwen3.7-flash`（DashScope Anthropic 兼容入口）的 API 三场景（查询+R004、受控保存、跨轮补充保存）与真实 Chrome/React 查询、受控保存、跨轮补充、`verified=true` 回读、脱敏审计均已通过。≤5 分钟视频与最终 zip 仍未完成。不要把 API 验证写成浏览器 UI 验证。
 
 ## 项目结构
 
@@ -304,7 +304,7 @@ npm run verify
 - 后端核心流程、任务记忆、受控写入、演示 API 与本地 UI 已实现。
 - React 是唯一 UI；T15 的真实浏览器受控保存/跨轮及最终录屏仍在进行。
 - 独立复现和交付材料核验仍在进行；队友接手请先阅读 [开发交接说明](docs/agent-handoff.md)，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
-- 最新 JDK21 全量 247 项、前端 Vitest 37 项自动化测试通过；真实 DeepSeek API 三场景和 React 查询+R004 已通过，但官方 Qwen3.8-Max 复测、浏览器保存/跨轮和视频未完成。
+- 最新 JDK21 全量 252 项、前端 Vitest 37 项自动化测试通过；`qwen3.7-flash` 真实 API 三场景与 React 查询、受控保存、跨轮补充均已通过；仅 ≤5 分钟视频与最终 zip 未完成。模型型号由配置决定，本项目统一 `qwen3.7-flash`。
 - 当前系统用于比赛演示与技术验证，不应视为具备生产环境所需的认证、部署、审计防篡改和运维能力。
 
 ---

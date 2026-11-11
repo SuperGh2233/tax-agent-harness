@@ -73,7 +73,9 @@ env -u LLM_ENDPOINT -u LLM_API_KEY -u LLM_MODEL TAXAGENT_DATABASE="$T13_DEMO_DB"
   '-Dspring-boot.run.arguments=--server.address=127.0.0.1 --server.port=8080'
 ```
 
-`.env` 不会自动加载；无需把密钥写进仓库。当前真实模型使用百度千帆 Token Plan 个人版：OpenAI 兼容 Base URL `https://qianfan.baidubce.com/v2/tokenplan/personal`、模型 `deepseek-v4.1-flash-1017`、`LLM_PROTOCOL=openai-chat`；Anthropic 兼容 Base URL `https://qianfan.baidubce.com/anthropic/tokenplan/personal` 也保留。客户端会把 OpenAI Base URL 规范化为 `/chat/completions`。`LLM_API_KEY` 只在本机安全终端或工作区 `.tools/model.env` 中输入，绝不粘贴到聊天、日志、截图或仓库。2026-11-06 已通过真实千帆 API 三场景（查询+R004、受控保存、跨轮补充保存）和真实 Chrome 浏览器查询/受控保存；真实浏览器跨轮、视频和最终包仍未验证。只能使用官方合成样本、独立临时 SQLite 与 loopback，不得使用 data/harness.db 或真实财务数据。
+`.env` 不会自动加载；无需把密钥写进仓库。**当前使用的模型是 DashScope Anthropic 兼容入口**：`LLM_ENDPOINT=https://dashscope.aliyuncs.com/apps/anthropic`、`LLM_MODEL=qwen3.7-flash`、`LLM_PROTOCOL=anthropic`（不填也会按 endpoint 路径选中 Anthropic 适配器）。客户端在 base 后追加 `/v1/messages`，用 `x-api-key` 认证，超时 60 秒。赛事材料未指定模型名，只要求可配置切换；OpenAI 兼容 Base URL（会规范化为 `/chat/completions`）与 Responses 路径均保留，换模型只改环境变量。`LLM_API_KEY` 只在本机安全终端输入，绝不粘贴到聊天、日志、截图或仓库。
+
+2026-11-11 已验证（`qwen3.7-flash` + 全新临时库 + loopback）：API 三场景（查询+R004、受控保存、跨轮补充保存）与真实 Chrome 浏览器内的查询、受控保存、跨轮补充、`verified=true` 回读、脱敏审计全部通过；**未完成**的只有 ≤5 分钟演示视频与最终作品包。演示与录屏按 [DEMO_SCRIPT.md](DEMO_SCRIPT.md) 执行（内含强制的干净库与数字口径步骤）。只能使用官方合成样本、独立临时 SQLite 与 loopback，不得使用 `data/harness.db` 或真实财务数据。
 
 ## 5. 故障排查与证据
 

@@ -353,3 +353,53 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 验证：Java 247/0/0/0（关闭 Windows 临时目录清理）；前端 37/37（typecheck、ESLint、Vite build）；`mvn clean package` 成功；OSV 0 未抑制；React 真实查询+R004 与完整 prompt trace 通过。
 - 未完成：官方 Qwen3.8-Max 复测、React 浏览器内受控保存/跨轮、≤5 分钟视频、最终作品 zip。
 - 已按用户明确要求将本轮 P1/P2 改动提交并推送到 `origin/work/zhanghengyuan1`；此前 `5b19cdd` 也已在同一分支。
+
+### T17 — 提交前完整测试与浏览器保存闭环（2026-11-11）
+- 状态：DONE（测试范围）；认领人：Coding Agent。完整证据：[TEST_REPORT_20261111.md](docs/evidence/TEST_REPORT_20261111.md)。
+- 环境：macOS / JDK 21.0.12.1 / Maven 3.10 / Node 22.22.2；`127.0.0.1:18085` + 独立临时库 `/tmp/taxagent-test-AXRSwm/test.db`；模型沿用用户指定的 `qwen3.7-flash`（endpoint 路径含 `/anthropic` → AnthropicMessagesClient）。
+- **缺陷修复（提交门禁阻塞项）**：`AgentRuntime` 工具结果序列化未关闭 `WRITE_DATES_AS_TIMESTAMPS`，`invoice_date` 输出 `[2026,9,8]` 数组；前端 `isInvoice()` 要求字符串，导致"审核与结果"永远拿不到发票、浏览器内受控保存不可用。修复：`AgentRuntime.JSON` 增加 `.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)`；新增回归 `AgentRuntimeTest#invoiceRowsExposeIsoDateStringsNotArrays`。仅改这 2 个文件，未动契约、规则与业务边界。
+- 受控保存（API，任务 `1dc188aa`）：`operationId=cd15f309…`，F002/purpose，`verified=true` 且回读一致，`invoice_operations` 1 行含 `task_id`，审计 `fields=purpose` 无明文；同 `requestId` 重放不重复写入，改载荷重放 HTTP 409。
+- 负例：viewer 读 operator 任务 404；viewer 携带批准 403 PERMISSION_DENIED；operator 口头"直接保存"无批准时只读完成、零写入。
+- 浏览器 E2E（真实 Chromium）：只读查询（引用 R002 v2.0，4 张缺用途）→ 审核页 10 张发票 → 二次确认弹窗 `operationId=8a441f8a…` → 保存后 `verified=true · 数据库回读已核验`（F009）→ 检查器执行计划 6 步全绿。截图 6 张存 `docs/evidence/ui-e2e-20261111-*.png`。
+- 补充表单：`F004.purpose` + 明确值 + 原话 → "仅记录信息" → 提示"明确事实已记录，发票未保存"，模型随后仍报告 F004 系统内为空。
+- 回归：Java 248/0/0/0（离线）；前端 37/37 + typecheck + build；OSV 35 依赖 0 未抑制（2 条既有豁免）；`secret_scan` CLEAN；`git diff --check` 通过。
+- 已知约束：补充清空待补字段后再发起查询会让任务自动结项（COMPLETED），随后同任务禁止写入；演示需在"等待补充"状态下直接审核保存。
+- 未完成：官方 Qwen3.8-Max 复测（用户指定沿用 3.7-flash）、≤5 分钟视频、最终 zip、空缓存首次在线构建、跨 JVM 并发验证。
+- 未提交/未推送；工作树仅本轮 2 个源码/测试文件 + 6 张证据截图 + 本报告新增。
+
+### T18 — 演示流程按修正顺序重录（2026-11-11）
+- 状态：DONE（重录+取证）；认领人：Coding Agent。记录：[DEMO_RERUN_20261111.md](docs/evidence/DEMO_RERUN_20261111.md)。
+- 顺序修正：**先受控保存、后补充声明**。原脚本第 3→4 段在同一任务连演会卡死——补充清空待补字段后再查询会使任务结项，写入按钮被禁用。保存改在「等待补充」状态下执行，实测通过；补充拆为独立第二任务，只演示「仅记录声明、不写入发票」。
+- 实测：任务 `020af773`，首轮查询 24.7s（4 只读工具，NEEDS_INPUT），保存轮 13.2s（update_invoice → query_invoices → check_invoice_purpose，FINISHED），`operationId=ec584656…`，`verified=true` 且数据库回读一致；F002.purpose 空→「办公室采购」，C001 缺用途 10→9，`invoice_operations` 1 行含 task_id，审计 22 条且含明文用途 0 行。取消一次（`f0304d78…`）库中零变化。
+- 教训 1：待补字段必须与要写字段对齐。首轮录制用 `F002.purpose,F002.remarks`，模型多带 remarks 导致载荷不一致，被 fail-closed 拒绝 `CONFIRMATION_REQUIRED`（零写入）。
+- 教训 2：保存失败会在 `sessionStorage`/`localStorage` 留下操作锁，换库重启也不释放；演示前须核查或清理。
+- 产出：14 张按镜头编号的截图 `docs/evidence/demo-rerun-20261111-*.png`；DEMO_SCRIPT.md 原文未改，仅在该记录第五节给出建议补丁。
+- 未提交/未推送。
+
+### T19 — 提交前风险修复：规则生效 + 运行记录持久化（2026-11-11）
+- 状态：DONE（代码+实测）；认领人：Coding Agent。记录：[FIXES_20261111.md](docs/evidence/FIXES_20261111.md)。
+- **规则生效**：删除 `RuleService` 的官方正文白名单（OFFICIAL 全等比较），改为从存储正文解析 `每张必填` / `≥X 元必填` 两种既有表述；矛盾措辞或无法解析仍 `UNSUPPORTED_SCOPE`。停用旧版→导入新版后，检查结果与引用版本立即随新版本变化。单测新增 2 项（共 11 项）；真实服务实测：R002 3.0（≥1000 元）→ 缺用途只剩 F006，模型引用 R002 3.0。
+- **运行记录**：新增 append-only `agent_trace` 表 + `GET /api/demo/tasks/{id}/traces`；每轮（含失败轮）记录系统提示、完整用户消息、工具名、历史条数、memorySource、outcome，不含密钥。检查器在刷新/重启后回退显示持久化记录。
+- **运行时鲁棒性**：真实模型把结束协议发成 `finish` 工具调用会导致整轮 `INVALID_ARGUMENT`；现按文本协议归一化 `finish`/`ask`，仍保留"工具错误不得报成功""批准轮未核验不得结束"约束。新增 2 项测试。
+- 其他：系统提示补充"无本轮批准时须说明去审核面板确认"；HTML 入口加 `Cache-Control: no-cache`（避免升级后旧 JS）；CLI 说明"更新=新增版本"。
+- 不改：`amount_cents`（工具契约冻结整数分）、8 月用途检查（规则限定 9 月）。
+- 回归：后端 252/0/0/0；前端 37/37 + typecheck + build；JAR 重新打包且旧哈希资源已清；18086 已用新 JAR 重启。
+- 未提交/未推送。
+
+### T20 — 模型口径纠偏：统一 qwen3.7-flash，撤销"官方评审模型 Qwen3.8-Max"表述（2026-11-11）
+- 状态：DONE（文档纠偏，无代码改动）；认领人：Coding Agent。
+- 触发：用户指出 `Qwen3.8-Max` 无人授权。核查结论：该表述由提交 `1837f8b`（11-06）写入 `docs/SUBMISSION_NOTES.md`，属早期会话假设；官方材料 `01_参赛说明.docx` 与 `03_业务规则.docx` 全文未出现任何模型名，只要求"赛事允许的模型 + 配置项切换"。仓库中无任何 3.8 型号的真实调用证据。
+- 决定（用户 2026-11-11 明确）：**统一使用 `qwen3.7-flash`，不使用 Qwen3.8-Max**；换模型通过 `LLM_MODEL`/`LLM_ENDPOINT` 配置，不做型号复测。
+- 已改：`docs/SUBMISSION_NOTES.md`（第 2 节改写为"模型与接口配置"、提交门禁、当前状态）、`docs/index.md` 索引描述、`README.md`（模型配置表、适配路径、验证说明、状态行）、`docs/agent-handoff.md`、`docs/evidence/TEST_REPORT_20261111.md`、`docs/evidence/FIXES_20261111.md`、`docs/参赛作品设计说明_2-3页.docx`（"官方评审模型复测"段改写为当前事实，247 项更正为 252 项）。
+- 未改历史记录：`docs/plans/active/PLAN-20261030-*.md`、`docs/specs/SPEC-20261030-demo-api.md`、`TASKS.md` 早期条目中的 `qwen3.8-flash` 属当时自选的联调目标（仅 stub，未发真实请求），保留原文，仅在各文件顶部加口径注记。
+- 未提交/未推送。
+
+### T21 — 录制可用性收口：脚本重写 + 数字口径标注 + 交付文档对齐（2026-11-11 晚）
+- 状态：DONE（文档，无代码改动）；认领人：Coding Agent。
+- **DEMO_SCRIPT.md 重写**：旧版第 3→4 段"补充后再保存"同任务连演必卡死（补充清空待补字段→任务推进→再查询直接结项→写入按钮禁用）。新版改为六段：身份→查询→**等待补充状态下直接审核**→取消一次→确认+回读→检查器/审计→（可选）补充声明独立任务；待补字段只登记 `F002.purpose`；新增录制前四步（新建库、基线核对、清 `taxagent-pending-operation` 锁、显式注入密钥）；模型口径改为 `qwen3.7-flash`。
+- **数字口径**：新增"口径表"章节。新建库 C001 2026-09 缺 5 张（F002/F004/F003/F006/F009）→ 保存 F002 后 4 张 → 再保存 F009 后 3 张。此前 `TEST_REPORT` 的"4 张"与 `DEMO_RERUN` 的"5 张"被误读为矛盾，实为同一库不同写入时点；三份证据均已加时点标注。
+- **实测校验**：用 `--initialize-data` 新建库验证基线脚本输出 `invoices 40 / bank_entries 48 / 缺 ['F002','F004','F003','F006','F009']`；台账表在服务启动时才创建，脚本已做存在性判断。
+- **REPRODUCE.md**：模型段从千帆 `deepseek-v4.1-flash-1017` 改为 DashScope `qwen3.7-flash` + `/anthropic`，并更新已验证范围与未完成项。
+- **RELEASE_CHECKLIST.md**：头部状态从 2026-11-06（247 项、千帆、浏览器保存未完成）更新为 2026-11-11（252 项、qwen3.7-flash、浏览器全链路通过）；对照表更新源码/设计说明/运行记录/演示/三场景/规则管理六行；测试计数基线 187→252。
+- **新增** `docs/evidence/README.md`：关键运行记录索引（四份记录 + 22 张截图 + 口径表），`docs/index.md` 同步。
+- 未提交/未推送（按 AGENTS.md：不得擅自提交）。

@@ -1,17 +1,18 @@
 package com.taxagent.harness.tool;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.file.Path;
 import java.sql.*;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.regex.Pattern;
 import static com.taxagent.harness.tool.ToolContract.*;
 
 /** Local service only. Known official rule executor, not a general text/RAG interpreter. */
 public final class RuleService {
     private final String url;
     private final PermissionGuard guard = new PermissionGuard();
-    private static final Map<RuleKey, RuleDefinition> OFFICIAL = officialDefinitions();
 
     public RuleService() { this(Path.of("data/harness.db")); }
     public RuleService(Path database) {
@@ -108,25 +109,42 @@ public final class RuleService {
         });
     }
 
+    /**
+     * Executable semantics parsed from the stored rule text. Only the two documented requirement
+     * forms are interpreted; any other wording is refused instead of guessed.
+     */
+    record PurposeRequirement(boolean everyInvoice, long thresholdCents) {
+        boolean requires(long amountCents) { return everyInvoice || amountCents >= thresholdCents; }
+        String describe() {
+            return everyInvoice ? "每张发票都必须填写用途"
+                    : "价税合计大于或等于 " + BigDecimal.valueOf(thresholdCents, 2).toPlainString() + " 元时必须填写用途";
+        }
+    }
+    private static final Pattern THRESHOLD = Pattern.compile("大于或等于([0-9]+(?:\\.[0-9]{1,2})?)元");
+    private static final Pattern MUST_FILL = Pattern.compile("必须填写用途");
+
+    static PurposeRequirement requirement(String content) {
+        if (content == null) throw unsupported();
+        var text = content.replaceAll("\\s+", "");
+        if (!MUST_FILL.matcher(text).find()) throw unsupported();
+        var threshold = THRESHOLD.matcher(text);
+        boolean every = text.contains("每张发票都必须填写用途");
+        if (every && threshold.find()) throw unsupported(); // contradictory wording: refuse, never guess
+        if (every) return new PurposeRequirement(true, 0);
+        if (threshold.find()) {
+            var cents = new BigDecimal(threshold.group(1)).movePointRight(2).setScale(0, RoundingMode.UNNECESSARY);
+            return new PurposeRequirement(false, cents.longValueExact());
+        }
+        throw unsupported();
+    }
+
     public PurposeResult checkInvoicePurpose(PermissionGuard.Session session, PurposeCheck query) {
         if (query == null) throw invalid("Purpose query required");
         return transaction(false, c -> {
             guard.require(c, session, query.enterpriseId(), PermissionGuard.Access.READ);
             var date = LocalDate.parse(query.month() + "-01");
-            String id = switch (query.enterpriseId()) {
-                case "C001" -> "R002";
-                case "C002" -> "R003";
-                default -> throw unsupported();
-            };
-            var candidates = rules(c, query.enterpriseId(), date).stream()
-                    .filter(r -> r.key().ruleId().equals(id)).toList();
-            // No invented precedence for multiple enabled versions.
-            if (candidates.size() > 1) throw new DomainException(ErrorCode.CONFLICT, "Ambiguous enabled rule versions");
-            if (candidates.isEmpty()) throw unsupported();
-            var rule = candidates.getFirst();
-            var expectedKey = new RuleKey(id, id.equals("R002") ? "2.0" : "1.0");
-            if (!rule.key().equals(expectedKey) || !rule.definition().equals(OFFICIAL.get(expectedKey)))
-                throw unsupported();
+            var rule = purposeRule(c, query.enterpriseId(), date);
+            var requirement = requirement(rule.definition().content());
             var missing = new ArrayList<InvoiceKey>();
             try (var s = c.prepareStatement("""
                     SELECT id,amount_cents,purpose FROM invoices
@@ -137,8 +155,7 @@ public final class RuleService {
                 try (var r = s.executeQuery()) {
                     while (r.next()) {
                         String purpose = r.getString("purpose");
-                        if ((id.equals("R002") || r.getLong("amount_cents") >= 100_000)
-                                && (purpose == null || purpose.isBlank()))
+                        if (requirement.requires(r.getLong("amount_cents")) && (purpose == null || purpose.isBlank()))
                             missing.add(new InvoiceKey(query.enterpriseId(), r.getString("id")));
                     }
                 }
@@ -147,15 +164,23 @@ public final class RuleService {
         });
     }
 
+    /** The single enabled purpose rule of the enterprise; multiple enabled versions stay ambiguous. */
+    private static StoredRule purposeRule(Connection c, String enterprise, LocalDate date) throws SQLException {
+        String id = switch (enterprise) {
+            case "C001" -> "R002";
+            case "C002" -> "R003";
+            default -> throw unsupported();
+        };
+        var candidates = rules(c, enterprise, date).stream().filter(r -> r.key().ruleId().equals(id)).toList();
+        // No invented precedence for multiple enabled versions.
+        if (candidates.size() > 1) throw new DomainException(ErrorCode.CONFLICT, "Ambiguous enabled rule versions");
+        if (candidates.isEmpty()) throw unsupported();
+        return candidates.getFirst();
+    }
+
     static void requireSupportedWriteRules(Connection c, String enterprise, LocalDate date) throws SQLException {
         if (!date.toString().startsWith("2026-09")) throw unsupported();
-        var active = rules(c, enterprise, date);
-        String purposeId = enterprise.equals("C001") ? "R002" : enterprise.equals("C002") ? "R003" : "";
-        var purposeRules = active.stream().filter(r -> r.key().ruleId().equals(purposeId)).toList();
-        if (purposeRules.size() > 1) throw new DomainException(ErrorCode.CONFLICT, "Ambiguous enabled rules");
-        if (purposeRules.isEmpty()) throw unsupported();
-        for (var rule : active)
-            if (!rule.definition().equals(OFFICIAL.get(rule.key()))) throw unsupported();
+        requirement(purposeRule(c, enterprise, date).definition().content());
     }
 
     private static List<StoredRule> rules(Connection c, String enterprise, LocalDate date) throws SQLException {
@@ -194,18 +219,8 @@ public final class RuleService {
         if (context == null) throw new DomainException(ErrorCode.PERMISSION_DENIED, "Trusted local management required");
     }
     private static DomainException unsupported() {
-        return new DomainException(ErrorCode.UNSUPPORTED_SCOPE, "No supported enabled official purpose rule; inspect stored rule content");
-    }
-    private static Map<RuleKey, RuleDefinition> officialDefinitions() {
-        // Seed is used only as an allowlist of executable semantics, never as current DB state.
-        try (var input = RuleService.class.getResourceAsStream("/seed/official-v1.1.0.json")) {
-            var result = new HashMap<RuleKey, RuleDefinition>();
-            for (var row : new ObjectMapper().readTree(input).required("rules"))
-                result.put(new RuleKey(row.get(0).asText(), row.get(1).asText()),
-                        new RuleDefinition(row.get(2).asText(), LocalDate.parse(row.get(3).asText()),
-                                RuleStatus.valueOf(row.get(4).asText()), row.get(5).asText()));
-            return Map.copyOf(result);
-        } catch (java.io.IOException e) { throw new ExceptionInInitializerError(e); }
+        return new DomainException(ErrorCode.UNSUPPORTED_SCOPE,
+                "No executable purpose rule: check the enabled version's wording, or disable conflicting versions");
     }
     @FunctionalInterface private interface Operation<T> { T run(Connection c) throws SQLException; }
 }

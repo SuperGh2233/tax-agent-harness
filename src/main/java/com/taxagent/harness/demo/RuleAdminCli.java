@@ -70,6 +70,7 @@ public final class RuleAdminCli {
             err.println("Usage: --rules-list --enterprise=C001 [--date=2026-09-15]");
             err.println("       --rules-import/--rules-update --rule-id=R005 --version=1.0 --name=NAME --effective-from=2026-10-01 "
                     + "--content-file=rule.txt --enterprises=C001,C002 [--status=启用]");
+            err.println("       （更新 = 新增版本；已存在的版本号不可原地改写，须先 --rules-disable 再导入新版本）");
             err.println("       --rules-disable --rule-id=R005 --version=1.0");
             err.println("       --prefs-list --enterprise=C001 [--user=U001]");
             err.println("       --prefs-put --enterprise=C001 --name=style --value=简洁 --user-request=用户原话 [--user=U001]");

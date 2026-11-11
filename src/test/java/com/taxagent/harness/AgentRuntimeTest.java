@@ -49,6 +49,32 @@ class AgentRuntimeTest {
         assertThat(fake.requests.get(3).history()).isEqualTo(result.history());
         assertThat(Files.readAllBytes(database)).isEqualTo(before);
     }
+    @Test void providerPseudoToolFinishIsNormalizedNotRejected() {
+        var fake = new FakeLlmClient(new Call("c1", "finish", "{\"text\":\"已核对，缺 F002。\"}"));
+        var result = runtime(fake).run(user, "检查用途");
+        assertThat(result.status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(result.text()).isEqualTo("已核对，缺 F002。");
+        assertThat(result.errorCode()).isNull();
+    }
+    @Test void providerPseudoToolAskStillWaitsForUser() {
+        var fake = new FakeLlmClient(new Call("c1", "ask", "{\"text\":\"请确认月份。\"}"));
+        var result = runtime(fake).run(user, "查发票");
+        assertThat(result.status()).isEqualTo(AgentRuntime.Status.NEEDS_INPUT);
+        assertThat(result.text()).isEqualTo("请确认月份。");
+    }
+    @Test void invoiceRowsExposeIsoDateStringsNotArrays() throws Exception {
+        // The React review panel only accepts string dates; epoch arrays silently hid every invoice.
+        var fake = new FakeLlmClient(call("query_invoices"), new Finish("完成"));
+        var rows = new ObjectMapper().readTree(runtime(fake).run(user, "查询九月发票")
+                .history().getFirst().resultJson()).at("/data/rows");
+        assertThat(rows.isArray()).isTrue();
+        assertThat(rows.size()).isEqualTo(10);
+        for (var row : rows) {
+            assertThat(row.at("/invoice_date").isTextual()).isTrue();
+            assertThat(row.at("/invoice_date").asText()).matches("\\d{4}-\\d{2}-\\d{2}");
+            assertThat(row.at("/amount_cents").isInt()).isTrue();
+        }
+    }
     @Test void askAndFinishAreModelDecisionsWithNoCrossRequestMemory() {
         var fake = new FakeLlmClient(new Ask("请提供企业和月份"), new Finish("说明完成"));
         var runtime = runtime(fake);

@@ -13,7 +13,9 @@ public final class AgentRuntime {
     private static final Map<String, String> DEFINITIONS = Map.of(
             "query_invoices", "Query", "query_bank_entries", "Query",
             "check_invoice_purpose", "PurposeCheck", "query_rules", "RuleQuery");
+    /** Tool results are the evidence the UI parses and the model reads: dates must be ISO strings, not epoch arrays. */
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules()
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
     public record Limits(int maxSteps, Duration timeout, int modelRetries, Set<String> allowedTools) {
         public Limits {
@@ -119,6 +121,15 @@ public final class AgentRuntime {
                 }
                 List<Call> calls = decision instanceof Call single ? List.of(single)
                         : decision instanceof Batch batch ? batch.calls() : null;
+                // Some providers express the text protocol as a pseudo tool call named finish/ask.
+                var finalizer = finalizer(calls);
+                if (finalizer != null) {
+                    if (toolError != null) return error(toolError, history);
+                    if (finalizer instanceof Ask ask) return new Result(Status.NEEDS_INPUT, ask.text(), null, history);
+                    if (approval != null && !verifiedWrite)
+                        return error(writeDispatched ? "WRITE_NOT_VERIFIED" : "WRITE_NOT_EXECUTED", history);
+                    return new Result(Status.FINISHED, ((Finish) finalizer).text(), null, history);
+                }
                 if (calls != null) {
                     // Preflight the entire read-only batch before executing any member.
                     // An approved invoice write is never allowed to share a provider turn.
@@ -193,6 +204,19 @@ public final class AgentRuntime {
             return error("MAX_STEPS", history);
         } catch (Exception e) { return error("RUNTIME_FAILURE", history);
         } finally { worker.shutdownNow(); }
+    }
+    /** Accepts the text protocol only when a provider sends it as a single finish/ask tool call. */
+    private static Decision finalizer(List<Call> calls) {
+        if (calls == null || calls.size() != 1) return null;
+        var call = calls.getFirst();
+        boolean ask = call.name().equals("ask");
+        if (!ask && !call.name().equals("finish")) return null;
+        try {
+            var node = JSON.readTree(call.arguments());
+            var text = node.has("text") ? node.path("text").asText("") : node.path("content").asText("");
+            if (text.isBlank() || text.length() > 4000) return null;
+            return ask ? new Ask(text) : new Finish(text);
+        } catch (Exception malformed) { return null; }
     }
     /** All batch arguments must be valid and read-only before the first tool runs. */
     private void validateReadBatch(List<Call> calls, String enterprise) {

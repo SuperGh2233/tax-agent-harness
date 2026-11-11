@@ -201,5 +201,5 @@ npm run verify
 - 新增：`query_rules`/R004 引用；按本轮批准发布写工具；`ContextProjector` 记忆投影；审计 `ruleVersion/memorySource/durationMs` 与 scorecard；偏好 CLI/HTTP API/React 入口；turn 级 `requestId` 幂等；跨标签页操作锁；限速/请求体上限；审计 CSV 导出；Maven Wrapper；React 单一入口 `/react-app/`（静态页移除、Maven 自动构建）；完整 `promptTrace`；审计保留策略；OSV 依赖 CVE 扫描（0 未抑制，2 条风险接受）。
 - 真实 E2E：千帆 API 查询+R004、受控保存、跨轮补充保存通过；真实 Chrome/React 查询+R004 与完整 prompt trace 通过；浏览器内保存/跨轮、≤5 分钟视频和最终包未完成。证据见 [REAL_E2E_20261106.md](evidence/REAL_E2E_20261106.md)。
 - 验证：关闭 Windows 临时目录清理后 Java 247/0/0/0；默认清理模式 1 个临时目录错误；前端 37/37；`mvn clean package` 成功（自动构建 React）。
-- 官方跑测模型 Qwen3.8-Max 尚未实测：适配器不硬编码模型名，Anthropic/OpenAI-compatible 路径均可用；提交前必须用官方 endpoint/model/key 复跑三场景并记录，供应商差异可能影响工具调用和 JSON 决策。
+- 模型口径（2026-11-11 定稿）：本项目统一使用 `qwen3.7-flash`，不使用 Qwen3.8-Max。官方材料未指定模型名，适配器不硬编码模型名，Anthropic/OpenAI-compatible 路径均可用；换模型只需改 `LLM_MODEL`/`LLM_ENDPOINT`，无需型号复测。
 - 已按用户明确要求提交并推送到 `origin/work/zhanghengyuan1`；未合并 `main`，等待队友评审。

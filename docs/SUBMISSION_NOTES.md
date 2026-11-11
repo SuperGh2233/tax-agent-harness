@@ -11,13 +11,15 @@
 - ≤5 分钟演示视频（待录制）。
 - 不提交：`.git`、`.env*`、真实密钥、`data/**`、临时数据库、`frontend/dist`、`frontend/node_modules`、`target/**`、录屏源文件。
 
-## 2. 官方评审模型 Qwen3.8-Max
+## 2. 模型与接口配置
 
-官方跑测模型为千问 Qwen3.8-Max。当前所有真实 E2E 是 DeepSeek-V4.1-flash-1017；**提交前必须用官方 endpoint/model/key 复跑三场景**。本机安全终端配置（不要写入仓库）：
+官方材料（`01_参赛说明.docx`、`03_业务规则.docx`）**未指定具体模型名**，只要求使用赛事允许的模型，并通过配置项切换模型地址、模型名和鉴权信息。因此本作品不绑定任何供应商或型号。
+
+**本项目统一使用 `qwen3.7-flash`**（DashScope Anthropic 兼容入口）；全部真实 E2E、演示截图与视频均基于该模型，**不使用 Qwen3.8-Max**。本机安全终端配置（不要写入仓库）：
 
 ```powershell
 $env:LLM_ENDPOINT = "https://dashscope.aliyuncs.com/apps/anthropic"
-$env:LLM_MODEL = "qwen3.8-max"
+$env:LLM_MODEL = "qwen3.7-flash"
 $env:LLM_PROTOCOL = "anthropic"
 $secure = Read-Host -AsSecureString "LLM_API_KEY"
 $env:LLM_API_KEY = [System.Net.NetworkCredential]::new("", $secure).Password
@@ -64,18 +66,19 @@ java -Djava.io.tmpdir=$demoDir -Dorg.sqlite.tmpdir=$demoDir -jar target\harness-
 
 ## 5. 提交前门禁
 
-- [ ] Qwen3.8-Max 三场景真实复测并记录。
+- [ ] `qwen3.7-flash` 三场景真实复测并记录（本作品统一模型，不做其他型号复测）。
 - [ ] React 浏览器内查询、受控保存、跨轮补充保存均通过。
 - [ ] 视频 ≤5 分钟，真实模型、真实数据保存与回读。
 - [ ] `REAL_E2E` 记录和截图已去敏，无密钥/个人数据/真实财务数据。
-- [ ] Java 247/0/0/0、前端 37/37、`mvn clean package`、OSV 0 未抑制。
+- [ ] Java 252/0/0/0、前端 37/37、`mvn clean package`、OSV 0 未抑制。
 - [ ] `scripts/secret_scan.py` + 人工审阅最终 zip 每个条目。
 - [ ] 设计说明 2–3 页、TASKS/REPRODUCE/RELEASE_CHECKLIST 与最终包一致。
 - [ ] 最终 zip 命名和团队信息按官网要求确认。
 
-## 6. 当前状态（2026-11-06）
+## 6. 当前状态（2026-11-11 更新）
 
-- 已完成：React 单一前端、执行计划/上下四栏、自然错误提示、完整 prompt trace、审计保留策略、OSV 扫描、离线构建脚本、TASKS 记录。
-- 已验证：真实 DeepSeek API 三场景、React 查询+R004、247/37 测试、clean package、OSV 0 未抑制。
-- 未完成：官方 Qwen3.8-Max 复测、React 浏览器保存/跨轮、视频、最终 zip。
-- Git：本轮 P1/P2 改动已提交/推送到 `origin/work/zhanghengyuan1`；`5b19cdd` 是此前的提交。
+- 已完成：React 单一前端、执行计划/上下四栏、自然错误提示、完整 prompt trace、审计保留策略、OSV 扫描、离线构建脚本、TASKS 记录、规则变更即时生效、`agent_trace` 持久化与 `/traces` 回读。
+- 已验证：`qwen3.7-flash` 三场景真实 E2E（查询 → 待补追问 → 跨轮续接 → 受控保存 → 回读 → 审计）、React 浏览器保存与跨轮、252/37 测试、clean package、OSV 0 未抑制。
+- 未完成：≤5 分钟演示视频、最终 zip、设计说明 docx 按最新结论校对。
+- 模型口径：本项目统一 `qwen3.7-flash`，**不使用 Qwen3.8-Max**；官方未指定型号，配置项可切换，无需型号复测。
+- Git：本轮 P1/P2 改动已提交/推送到 `origin/work/zhanghengyuan1`；`5b19cdd` 是此前的提交；2026-11-11 的规则/持久化修复改动尚在工作树，待人工确认后提交。

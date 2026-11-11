@@ -21,6 +21,11 @@ public final class DemoAudit {
         }
     }
     public static final class Failure extends RuntimeException { public Failure() { super("AUDIT_STORAGE_ERROR"); } }
+    /** Stored model input of one turn: prompt, trusted message, tool schema names, context size. */
+    public record TraceRecord(long id, String requestId, String taskId, String systemPrompt, String userMessage,
+                              List<String> toolNames, int historySize, String memorySource, String outcome, String time) {
+        public TraceRecord { toolNames = List.copyOf(toolNames); }
+    }
     public DemoAudit(Path db) { url = "jdbc:sqlite:" + db.toAbsolutePath().toUri().toASCIIString() + "?mode=rw"; }
     private Connection open() throws SQLException {
         var c = DriverManager.getConnection(url);
@@ -38,8 +43,46 @@ public final class DemoAudit {
             s.execute("CREATE TRIGGER IF NOT EXISTS demo_audit_no_update BEFORE UPDATE ON demo_audit BEGIN SELECT RAISE(ABORT,'append only'); END");
             s.execute("CREATE TRIGGER IF NOT EXISTS demo_audit_no_replace BEFORE INSERT ON demo_audit WHEN EXISTS (SELECT 1 FROM demo_audit WHERE id=NEW.id) BEGIN SELECT RAISE(ABORT,'append only'); END");
             s.execute("CREATE TRIGGER IF NOT EXISTS demo_audit_no_delete BEFORE DELETE ON demo_audit BEGIN SELECT RAISE(ABORT,'append only'); END");
+            s.execute("CREATE TABLE IF NOT EXISTS agent_trace (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,enterprise_id TEXT NOT NULL,request_id TEXT NOT NULL,task_id TEXT NOT NULL,system_prompt TEXT NOT NULL,user_message TEXT NOT NULL,tool_names TEXT NOT NULL,history_size INTEGER NOT NULL,memory_source TEXT,outcome TEXT,time TEXT NOT NULL)");
+            s.execute("CREATE TRIGGER IF NOT EXISTS agent_trace_no_update BEFORE UPDATE ON agent_trace BEGIN SELECT RAISE(ABORT,'append only'); END");
+            s.execute("CREATE TRIGGER IF NOT EXISTS agent_trace_no_delete BEFORE DELETE ON agent_trace BEGIN SELECT RAISE(ABORT,'append only'); END");
             return c;
         } catch (SQLException e) { c.close(); throw e; }
+    }
+    /** Persists the model input of a turn; append-only like the audit trail. */
+    public void appendTrace(PermissionGuard.Session user, String enterprise, String requestId, String taskId,
+                            String systemPrompt, String userMessage, List<String> toolNames, int historySize,
+                            String memorySource, String outcome) {
+        try (var c = open()) {
+            c.setAutoCommit(false);
+            new PermissionGuard().require(c, user, enterprise, PermissionGuard.Access.READ);
+            try (var s = c.prepareStatement("INSERT INTO agent_trace(user_id,enterprise_id,request_id,task_id,system_prompt,user_message,tool_names,history_size,memory_source,outcome,time) VALUES (?,?,?,?,?,?,?,?,?,?,?)")) {
+                s.setString(1, user.userId()); s.setString(2, enterprise); s.setString(3, requestId); s.setString(4, taskId);
+                s.setString(5, systemPrompt); s.setString(6, userMessage);
+                s.setString(7, String.join(",", toolNames)); s.setInt(8, historySize);
+                s.setString(9, memorySource); s.setString(10, outcome); s.setString(11, Instant.now().toString());
+                s.executeUpdate();
+            }
+            c.commit();
+        } catch (DomainException e) { throw e; } catch (Exception e) { throw new Failure(); }
+    }
+    /** Latest stored inputs for a task, newest first; survives restart and reload. */
+    public List<TraceRecord> traces(PermissionGuard.Session user, String enterprise, String taskId) {
+        try (var c = open()) {
+            c.setAutoCommit(false);
+            new PermissionGuard().require(c, user, enterprise, PermissionGuard.Access.READ);
+            var rows = new ArrayList<TraceRecord>();
+            try (var s = c.prepareStatement("SELECT * FROM agent_trace WHERE user_id=? AND enterprise_id=? AND task_id=? ORDER BY id DESC LIMIT 5")) {
+                s.setString(1, user.userId()); s.setString(2, enterprise); s.setString(3, taskId);
+                try (var r = s.executeQuery()) {
+                    while (r.next()) rows.add(new TraceRecord(r.getLong("id"), r.getString("request_id"), r.getString("task_id"),
+                            r.getString("system_prompt"), r.getString("user_message"),
+                            Arrays.stream(r.getString("tool_names").split(",")).filter(v -> !v.isBlank()).toList(),
+                            r.getInt("history_size"), r.getString("memory_source"), r.getString("outcome"), r.getString("time")));
+                }
+            }
+            c.commit(); return List.copyOf(rows);
+        } catch (DomainException e) { throw e; } catch (Exception e) { throw new Failure(); }
     }
     public void append(PermissionGuard.Session user, String enterprise, Event event) {
         try (var c = open()) {

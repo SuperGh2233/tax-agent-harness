@@ -244,6 +244,10 @@ public final class DemoController {
         long turnDurationMs = Math.max(0, (System.nanoTime() - turnStarted) / 1_000_000);
         UpdateResult verified = null;
         try {
+            var trace = turn.promptTrace();
+            if (trace != null) audit.appendTrace(p.trustedSession(), p.enterprise(), requestId, taskId,
+                    trace.systemPrompt(), trace.userMessage(), trace.tools().stream().map(t -> t.name()).toList(),
+                    trace.historySize(), turn.memorySource(), turn.result().status().name());
             for (var exchange : turn.result().history()) {
                 var call = exchange.call(); JsonNode args;
                 try { args = JSON.readTree(call.arguments()); } catch (Exception malformed) { args = JSON.createObjectNode(); }
@@ -300,6 +304,12 @@ public final class DemoController {
         return joined.matches("[A-Za-z0-9_.@,-]{1,200}") ? joined : null;
     }
     private static String month(String value) { return value != null && value.matches("[0-9]{4}-(0[1-9]|1[0-2])") ? value : null; }
+    /** Stored model input of recent turns; reload-safe replacement for the in-memory trace. */
+    @GetMapping("/tasks/{id}/traces") public Object traces(@PathVariable String id, HttpSession session) {
+        var p = principal(session);
+        taskId(id);
+        return request(p, id, "traces", () -> audit.traces(p.trustedSession(), p.enterprise(), id));
+    }
     @GetMapping("/audit") public Object audit(HttpSession session) {
         var p = principal(session); return audit.list(p.trustedSession(),p.enterprise());
     }

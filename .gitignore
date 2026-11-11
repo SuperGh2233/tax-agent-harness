@@ -32,3 +32,6 @@
 *.webm
 *.pem
 *.key
+
+# Local agent workspace data (memory, not project source)
+.workbuddy/

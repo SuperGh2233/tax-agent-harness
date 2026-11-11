@@ -118,6 +118,25 @@ class RuleServiceTest {
         service.disableVersion(admin,new RuleKey("R003","1.0"));
         fails(ErrorCode.UNSUPPORTED_SCOPE, () -> check("C002"));
     }
+    @Test void importedVersionChangesEnforcementWithoutRestart() {
+        var threshold = new RuleDefinition("甲企业发票用途规则", september, RuleStatus.启用,
+                "单张发票金额大于或等于 1000.00 元时必须填写用途；空白视为未填写。");
+        service.disableVersion(admin, new RuleKey("R002", "2.0"));
+        service.importVersion(admin, new RuleKey("R002", "3.0"), threshold, Set.of("C001"));
+        assertThat(check("C001").missing()).extracting(InvoiceKey::invoiceId).containsExactly("F006");
+        assertThat(check("C001").rules()).containsExactly(new RuleReference(new RuleKey("R002", "3.0"), "甲企业发票用途规则"));
+        service.disableVersion(admin, new RuleKey("R002", "3.0"));
+        service.importVersion(admin, new RuleKey("R002", "3.1"), definition(
+                "甲企业每张发票都必须填写用途，不设置金额门槛。", september), Set.of("C001"));
+        assertThat(check("C001").missing()).extracting(InvoiceKey::invoiceId)
+                .containsExactlyInAnyOrder("F002", "F004", "F003", "F006", "F009");
+        assertThat(check("C001").rules()).containsExactly(new RuleReference(new RuleKey("R002", "3.1"), "测试规则"));
+    }
+    @Test void contradictoryWordingIsRefusedNotGuessed() throws Exception {
+        sql("UPDATE rules SET content='每张发票都必须填写用途；单张金额大于或等于 1000.00 元时必须填写用途。' "
+                + "WHERE id='R002' AND version='2.0'");
+        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> check("C001"));
+    }
     @Test void readDoesNotMutateAndStorageFailureIsNotEmpty() throws Exception {
         byte[] before = Files.readAllBytes(db); check("C001"); service.queryRules(user,"C001",null);
         assertThat(Files.readAllBytes(db)).isEqualTo(before);

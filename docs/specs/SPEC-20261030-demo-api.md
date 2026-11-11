@@ -2,6 +2,8 @@
 
 状态：completed；2026-10-30。新增演示入口，不修改 T10 或冻结工具/业务契约。
 
+> **口径注记（2026-11-11）**：下文出现的 `qwen3.8-flash` 是 2026-10-30 的当时自选目标（仅 loopback stub 验证），非赛事要求。现行口径：**统一 `qwen3.7-flash`，不使用 Qwen3.8-Max**；本契约与适配器均不绑定型号，模型名由 `LLM_MODEL` 配置。
+
 ## 信任与配置
 
 本地模拟身份，不是生产认证。服务器固定 operator → U001、viewer → U002，仅此 allowlist，浏览器/模型不能提供可信 userId。`DemoPrincipal` 只由服务器创建并置于 HttpSession，每次构建 FinanceAgent 以及任务/工具/审计访问均复核数据库 permissions。Cookie HttpOnly、SameSite Strict、仅 cookie 跟踪；切换身份/企业成功后销毁旧会话、换新会话与 CSRF token。任务恢复归属 user+enterprise；相同用户再次进入可恢复持久任务，未登录或其他用户/企业不可访问。

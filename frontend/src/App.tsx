@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { ArrowUp, ArrowUpRight, Check, ChevronRight, CircleDashed, FileCheck2, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
 import { ApiError, canVerifyOperation, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, findOpenTask, friendlyError, isTerminalTaskStatus, parseTool, provenNotExecuted, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from './api'
-import type { Approval, AuditEvent, Exchange, Invoice, PlanStep, Session, Statement, Task, TurnView } from './api'
+import type { Approval, AuditEvent, Exchange, Invoice, PlanStep, SavedTrace, Session, Statement, Task, TurnView } from './api'
 import { Button, Modal } from './ui'
 
 const api = new DemoApi()
@@ -52,6 +52,7 @@ export default function App() {
   const [turn, setTurn] = useState<TurnView | null>(null)
   const [operation, setOperation] = useState<Operation | null>(initialOperation)
   const [audit, setAudit] = useState<AuditEvent[] | null>(null)
+  const [savedTrace, setSavedTrace] = useState<SavedTrace | null>(null)
   const [goal, setGoal] = useState('')
   const [pending, setPending] = useState('')
   const [sourceTaskId, setSourceTaskId] = useState<string | null>(null)
@@ -120,12 +121,16 @@ export default function App() {
     setInspector(true)
     if (!selected) return
     try { setPreferences(await api.preferences()) } catch { /* task inspector remains usable */ }
+    // Reload-safe fallback: the in-memory turn trace disappears on refresh, the stored one does not.
+    if (task) {
+      try { setSavedTrace((await api.traces(task.id))[0] ?? null) } catch { setSavedTrace(null) }
+    }
   }
-  function reset() { setTask(null); setCancelCandidate(null); setLoadedHistoricalTask(false); setSourceTaskId(null); setMessages([]); setTurn(null); setAudit(null); setTasks([]); setInspector(false); setPage('home'); setPreferences({}); setPreferencesOpen(false) }
+  function reset() { setTask(null); setCancelCandidate(null); setLoadedHistoricalTask(false); setSourceTaskId(null); setMessages([]); setTurn(null); setSavedTrace(null); setAudit(null); setTasks([]); setInspector(false); setPage('home'); setPreferences({}); setPreferencesOpen(false) }
   async function load(id: string) {
     await run(async () => {
       const context = await api.load(id)
-      setTask(context.task); setLoadedHistoricalTask(true); setTurn(null); setPage('workspace')
+      setTask(context.task); setLoadedHistoricalTask(true); setTurn(null); setSavedTrace(null); setPage('workspace')
       setMessages([{role:'notice', text:'任务已恢复。历史不是当前数据库证据，恢复不会恢复写入授权；请重新查询。'},
         ...(context.task.question ? [{role:'agent' as const, text:`历史追问：${context.task.question}`}] : [])])
     })
@@ -363,7 +368,9 @@ export default function App() {
       </div>
     </Modal>
     <Modal open={inspector} onOpenChange={setInspector} title="任务检查器" description="计划、实际执行与审计，按需展开。" drawer>
-      {task && <><h3>任务计划 / 待办</h3><p>{task.goal}</p>{task.pending.length ? <ul>{task.pending.map(p => <li key={p}>{p}</li>)}</ul> : <p className="muted">没有结构化待办。当前 API 未提供实时计划事件。</p>}<p className="muted">状态：{statusLabel[task.status]} · 版本 {task.version}</p><ExecutionPlan task={task} history={history} verification={verification}/><ContextSources task={task} history={history} preferences={preferences} enterprise={session?.enterprise ?? ''} role={session?.profile ?? ''}/><details><summary>历史工具摘要（不是当前执行证据）</summary><pre>{pretty(task.recentTools)}</pre></details><details><summary>本轮模型输入（记忆投影）</summary><pre>{turn?.modelInput ?? '无'}</pre></details><details><summary>完整模型输入（系统提示 + 用户消息 + 工具 schema）</summary><pre>{turn?.promptTrace ? pretty(turn.promptTrace) : '无'}</pre></details><ToolGroup history={history}/><details><summary>任务原始数据（可能包含敏感字段）</summary><pre>{pretty(task)}</pre></details></>}
+      {task && <><h3>任务计划 / 待办</h3><p>{task.goal}</p>{task.pending.length ? <ul>{task.pending.map(p => <li key={p}>{p}</li>)}</ul> : <p className="muted">没有结构化待办。当前 API 未提供实时计划事件。</p>}<p className="muted">状态：{statusLabel[task.status]} · 版本 {task.version}</p><ExecutionPlan task={task} history={history} verification={verification}/><ContextSources task={task} history={history} preferences={preferences} enterprise={session?.enterprise ?? ''} role={session?.profile ?? ''}/><details><summary>历史工具摘要（不是当前执行证据）</summary><pre>{pretty(task.recentTools)}</pre></details><details><summary>本轮模型输入（记忆投影）</summary><pre>{turn?.modelInput ?? '无'}</pre></details><details><summary>完整模型输入（系统提示 + 用户消息 + 工具 schema）</summary>{turn?.promptTrace ? <pre>{pretty(turn.promptTrace)}</pre>
+          : savedTrace ? <><p className="hint">已持久化的本轮运行记录（{savedTrace.time}）；工具只保存名称，schema 原文不落库。</p><pre>{pretty({systemPrompt: savedTrace.systemPrompt, userMessage: savedTrace.userMessage, tools: savedTrace.toolNames, historySize: savedTrace.historySize, memorySource: savedTrace.memorySource, outcome: savedTrace.outcome})}</pre></>
+          : <pre>无</pre>}</details><ToolGroup history={history}/><details><summary>任务原始数据（可能包含敏感字段）</summary><pre>{pretty(task)}</pre></details></>}
       <details onToggle={e => { if (e.currentTarget.open && audit === null && selected && !busy) void showAudit() }}><summary>真实审计</summary><Button disabled={!selected || busy} onClick={() => void showAudit()}>刷新审计</Button><Audit events={audit}/></details>
     </Modal>
   </div>

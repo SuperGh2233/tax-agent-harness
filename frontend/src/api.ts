@@ -32,6 +32,7 @@ export async function verifyPendingOperation(api: Pick<DemoApi, 'verify'>, opera
   clear()
 }
 export interface AuditEvent { id: number; requestId: string; taskId: string | null; tool: string | null; callId: string | null; month: string | null; invoiceId: string | null; fields: string | null; operationId: string | null; outcome: string; errorCode: string | null; verified: boolean; time: string }
+export interface SavedTrace { id: number; requestId: string; taskId: string; systemPrompt: string; userMessage: string; toolNames: string[]; historySize: number; memorySource: string | null; outcome: string | null; time: string }
 export interface Invoice { key: {enterprise_id: string; invoice_id: string}; invoice_date: string; seller: string; item: string; amount_cents: number; purpose: string; remarks: string }
 
 /** Fail closed after an approved financial turn: a missing tool history is never proof of no write. */
@@ -163,6 +164,8 @@ export class DemoApi {
   deletePreference(name: string) { return this.request<Record<string, Statement>>(`/preferences/${encodeURIComponent(name)}`, 'DELETE') }
   verify(taskId: string, operationId: string) { return this.request<OperationVerification>(`/tasks/${encodeURIComponent(taskId)}/operations/${encodeURIComponent(operationId)}/verify`, 'POST') }
   audit() { return this.request<AuditEvent[]>('/audit') }
+  /** Persisted model inputs; survives reload and restart, newest first. */
+  traces(id: string) { return this.request<SavedTrace[]>(`/tasks/${encodeURIComponent(id)}/traces`) }
 }
 
 /** Creating a task and running its first turn are separate backend operations.
