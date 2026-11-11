@@ -8,6 +8,7 @@ import java.sql.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /** Trusted backend service only. Never expose Session or explicit-input methods as model tools. */
 public final class TaskMemory {
@@ -16,9 +17,21 @@ public final class TaskMemory {
         public Input { text(value); text(userRequest); }
     }
     public record Summary(String tool, String outcome) {}
+    public record PlanStep(String key, String title, String state, String detail) {}
+    public record Plan(List<PlanStep> steps) {
+        public Plan { steps = List.copyOf(steps); }
+        public static Plan empty() { return new Plan(List.of()); }
+    }
     public record Task(String id, Status status, long version, String goal, List<String> pending,
-                       Map<String, Input> supplied, String question, List<Summary> recentTools) {
-        public Task { pending = List.copyOf(pending); supplied = Map.copyOf(supplied); recentTools = List.copyOf(recentTools); }
+                       Map<String, Input> supplied, String question, List<Summary> recentTools, Plan plan) {
+        public Task {
+            pending = List.copyOf(pending); supplied = Map.copyOf(supplied); recentTools = List.copyOf(recentTools);
+            plan = plan == null ? Plan.empty() : plan;
+        }
+        public Task(String id, Status status, long version, String goal, List<String> pending,
+                    Map<String, Input> supplied, String question, List<Summary> recentTools) {
+            this(id, status, version, goal, pending, supplied, question, recentTools, Plan.empty());
+        }
     }
     public record Context(Task task, Map<String, Input> preferences) {
         public Context { preferences = Map.copyOf(preferences); }
@@ -49,7 +62,8 @@ public final class TaskMemory {
     }
     public Task start(Session session, String enterprise, String explicitGoal, List<String> pending) {
         text(explicitGoal); if (pending == null) throw invalid(); pending.forEach(TaskMemory::text);
-        var task = new Task(UUID.randomUUID().toString(), Status.ACTIVE, 0, explicitGoal, pending, Map.of(), null, List.of());
+        var task = new Task(UUID.randomUUID().toString(), Status.ACTIVE, 0, explicitGoal, pending, Map.of(), null,
+                List.of(), TaskPlan.derive(Status.ACTIVE, pending, List.of(), List.of()));
         return access(session, enterprise, c -> {
             try (var s = c.prepareStatement("INSERT INTO agent_tasks VALUES (?,?,?,?,?,?)")) {
                 scope(s, session, enterprise); s.setString(3, task.id()); s.setString(4, task.status().name());
@@ -85,14 +99,16 @@ public final class TaskMemory {
             if (!fields.containsAll(changes.keySet())) throw invalid();
             var supplied = new HashMap<>(old.supplied()); supplied.putAll(changes);
             var pending = old.pending().stream().filter(k -> !changes.containsKey(k)).toList();
-            var next = new Task(id, Status.ACTIVE, version + 1, old.goal(), pending, supplied, null, old.recentTools());
+            var next = new Task(id, Status.ACTIVE, version + 1, old.goal(), pending, supplied, null, old.recentTools(),
+                    TaskPlan.derive(Status.ACTIVE, pending, old.recentTools(), List.of()));
             save(c, session, enterprise, old, next); return next;
         });
     }
     public Task cancel(Session session, String enterprise, String id, long version) {
         return access(session, enterprise, c -> {
             var old = get(c, session, enterprise, id); open(old, version);
-            var next = new Task(id, Status.CANCELLED, version + 1, old.goal(), old.pending(), old.supplied(), null, old.recentTools());
+            var next = new Task(id, Status.CANCELLED, version + 1, old.goal(), old.pending(), old.supplied(), null,
+                    old.recentTools(), TaskPlan.derive(Status.CANCELLED, old.pending(), old.recentTools(), List.of()));
             save(c, session, enterprise, old, next); return next;
         });
     }
@@ -123,13 +139,17 @@ public final class TaskMemory {
     }
     public Turn continueTask(Session session, String enterprise, String id, String message, AgentRuntime runtime,
                              AgentRuntime.ApprovedWrite approval) {
+        return continueTask(session, enterprise, id, message, runtime, approval, progress -> {});
+    }
+    public Turn continueTask(Session session, String enterprise, String id, String message, AgentRuntime runtime,
+                             AgentRuntime.ApprovedWrite approval, Consumer<AgentRuntime.Progress> progressSink) {
         text(message);
         var context = load(session, enterprise, id); var old = context.task(); open(old, old.version());
         if (approval != null && !id.equals(approval.taskId()))
             throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Approval must belong to this task");
         var projection = ContextProjector.project(context, message);
         var trace = new AtomicReference<AgentRuntime.Trace>();
-        var result = runtime.runScoped(session, enterprise, message, projection.memoryJson(), approval, trace::set);
+        var result = runtime.runScoped(session, enterprise, message, projection.memoryJson(), approval, trace::set, progressSink);
         return access(session, enterprise, c -> {
             var current = get(c, session, enterprise, id); open(current, old.version());
             var summaries = result.history().stream().map(e -> {
@@ -155,8 +175,9 @@ public final class TaskMemory {
                 case FINISHED -> Status.COMPLETED;
                 case ERROR -> Status.ACTIVE;
             };
+            var plan = TaskPlan.derive(status, pending, summaries, result.history());
             var next = new Task(id, status, old.version() + 1, old.goal(), pending, old.supplied(),
-                    effective.status() == AgentRuntime.Status.NEEDS_INPUT ? effective.text() : null, summaries);
+                    effective.status() == AgentRuntime.Status.NEEDS_INPUT ? effective.text() : null, summaries, plan);
             save(c, session, enterprise, old, next);
             return new Turn(next, effective, projection.truncated() ? "task-memory+projection" : "task-memory",
                     projection.memoryJson(), trace.get());

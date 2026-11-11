@@ -1,7 +1,7 @@
 // Mirrors DemoController, TaskMemory, LlmClient and ToolContract. Tool JSON uses snake_case.
 export interface Session { csrfToken: string; profile: string; enterprise: string; identityNotice: string }
 export interface Statement { value: string; userRequest: string }
-export interface Task { id: string; status: 'ACTIVE' | 'WAITING_USER' | 'COMPLETED' | 'CANCELLED'; version: number; goal: string; pending: string[]; supplied: Record<string, Statement>; question: string | null; recentTools: {tool: string; outcome: string}[] }
+export interface Task { id: string; status: 'ACTIVE' | 'WAITING_USER' | 'COMPLETED' | 'CANCELLED'; version: number; goal: string; pending: string[]; supplied: Record<string, Statement>; question: string | null; recentTools: {tool: string; outcome: string}[]; plan?: {steps: PlanStep[]} | null }
 
 /** Terminal tasks are historical context only; create a new task to continue work. */
 export function isTerminalTaskStatus(status: Task['status']): boolean {
@@ -17,6 +17,7 @@ export interface Result { status: 'FINISHED' | 'NEEDS_INPUT' | 'ERROR'; text: st
 export interface Verification { key: {enterpriseId: string; invoiceId: string}; purpose: string; remarks: string; verified: boolean }
 export interface PromptTrace { systemPrompt: string; userMessage: string; tools: {name: string; parameters: unknown}[]; historySize: number }
 export interface TurnView { turn: {task: Task; result: Result} | null; verification: Verification | null; errorCode: string | null; message: string; operationId: string | null; modelInput?: string | null; promptTrace?: PromptTrace | null }
+export interface ToolProgress { phase: 'tool_start' | 'tool_result'; callId: string; name: string; durationMs: number; outcome: string }
 export interface Approval { operationId: string; invoiceId: string; changes: Partial<Record<'purpose' | 'remarks', string>>; confirmed: true }
 export interface OperationVerification { operationId: string; status: 'VERIFIED' | 'NOT_FOUND' | 'DIVERGED'; verification: Verification | null }
 export function canVerifyOperation(operation: {id: string; taskId: string} | null): boolean {
@@ -134,6 +135,18 @@ export function friendlyError(code: string) {
   return `${messages[code] ?? '请求未完成，请核查服务、权限与实际执行结果。'} (${code})`
 }
 
+/** Minimal SSE parser for Spring's `event:name\ndata:{json}\n\n` frames. */
+function parseSseBlock(block: string): {event: string; data: unknown} | null {
+  let event = 'message'
+  const data: string[] = []
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event:')) event = line.slice(6).trim()
+    else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''))
+  }
+  if (!data.length) return null
+  try { return {event, data: JSON.parse(data.join('\n'))} } catch { return null }
+}
+
 // Small REST runtime boundary: no streaming simulation, retries or persistent approval.
 export class DemoApi {
   private csrf = ''
@@ -159,6 +172,44 @@ export class DemoApi {
   load(id: string) { return this.request<Context>(`/tasks/${encodeURIComponent(id)}`) }
   supplement(id: string, version: number, statements: Record<string, Statement>) { return this.request<Task>(`/tasks/${encodeURIComponent(id)}/supplement`, 'POST', {version, statements}) }
   turn(id: string, message: string, approval?: Approval) { return this.request<TurnView>(`/tasks/${encodeURIComponent(id)}/turn`, 'POST', {message, ...(approval ? {approval} : {})}) }
+  /** Same execution as turn(), streamed as SSE: tool progress, then text chunks, then the terminal TurnView. */
+  async streamTurn(id: string, message: string, approval: Approval | undefined,
+                   handlers: {onText?: (text: string) => void; onTool?: (event: ToolProgress) => void} = {}): Promise<TurnView> {
+    let response: Response
+    try {
+      response = await fetch(`/api/demo/tasks/${encodeURIComponent(id)}/turn/stream`, {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': this.csrf},
+        body: JSON.stringify({message, ...(approval ? {approval} : {})})
+      })
+    } catch { throw new ApiError('NETWORK_UNKNOWN') }
+    if (!response.ok) {
+      let code = `HTTP_${response.status}`
+      try { const body = await response.json() as {errorCode?: string}; code = body.errorCode ?? code } catch { /* keep status code */ }
+      throw new ApiError(code, response.status)
+    }
+    if (!response.body) throw new ApiError('INVALID_RESPONSE', response.status)
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = '', final: TurnView | null = null, failure: string | null = null
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.value) buffer += decoder.decode(chunk.value, {stream: !chunk.done})
+      for (let cut = buffer.indexOf('\n\n'); cut >= 0; cut = buffer.indexOf('\n\n')) {
+        const block = buffer.slice(0, cut); buffer = buffer.slice(cut + 2)
+        const parsed = parseSseBlock(block)
+        if (!parsed) continue
+        if (parsed.event === 'text') handlers.onText?.(String((parsed.data as {text?: unknown})?.text ?? ''))
+        else if (parsed.event === 'tool') handlers.onTool?.(parsed.data as ToolProgress)
+        else if (parsed.event === 'error') failure = String((parsed.data as {errorCode?: unknown})?.errorCode ?? 'RUNTIME_FAILURE')
+        else if (parsed.event === 'done') final = parsed.data as TurnView
+      }
+      if (chunk.done) break
+    }
+    if (failure) throw new ApiError(failure)
+    if (!final) throw new ApiError('INVALID_RESPONSE')
+    return final
+  }
   preferences() { return this.request<Record<string, Statement>>('/preferences') }
   putPreference(name: string, value: string, userRequest: string) { return this.request<Record<string, Statement>>('/preferences', 'POST', {name, value, userRequest}) }
   deletePreference(name: string) { return this.request<Record<string, Statement>>(`/preferences/${encodeURIComponent(name)}`, 'DELETE') }
@@ -172,15 +223,18 @@ export class DemoApi {
  * The callback publishes the created task immediately, even if the model call fails.
  * A failed first turn is never retried automatically. */
 export async function createAndRunFirstTurn(
-  api: Pick<DemoApi, 'start' | 'turn'>,
+  api: Pick<DemoApi, 'start' | 'turn'> & Partial<Pick<DemoApi, 'streamTurn'>>,
   goal: string,
   pending: string[],
   onCreated: (task: Task) => void,
+  handlers?: {onText?: (text: string) => void; onTool?: (event: ToolProgress) => void},
 ): Promise<{created: Task; response: TurnView | null; executionError: Error | null}> {
   const created = await api.start(goal, pending)
   onCreated(created)
   try {
-    const response = await api.turn(created.id, goal)
+    const response = handlers && api.streamTurn
+      ? await api.streamTurn(created.id, goal, undefined, handlers)
+      : await api.turn(created.id, goal)
     return {created, response, executionError: null}
   } catch (error) {
     return {created, response: null, executionError: error instanceof Error ? error : new Error('首轮执行结果未知')}

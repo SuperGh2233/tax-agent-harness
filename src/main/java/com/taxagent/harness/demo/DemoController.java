@@ -9,10 +9,14 @@ import jakarta.servlet.http.*;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequestMapping("/api/demo")
@@ -32,6 +36,10 @@ public final class DemoController {
     private final Path database;
     private final LlmClient model;
     private final DemoAudit audit;
+    // Presentation transport only; each turn still runs under the same mutation lock and audit rules.
+    private final ExecutorService streamExecutor = Executors.newCachedThreadPool(task -> {
+        var thread = new Thread(task, "turn-stream"); thread.setDaemon(true); return thread;
+    });
     // Never deserialized from HTTP. Only the fixed profile mapping below constructs this identity.
     record DemoPrincipal(String profile, String enterprise, Session trustedSession) {}
     public record Selection(String profile, String enterprise) {}
@@ -178,6 +186,49 @@ public final class DemoController {
         var p = principal(session);
         synchronized (mutationLock(p)) { return run(p,id,input); }
     }
+    /** Same turn execution as /turn, streamed as SSE: tool progress, then the final text in chunks.
+     *  Text events are presentation only; clients must use the terminal `done` payload for status and verification. */
+    @PostMapping(value = "/tasks/{id}/turn/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter turnStream(@PathVariable String id, @RequestBody JsonNode body, HttpSession session) {
+        var input = decode(body,Turn.class); text(input.message()); taskId(id);
+        var p = principal(session);
+        var emitter = new SseEmitter(120_000L);
+        streamExecutor.execute(() -> {
+            try {
+                emit(emitter, "status", Map.of("phase", "started"));
+                TurnView view;
+                synchronized (mutationLock(p)) {
+                    view = run(p, id, input, progress -> emit(emitter, "tool", Map.of(
+                            "phase", progress.phase(), "callId", progress.callId(), "name", progress.name(),
+                            "durationMs", progress.durationMs(),
+                            "outcome", progress.outcome() == null ? "" : progress.outcome())));
+                }
+                if (view.turn() != null && view.turn().result() != null)
+                    streamText(emitter, view.turn().result().text());
+                emit(emitter, "done", view);
+                emitter.complete();
+            } catch (DomainException e) {
+                emit(emitter, "error", Map.of("errorCode", e.code().name(), "message", "请求未完成：" + e.code().name()));
+                emitter.complete();
+            } catch (Exception e) {
+                emit(emitter, "error", Map.of("errorCode", "RUNTIME_FAILURE", "message", "流式请求失败"));
+                emitter.complete();
+            }
+        });
+        return emitter;
+    }
+    private static void emit(SseEmitter emitter, String event, Object data) {
+        try { emitter.send(SseEmitter.event().name(event).data(data, MediaType.APPLICATION_JSON)); }
+        catch (Exception ignored) { /* client disconnected: the turn still completes and is audited */ }
+    }
+    private static void streamText(SseEmitter emitter, String text) {
+        if (text == null || text.isBlank()) return;
+        int size = 24;
+        for (int start = 0; start < text.length(); start += size) {
+            emit(emitter, "text", Map.of("text", text.substring(start, Math.min(text.length(), start + size))));
+            try { Thread.sleep(18); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+        }
+    }
     @PostMapping("/tasks/{id}/operations/{operationId}/verify")
     public InvoiceWriteService.Verification verify(@PathVariable String id, @PathVariable String operationId, HttpSession session) {
         var p = principal(session); taskId(id); taskId(operationId);
@@ -196,6 +247,9 @@ public final class DemoController {
         }
     }
     private TurnView run(DemoPrincipal p, String taskId, Turn input) {
+        return run(p, taskId, input, progress -> {});
+    }
+    private TurnView run(DemoPrincipal p, String taskId, Turn input, Consumer<AgentRuntime.Progress> progress) {
         var a = agent(p); a.load(taskId);
         if (input.approval() != null && !"operator".equals(p.profile()))
             throw new DomainException(ErrorCode.PERMISSION_DENIED, "Only operator may approve writes");
@@ -223,8 +277,8 @@ public final class DemoController {
         long turnStarted = System.nanoTime();
         TaskMemory.Turn turn;
         try {
-            turn = update == null ? a.turn(taskId,input.message()) : a.approvedTurn(taskId,input.message(),approval.operationId(),update,
-                    update.changes().values().stream().anyMatch(String::isBlank) ? InvoiceWriteService.Intent.CLEAR_NOW : InvoiceWriteService.Intent.SAVE_NOW);
+            turn = update == null ? a.turn(taskId,input.message(),progress) : a.approvedTurn(taskId,input.message(),approval.operationId(),update,
+                    update.changes().values().stream().anyMatch(String::isBlank) ? InvoiceWriteService.Intent.CLEAR_NOW : InvoiceWriteService.Intent.SAVE_NOW, progress);
         } catch (DomainException failure) {
             if (update != null) {
                 var recovered = a.recover(taskId,approval.operationId(),update); // Query only, never retry a financial update.
