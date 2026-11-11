@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react'
 import { ArrowUp, ArrowUpRight, Check, ChevronRight, CircleDashed, FileCheck2, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
 import { ApiError, canVerifyOperation, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, findOpenTask, friendlyError, isTerminalTaskStatus, parseTool, provenNotExecuted, queriedInvoices, verifiedWriteResult, verifyPendingOperation } from './api'
 import type { Approval, AuditEvent, Exchange, Invoice, PlanStep, Session, Statement, Task, ToolProgress, TurnView } from './api'
@@ -446,8 +446,13 @@ function Thread({messages,busy,streaming,progress}: {messages:Message[]; busy:bo
 }
 function Composer({disabled,onSend}: {disabled:boolean; onSend:(m:string)=>void}) {
   const [message,setMessage] = useState('')
-  function submit(e: FormEvent) { e.preventDefault(); if (!disabled && message.trim()) { onSend(message.trim()); setMessage('') } }
-  return <form className="composer" onSubmit={submit}><label className="sr-only" htmlFor="message">向 Agent 发送消息</label><textarea id="message" value={message} onChange={e => setMessage(e.target.value)} disabled={disabled} placeholder="补充问题，或让 Agent 查询当前数据库…" maxLength={8000} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(e) }}/><div className="composer-bottom"><span><ShieldCheck size={13}/> 发送消息不会授予保存权限 <span className="keyboard-hint">· ⌘ / Ctrl + Enter</span></span><Button type="submit" variant="primary" disabled={disabled || !message.trim()} aria-label="发送消息"><ArrowUp size={18}/></Button></div></form>
+  function sendNow() { if (!disabled && message.trim()) { onSend(message.trim()); setMessage('') } }
+  function submit(e: FormEvent) { e.preventDefault(); sendNow() }
+  function keydown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter sends; Shift+Enter inserts a newline. Never send while an IME composition is open.
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendNow() }
+  }
+  return <form className="composer" onSubmit={submit}><label className="sr-only" htmlFor="message">向 Agent 发送消息</label><textarea id="message" value={message} onChange={e => setMessage(e.target.value)} disabled={disabled} placeholder="补充问题，或让 Agent 查询当前数据库…" maxLength={8000} onKeyDown={keydown}/><div className="composer-bottom"><span><ShieldCheck size={13}/> 发送消息不会授予保存权限 <span className="keyboard-hint">· Enter 发送，Shift + Enter 换行</span></span><Button type="submit" variant="primary" disabled={disabled || !message.trim()} aria-label="发送消息"><ArrowUp size={18}/></Button></div></form>
 }
 function ToolGroup({history}: {history:Exchange[]}) {
   if (!history.length) return null
