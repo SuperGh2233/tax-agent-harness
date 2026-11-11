@@ -403,3 +403,14 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - **RELEASE_CHECKLIST.md**：头部状态从 2026-11-06（247 项、千帆、浏览器保存未完成）更新为 2026-11-11（252 项、qwen3.7-flash、浏览器全链路通过）；对照表更新源码/设计说明/运行记录/演示/三场景/规则管理六行；测试计数基线 187→252。
 - **新增** `docs/evidence/README.md`：关键运行记录索引（四份记录 + 22 张截图 + 口径表），`docs/index.md` 同步。
 - 未提交/未推送（按 AGENTS.md：不得擅自提交）。
+
+### T22 — 合并队友分支 work/zhanghengyuan1 到 main（2026-11-12 00:15）
+- 状态：DONE；认领人：Coding Agent；依据用户明确指示「帮我合并然后更新到我的 main 分支」。
+- 合并对象：`origin/work/zhanghengyuan1` 6 个提交（`aa56377` SSE 流式 tool/文本、`1d11efd` Enter 发送、`b8946d6` Enter 提交目标+HTML no-store、`0e5fa49` 服务端 task plan 持久化+畸形回复重试、`ea557af`/`96b3ef5` 完成态提示调整）。
+- 冲突仅 2 处，均属「同一位置各加一段」，按并集解决、未删除任何一方逻辑：
+  1. `frontend/src/App.tsx:5` 类型导入——同时保留 `SavedTrace`（main）与 `ToolProgress`（work）。
+  2. `AgentRuntime`——`finalizer(...)`（finish/ask 工具调用归一化）与 `emit(Consumer<Progress>,...)`（流断开不改业务结果）并列保留，各自闭合。
+- 合并后语义核对：`/turn` 与 `/turn/stream` 并存；`/traces`、`/audit` 未受影响；`run(p,id,input,progress)` 重载对两条路径都保留每轮耗时、审计与 `agent_trace` 落库；两套 `SYSTEM_PROMPT` 改动均在；前端 `task.plan?.steps ?? deriveExecutionPlan(...)` 服务端计划优先、本地推导兜底。
+- 验证：后端 `mvn test` 252/0/0/0 BUILD SUCCESS；前端 `tsc --noEmit` 0 错、`vitest` 37/37。
+- 已知缺口（未在本轮补）：队友 6 个提交未附自动化测试，`POST /api/demo/tasks/{id}/turn/stream` 目前零测试覆盖，建议后续补一个 SSE 冒烟用例（断言末帧 `done` 携带 `verified`）。
+- 文档同步：`DEMO_SCRIPT.md` 第 2 段补一句「流式呈现属正常，最终只认末帧 `done`」。
