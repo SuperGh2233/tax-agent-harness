@@ -422,3 +422,10 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - SSE 路由：`POST /api/demo/tasks/{id}/turn/stream` 无会话返回 403（非 404），确认合并进来的流式端点已注册。
 - 已知陷阱：`--initialize-data` 只接受 `--database=`，混用 `--taxagent.database=` 会抛 `Unknown initialization argument`；`nohup ... &` 起的进程会在命令结束后被回收，需用常驻后台任务方式持有。
 - 文档：`DEMO_SCRIPT.md` 密钥注入改为主用 `set -a; . ./.env; set +a`，并补充两套参数不可混用的说明；新增 `CLAUDE.md`（贡献者命令与架构说明，密钥均为占位符）。
+
+### T24 — 演示脚本审计段落纠错：写入记录不在列表首位（2026-11-12 10:35）
+- 状态：DONE（文档纠错，无代码改动）；认领人：Coding Agent。触发：用户按 3:30 段落实操，找不到“最新一条 `update_invoice · TOOL_RESULT`”，怀疑没有审计功能。
+- 核查结论：**功能存在**。前端导航 `审计记录`（`App.tsx:326`）→ `<details>`「展开真实审计记录」（`App.tsx:362`）→ 事件以 `{tool} · {outcome}` 渲染，带 ✓ 核验标记，展开显示除 id/tool/outcome/time 外的全部字段。构建产物与 JAR 内均含「审计记录 / 展开真实审计记录 / 刷新审计」文案。
+- **脚本原句错误**：面板按 id 倒序，写入成功后系统还会追加「查询核对（query_invoices）」和「本轮结束（turn FINISHED）」两条，工作台任务状态再追加两条，因此 `update_invoice · TOOL_RESULT` 实测在第 4～5 条，从不是第一条。证据：`/tmp/taxagent-test-AXRSwm/test.db` 中 id 61 = `update_invoice/TOOL_RESULT/fields=purpose/verified=1`，紧随其后 62=`query_invoices`、63=`turn/FINISHED`、64/65=`tasks`。
+- 已改 `DEMO_SCRIPT.md`：3:30 段落改为「按倒序找第 4～5 条」，补实测顺序表（5 行）与自查条件「列表里完全没有 update_invoice 行 = 这次没有真正写入，不得指着别的行说已保存」。
+- 附带发现（未改代码）：用裸 HTTP 直接构造批准轮（`/tasks/{id}/turn` + approval）连续两次返回 `CONFIRMATION_REQUIRED`，模型 `update_invoice` 参数与批准值不严格相等即被 fail-closed 拒；UI 路径历史上可成功（库中已有 TOOL_RESULT 记录）。录制前建议走一遍真实浏览器全链路确认。
