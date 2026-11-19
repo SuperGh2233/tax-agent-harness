@@ -152,6 +152,7 @@ class FinanceAgentIntegrationTest {
         // The model decides only whether to save; the payload is the trusted approval.
         assertThat(writeSchema.path("properties").isEmpty()).isTrue();
         assertThat(writeSchema.path("additionalProperties").asBoolean(true)).isFalse();
+        assertThat(writeSchema.path("description").asText()).contains("{}");
         assertThat(writeSchema.toString()).doesNotContain("$ref", "authorization", "user_id");
         var restarted = agent("U001", enterprise, new FakeLlmClient(check(enterprise), new Ask("继续补其余用途")));
         assertThat(restarted.load(task.id()).task()).isEqualTo(saved.task());
@@ -238,6 +239,53 @@ class FinanceAgentIntegrationTest {
         assertThat(data(saved, 0).path("purpose").asText()).isEqualTo("办公室实际采购");
         assertThat(data(saved, 0).path("remarks").asText()).isEqualTo("用户核对");
         assertThat(saved.task().pending()).isEmpty();
+        assertThat(ledgerCount()).isEqualTo(1);
+    }
+
+    /** T37 evidence: qwen3.7-flash batched "check, save" in one provider turn and the whole batch was refused. */
+    @Test void approvedBatchRunsTheSaveFirstAndReplaysResultsInProviderOrder() throws Exception {
+        var update = update("C001");
+        var model = new FakeLlmClient(new Batch(List.of(query("query_invoices", "C001", "2026-09"),
+                new Call("save", "update_invoice", "{}"))), new Finish("已保存并回查"));
+        var agent = agent("U001", "C001", model);
+        var task = agent.start("保存 F002", List.of("F002.purpose", "F002.remarks"));
+        var saved = agent.approvedTurn(task.id(), "现在保存并查询发票核对", "batched", update, SAVE_NOW);
+        assertThat(saved.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(saved.result().history()).extracting(e -> e.call().name()).containsExactly("query_invoices", "update_invoice");
+        assertThat(data(saved, 1).path("verified").asBoolean()).isTrue();
+        // The read ran after the save, so it already shows the saved value.
+        var f002 = new ArrayList<JsonNode>();
+        data(saved, 0).path("rows").forEach(row -> { if (row.at("/key/invoice_id").asText().equals("F002")) f002.add(row); });
+        assertThat(f002).singleElement().satisfies(row -> assertThat(row.path("purpose").asText()).isEqualTo("办公室实际采购"));
+        assertThat(model.requests.get(1).history()).isEqualTo(saved.result().history());
+        assertThat(ledgerCount()).isEqualTo(1);
+    }
+
+    @Test void batchWithMoreThanOneSaveIsStillRefusedBeforeAnythingRuns() throws Exception {
+        var update = update("C001");
+        var agent = agent("U001", "C001", new FakeLlmClient(new Batch(List.of(
+                new Call("s1", "update_invoice", "{}"), new Call("s2", "update_invoice", "{}")))));
+        var task = agent.start("保存 F002", List.of());
+        var turn = agent.approvedTurn(task.id(), "保存", "two-saves", update, SAVE_NOW);
+        failed(turn, "CONFIRMATION_REQUIRED");
+        assertThat(turn.result().history()).isEmpty();
+        assertThat(ledgerCount()).isZero();
+    }
+
+    /** T37 evidence: a corrected save was verified but the earlier malformed call still decided the turn. */
+    @Test void verifiedSaveOutweighsAnEarlierMalformedCallAndIsNeverRepeated() throws Exception {
+        var update = update("C001");
+        var agent = agent("U001", "C001", new FakeLlmClient(new Call("bad", "update_invoice", "{\"{}\":\"\"}"),
+                new Call("save", "update_invoice", "{}"), new Call("again", "update_invoice", "{}"), new Finish("已保存")));
+        var task = agent.start("保存 F002", List.of("F002.purpose", "F002.remarks"));
+        var saved = agent.approvedTurn(task.id(), "保存 F002", "corrected", update, SAVE_NOW);
+        assertThat(saved.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(JSON.readTree(saved.result().history().get(0).resultJson()).at("/error/code").asText()).isEqualTo("INVALID_ARGUMENT");
+        // The refusal tells the model how to retry: the empty object, nothing else.
+        assertThat(JSON.readTree(saved.result().history().get(0).resultJson()).at("/error/message").asText())
+                .isEqualTo(AgentRuntime.SAVE_ARGUMENTS);
+        assertThat(data(saved, 1).path("verified").asBoolean()).isTrue();
+        assertThat(JSON.readTree(saved.result().history().get(2).resultJson()).at("/error/code").asText()).isEqualTo("CONFIRMATION_REQUIRED");
         assertThat(ledgerCount()).isEqualTo(1);
     }
 

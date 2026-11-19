@@ -1,0 +1,556 @@
+{
+  "meta": {
+    "generatedAt": "2026-11-19 16:16:07 +0800",
+    "model": "qwen3.7-flash",
+    "protocol": "anthropic",
+    "endpointHost": "dashscope.aliyuncs.com",
+    "runs": 5,
+    "refs": {
+      "before": "f7ffe68",
+      "after": "target/harness-0.0.1-SNAPSHOT.jar"
+    }
+  },
+  "results": [
+    {
+      "version": "before",
+      "pending": [
+        "F002.purpose"
+      ],
+      "runs": [
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 12.6,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": "CONFIRMATION_REQUIRED",
+          "verified": false,
+          "seconds": 25.2,
+          "tools": [],
+          "writeArguments": [],
+          "purpose": "",
+          "ledger": 0,
+          "passed": false
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 11.3,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": "CONFIRMATION_REQUIRED",
+          "verified": false,
+          "seconds": 12.3,
+          "tools": [],
+          "writeArguments": [],
+          "purpose": "",
+          "ledger": 0,
+          "passed": false
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 12.4,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": "CONFIRMATION_REQUIRED",
+          "verified": false,
+          "seconds": 14.6,
+          "tools": [],
+          "writeArguments": [],
+          "purpose": "",
+          "ledger": 0,
+          "passed": false
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 14.2,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 11.0,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{\"changes\":{\"purpose\":\"办公室采购\"},\"key\":{\"enterprise_id\":\"C001\",\"invoice_id\":\"F002\"}}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 15.3,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose",
+              "query_rules"
+            ]
+          },
+          "http": 200,
+          "errorCode": "CONFIRMATION_REQUIRED",
+          "verified": false,
+          "seconds": 10.3,
+          "tools": [],
+          "writeArguments": [],
+          "purpose": "",
+          "ledger": 0,
+          "passed": false
+        }
+      ]
+    },
+    {
+      "version": "after",
+      "pending": [
+        "F002.purpose"
+      ],
+      "runs": [
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 23.9,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 10.4,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 10.5,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 16.5,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 14.6,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 16.1,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 23.7,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": "INVALID_ARGUMENT",
+          "verified": false,
+          "seconds": 30.2,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{\"_method\":\"POST\",\"_path\":\"/v1/invoice/update\",\"{}\":\"{}\"}"
+          ],
+          "purpose": "",
+          "ledger": 0,
+          "passed": false
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 21.5,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 11.0,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "version": "before",
+      "pending": [
+        "F002.purpose",
+        "F002.remarks"
+      ],
+      "runs": [
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 17.4,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose",
+              "query_rules"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 14.0,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{\"changes\":{\"purpose\":\"办公室采购\"},\"key\":{\"enterprise_id\":\"C001\",\"invoice_id\":\"F002\"}}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 15.4,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 17.4,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{\"changes\":{\"purpose\":\"办公室采购\"},\"key\":{\"enterprise_id\":\"C001\",\"invoice_id\":\"F002\"}}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 10.9,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 16.5,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{\"changes\":{\"purpose\":\"办公室采购\"},\"key\":{\"enterprise_id\":\"C001\",\"invoice_id\":\"F002\"}}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 25.7,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 6.7,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{\"changes\":{\"purpose\":\"办公室采购\"},\"key\":{\"enterprise_id\":\"C001\",\"invoice_id\":\"F002\"}}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 18.2,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": "CONFIRMATION_REQUIRED",
+          "verified": false,
+          "seconds": 6.0,
+          "tools": [],
+          "writeArguments": [],
+          "purpose": "",
+          "ledger": 0,
+          "passed": false
+        }
+      ]
+    },
+    {
+      "version": "after",
+      "pending": [
+        "F002.purpose",
+        "F002.remarks"
+      ],
+      "runs": [
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 13.5,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 27.3,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 11.6,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": "INVALID_ARGUMENT",
+          "verified": false,
+          "seconds": 19.5,
+          "tools": [
+            "update_invoice",
+            "query_invoices",
+            "update_invoice"
+          ],
+          "writeArguments": [
+            "{\"changes\":\"{\\\"enterprise\\\": \\\"C001\\\", \\\"invoiceId\\\": \\\"F002\\\", \\\"changes\\\": {\\\"purpose\\\": \\\"办公室采购\\\"}}\"}",
+            "{\"changes\":\"{}\"}"
+          ],
+          "purpose": "",
+          "ledger": 0,
+          "passed": false
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 19.2,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 11.4,
+          "tools": [
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 10.9,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": "INVALID_ARGUMENT",
+          "verified": false,
+          "seconds": 24.3,
+          "tools": [
+            "update_invoice",
+            "query_invoices",
+            "check_invoice_purpose",
+            "query_rules"
+          ],
+          "writeArguments": [
+            "{\"arguments\":\"{}\"}"
+          ],
+          "purpose": "",
+          "ledger": 0,
+          "passed": false
+        },
+        {
+          "stage": "save",
+          "query": {
+            "http": 200,
+            "errorCode": null,
+            "seconds": 14.5,
+            "tools": [
+              "query_invoices",
+              "check_invoice_purpose"
+            ]
+          },
+          "http": 200,
+          "errorCode": null,
+          "verified": true,
+          "seconds": 49.7,
+          "tools": [
+            "update_invoice",
+            "query_invoices",
+            "update_invoice",
+            "query_invoices",
+            "update_invoice",
+            "query_invoices"
+          ],
+          "writeArguments": [
+            "{\"changes\":\"{}\"}",
+            "{\"changes\":\"{}\"}",
+            "{}"
+          ],
+          "purpose": "办公室采购",
+          "ledger": 1,
+          "passed": true
+        }
+      ]
+    }
+  ]
+}

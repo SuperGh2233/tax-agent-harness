@@ -544,34 +544,46 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 未做 / 局限：真实模型未跑；跨范围冲突只按名称判断，语义相近但名称不同的旧要求（如 style 与 tone）不会自动识别为冲突；个人记忆的编号拦截是格式规则，不能识别不带编号的企业事实；已更正（未删除）记忆的旧值仍保留在当时的运行记录中（运行记录如实反映当时模型输入），删除时才一并擦除。未提交/未推送。
 
 ### T34 — 上下文压缩与原文回溯（契约 B7，“上下文管理”）
-- 状态：IN_PROGRESS（2026-11-19，Coding Agent）。范围：长对话与大文件下的投影策略（保留任务对象、用户限制、待办）；只读回溯工具按需取回被裁剪的对话、文件片段、工具结果。
+- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项、前端 53 项通过，OSV 与密钥扫描干净）；真实模型未复测。范围：长对话与大文件下的投影策略（保留任务对象、用户限制、待办）；只读回溯工具按需取回被裁剪的对话、文件片段、工具结果。
 - 验收：30 轮含更正的脚本对话后，模型输入仍含企业、月份、待办与最新更正；大文件问答通过回溯取回原文定位。
 
 ### T35 — 多轮办理补强（“多轮办理”）
-- 状态：IN_PROGRESS（2026-11-19，Coding Agent；与 T34 待验证并行，按用户指示只写代码，测试由用户在 Mac 本地运行）。范围：修复“补充清空待补字段后再查询即结项、写入按钮禁用”的陷阱；局部更正只改动对应授权范围并保留剩余待办；歧义时追问。
+- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项、前端 53 项通过）；真实模型未复测。范围：修复“补充清空待补字段后再查询即结项、写入按钮禁用”的陷阱；局部更正只改动对应授权范围并保留剩余待办；歧义时追问。
 - 验收：补充后仍可在同任务受控保存；局部更正后其余待办与已批准范围不变；取消任务后不再写入。
-- 实现（代码已写，**未运行任何测试**，待用户 Mac 本地验证后才可标 DONE）：
+- 实现（用户 Mac 本地验证通过，见状态行）：
   - 根因：`supplement` 把字段移出 `pending` 即视为办完，但声明不等于保存；下一轮模型 `finish` 时 `pending` 为空 → `COMPLETED` → 审核页禁用写入。
   - `TaskMemory.Task` 新增 `awaitingSave`（旧任务 JSON 无此字段即为空）：补充的发票字段（`<发票号>.purpose|remarks`）进入“待保存”；只有本轮可信批准写入 `verified=true` 且键/值与批准一致才移出。`pending` 或 `awaitingSave` 非空时模型 `finish` 改为 `WAITING_USER`，追问列出“已记录但尚未保存：F002.purpose＝“…””，提示审核页确认保存、更正或取消。非发票字段（如 `month`）沿用原行为。
   - 局部更正：已保存后再补充同一字段只把该字段重新放回 `awaitingSave`，其余 `pending`/`awaitingSave` 不变；批准保存的值与此前声明不同时，以批准值（最新明确陈述）覆盖 `supplied`，批准清空则删除该声明。取消任务后 `continueTask`/`supplement` 均 CONFLICT，零台账。
   - `TaskPlan`/前端 `deriveExecutionPlan`：有待保存时“保存并回读核验”为 waiting 并列出字段，结项步骤显示“等待确认保存或取消”。`ContextProjector` 投影保留 `awaitingSave`；`AgentRuntime` 上下文说明加一句“awaitingSave 不得说成已保存”。前端任务面板与上下文来源显示“待保存”。
-  - 测试（未运行）：`TaskMemoryTest` 改写 `modelFinishCannotComplete…AndCanResumeAfterSupplement`（原断言即陷阱行为），新增 `correctionReopensOnlyItsFieldAndKeepsTheRestOfTheWork`、`cancelledTaskRefusesTheApprovedSaveAndWritesNothing`；`DemoApiTest.modelFinishCannotCloseTaskWithPendingFieldsAtHttpBoundary` 末段由 COMPLETED 改为 WAITING_USER + awaitingSave；前端 `api.test.ts` 新增 T35 计划用例。
-  - 验证后待办：同步 `DEMO_SCRIPT.md` 第 250 行“补充后再查询会让任务结项”与 `CLAUDE.md` 演示顺序坑；“歧义时追问”目前只覆盖确定性追问（待补/待保存字段），未做自然语言歧义识别。
+  - 测试（用户 Mac 本地通过）：`TaskMemoryTest` 改写 `modelFinishCannotComplete…AndCanResumeAfterSupplement`（原断言即陷阱行为），新增 `correctionReopensOnlyItsFieldAndKeepsTheRestOfTheWork`、`cancelledTaskRefusesTheApprovedSaveAndWritesNothing`；`DemoApiTest.modelFinishCannotCloseTaskWithPendingFieldsAtHttpBoundary` 末段由 COMPLETED 改为 WAITING_USER + awaitingSave；前端 `api.test.ts` 新增 T35 计划用例。
+  - 已同步（2026-11-19）：`DEMO_SCRIPT.md` 第六节第 2 条与 `CLAUDE.md` 演示顺序坑改为 T35 后行为；“歧义时追问”目前只覆盖确定性追问（待补/待保存字段），未做自然语言歧义识别。
 
 ### T36 — 异常恢复补强（“异常恢复”）
-- 状态：IN_PROGRESS（2026-11-19，Coding Agent；与 T34/T35 待验证并行，只写代码，测试由用户在 Mac 本地运行）。范围：明确重试策略（只读可重试、写入只走 verify）；连续报错熔断与如实反馈；`/turn/stream` SSE 测试（末帧 `done` 携带核验结果、中途断开不改业务结果）；`AnthropicMessagesClient` 与 OpenAI 客户端畸形回复纠正一致。
+- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项、前端 53 项通过）；真实模型未复测。范围：明确重试策略（只读可重试、写入只走 verify）；连续报错熔断与如实反馈；`/turn/stream` SSE 测试（末帧 `done` 携带核验结果、中途断开不改业务结果）；`AnthropicMessagesClient` 与 OpenAI 客户端畸形回复纠正一致。
 - 验收：故障注入覆盖模型超时、连续错误、响应丢失、进程重启；已完成操作不重做，待确认操作不执行，回复说明真实状态。
 - T33 遗留给本任务：除审计外，`TaskMemory`、`FileService.upload`、`AgentDirectory.save`、`InvoiceWriteService` 等写事务同样“先读后写”，并发写时可能 SQLITE_BUSY 后 fail closed（业务上安全但体验差）；应统一改为 IMMEDIATE 写事务并补并发写测试。
   - 核查（2026-11-19）：代码中已统一——所有 `mode=rw` 连接都经 `tool/Sqlite.open`（`transaction_mode=IMMEDIATE`），只读事务走 `openForRead`/`mode=ro`；`DemoApiTest.parallelReadsAndWritesDoNotFailOnStorageLocks` 已含并发任务创建与记忆写入。本任务未再改动。
-- 实现（代码已写，**未运行任何测试**，待用户 Mac 本地验证后才可标 DONE）：
+- 实现（用户 Mac 本地验证通过，见状态行）：
   - 重试策略（`AgentRuntime`）：运行时不重试模型；只读工具在超时或 `STORAGE_ERROR` 时重试一次（`readWithRetry`），业务拒绝（权限、参数、范围、NOT_FOUND）不重试；`update_invoice` 永不重试——写入返回 `STORAGE_ERROR`（结果可能未知）时立即结束本轮，不再询问模型，结果只能经 verify/recover 判定。
   - 熔断：同一轮连续 3 次工具错误（`MAX_CONSECUTIVE_TOOL_ERRORS`）返回 `TOOL_ERRORS_REPEATED`；中间任一成功即清零。
   - 如实反馈：`AgentRuntime.honest` 按本轮工具证据生成失败回复——已有 verified 保存则“不会重做”；写入已派发但无核验则“结果未知，勿重复保存，请核验”；写入被明确拒绝或未派发则“没有修改任何发票”；附只读查询次数及模型类错误“不会自动重发”。错误码不变，仅文本更具体。前端 `friendlyError` 补齐 `MODEL_RESPONSE_INVALID / AUTH_FAILED / RATE_LIMITED / TRANSPORT_ERROR / HTTP_ERROR / OUTPUT_LIMIT`、`TOOL_ERRORS_REPEATED`、`STORAGE_ERROR`。
   - 畸形回复一致：`LlmClient.CORRECTION` + `httpFailure`；Messages、Chat Completions、Responses 三种协议对无法解析的回复都纠正重试一次（纠正说明放在 system/instructions），再失败统一 `MODEL_RESPONSE_INVALID`；HTTP 401/403→`MODEL_AUTH_FAILED`、429→`MODEL_RATE_LIMITED`、其他→`MODEL_HTTP_ERROR`，均不重试；OpenAI 适配器新增 `MODEL_TRANSPORT_ERROR`。行为变化：Responses 此前不纠正、Messages 此前不纠正。
   - SSE：`DemoController.turnStream` 的 `complete` 改为不抛异常（客户端已断开时）。
-  - 测试（未运行）：新增 `runtime/MalformedReplyConsistencyTest`（三协议×纠正一次/二次失败/HTTP 映射）、`runtime/RetryPolicyTest`（只读重试与不重试、`honest` 文本）、`FaultRecoveryTest`（模型超时、熔断与清零、写入结果未知立即停止且不重试、丢失响应＋重启不重做、未执行的批准重启后失效）；`DemoApiTest` 新增 `streamEndsWithDoneCarryingTheVerifiedResult`、`clientDisconnectMidStreamDoesNotChangeTheBusinessOutcome`（经 `MockAsyncContext` 的 `AsyncListener.onError` 模拟断开）。改动既有断言：`OpenAiResponsesClientTest` 200 畸形由 `MODEL_FAILURE` 改为 `MODEL_RESPONSE_INVALID`；`FinanceAgentIntegrationTest.approvedFinishWithoutWriteFailsClosed` 由精确文本改为前缀＋“没有修改任何发票”。
+  - 测试（用户 Mac 本地通过）：新增 `runtime/MalformedReplyConsistencyTest`（三协议×纠正一次/二次失败/HTTP 映射）、`runtime/RetryPolicyTest`（只读重试与不重试、`honest` 文本）、`FaultRecoveryTest`（模型超时、熔断与清零、写入结果未知立即停止且不重试、丢失响应＋重启不重做、未执行的批准重启后失效）；`DemoApiTest` 新增 `streamEndsWithDoneCarryingTheVerifiedResult`、`clientDisconnectMidStreamDoesNotChangeTheBusinessOutcome`（经 `MockAsyncContext` 的 `AsyncListener.onError` 模拟断开）。改动既有断言：`OpenAiResponsesClientTest` 200 畸形由 `MODEL_FAILURE` 改为 `MODEL_RESPONSE_INVALID`；`FinanceAgentIntegrationTest.approvedFinishWithoutWriteFailsClosed` 由精确文本改为前缀＋“没有修改任何发票”。
   - 风险：熔断可能改变既有测试中“同一轮连续 ≥3 次工具报错”脚本的错误码（未逐一核实）；SSE 断开测试依赖 Spring 对 `AsyncListener.onError` 的处理，若 Mac 上不稳定请反馈。
 
 ### T37 — 复赛交付文档与创新对比（契约 B8）
-- 状态：TODO。范围：根目录 `作品使用说明.md`（启动、配置 Agent/能力、上传、对话、查看业务数据变化/执行记录/模型输入）；`自主创新说明.md`，候选题目为 T26“批准轮保存载荷由程序生成”，需用 `qwen3.7-flash` 在同一任务下分别运行 T26 前（上一提交）与 T26 后版本，记录通过次数/运行次数与失败码。
+- 状态：IN_PROGRESS（2026-11-19，Coding Agent；先写 `作品使用说明.md` 与创新对比运行脚本，真实对比运行由用户执行）。范围：根目录 `作品使用说明.md`（启动、配置 Agent/能力、上传、对话、查看业务数据变化/执行记录/模型输入）；`自主创新说明.md`，候选题目为 T26“批准轮保存载荷由程序生成”，需用 `qwen3.7-flash` 在同一任务下分别运行 T26 前（上一提交）与 T26 后版本，记录通过次数/运行次数与失败码。
 - 验收：评委按说明可独立完成全部操作；创新对比为真实运行记录，不是推断。
+- 进展（2026-11-19，Coding Agent；仅写文档与脚本，未运行）：
+  - `作品使用说明.md`（根目录）：构建、新建演示库、模型环境变量（含命名配置）、启动；身份与企业（按种子权限：U001 两家可改，U002 C001 只读、C002 无权）；Agent 配置、能力中心、规则 CLI；资料文件上传（格式、Excel 表头、只补缺失键、10 MB）；对话、补充（T35 待保存语义）、长期记忆；审核页二次确认保存与 `verified=true` 回读；检查器（执行计划、上下文来源、上下文压缩、本轮/完整模型输入）、工具时间线、审计记录；常见错误码。界面文案按 `App.tsx`/`api.ts` 实际标签核对。**未经评委视角实操走查**。
+  - `scripts/innovation_compare.py`（仅标准库）：分别在独立 worktree 构建 `f7ffe68`（T26 前）与 `HEAD`（`-Dfrontend.skip=true`），或用 `--before-jar/--after-jar`；每次运行新建种子库与本地服务，经真实 HTTP API 走“查询 → 审核页同款消息与结构化批准保存 F002 用途”，以数据库证据判定（用途=批准值、台账 1 条、`verified=true`、无错误码）；两组待补字段（`F002.purpose` / `F002.purpose,F002.remarks`）；输出 `target/t37-innovation/summary.md`、`results.json`（含模型 `update_invoice` 实际参数）与每次服务日志，不记录密钥。仅做过 Python 语法检查。
+  - `自主创新说明.md`：草稿，问题/做法/判断依据/对比设置已写；结果表与结论留空，须用户以 `qwen3.7-flash` 运行脚本后原样填入。
+  - 待用户：Mac 上运行 `python3 scripts/innovation_compare.py --runs 5`（耗用真实模型额度）；按 `作品使用说明.md` 以评委视角走一遍；结果回填后才可标 DONE。
+  - 第一次真实运行（2026-11-19 14:27，用户 Mac，`qwen3.7-flash`，每组 5 次；证据 `docs/evidence/T37_INNOVATION_20261119/`）：改进前 3/5、1/5，改进后 0/5、1/5，**不支持 T26 论点**；用户评委走查结论 not done，审核页保存在真实模型下约 5/6 失败。
+  - 根因（按 `results.json` 逐次核对）：14 次失败中 13 次是保存轮工具序列为空的 `CONFIRMATION_REQUIRED`——模型把“保存 + 查询核对”合成一个批次，`validateReadBatch` 拒绝含 `update_invoice` 的整批，零写入；T26 把保存改为无参数后模型更倾向合批，故改进后单字段组 5/5 全部如此。另 1 次（改进后双字段组 #3）数据库已写入且 `verified=true`，但同轮先前一次畸形参数 `{"{}":""}` 留下的 `INVALID_ARGUMENT` 仍决定了本轮结果（改进前单字段组 #4 同类：已核验后模型又提交一次未批准的备注修改）。
+  - 修复（2026-11-19，Coding Agent；未运行测试）：`AgentRuntime` 批准轮允许“恰好一个保存 + 只读查询”的批次——先预校验只读成员，再单独先执行保存、后执行查询（查询看到保存后的值），结果按供应商原顺序写入 history（Anthropic 回放要求）；无批准、多个保存仍整批拒绝。本轮已核验后再调用保存不执行、不计为工具错误；已核验的保存清除本轮先前的 `toolError`。安全不变量不变：载荷仍只来自可信批准，批准每轮至多执行一次，证据门仍要求本轮 `verified=true`。新增 `FinanceAgentIntegrationTest` 3 项（合批先保存且按原序回放、两个保存的批次仍拒绝、已核验保存压过先前畸形调用且不重复执行）。
+  - 待用户：Mac 上跑 `mvn test`；再重跑对比。注意脚本默认构建已提交的 `HEAD`，未提交的修复需先本地打包并用 `--after-jar target/harness-0.0.1-SNAPSHOT.jar`。
+  - 用户已在 Mac 跑完测试并完成第二次对比（2026-11-19 16:16，`anthropic` 协议，本地 JAR；证据 `docs/evidence/T37_INNOVATION_20261119_run2/`）：改进前 1/5、4/5（合计 5/10），改进后 4/5、3/5（合计 7/10）。改进后 10 次保存轮全部是“保存 → 查询”，空批次拒绝消失；剩余 3 次均为 `INVALID_ARGUMENT`——模型给无参数保存塞杂项参数（`{"_method":…,"_path":…}`、`{"changes":"<审核页消息字符串>"}`、`{"arguments":"{}"}`），当时回给模型的只有 “Invalid tool input”。
+  - 第二处修复（2026-11-19，Coding Agent；未运行测试）：`approvedUpdate` 拒绝规则不变（畸形/伪造字段仍 `INVALID_ARGUMENT`，不等于批准仍 `CONFIRMATION_REQUIRED`），但批准轮的拒绝信息改为 `AgentRuntime.SAVE_ARGUMENTS`（“只传空对象 {} 再调用一次……”），保存工具 schema 也带同一 `description`；无批准时信息不变。测试：`FinanceAgentIntegrationTest` 断言 schema 描述与拒绝信息。
+  - 待用户：Mac 上 `mvn test`、重新打包后用 `--after-jar` 第三次对比；并提供评委走查发现的具体文档问题（尚未收到明细，`作品使用说明.md` 未改）。

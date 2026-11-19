@@ -78,7 +78,8 @@ public final class AgentRuntime {
                 .map(name -> new Tool(name, defs.required(DEFINITIONS.get(name)).deepCopy())).forEach(tools::add);
         if (writer != null && writeAllowed && !limits.disabledTools().contains("update_invoice")) {
             // No arguments: the model only decides whether to save; the payload is the trusted approval.
-            var update = JSON.createObjectNode().put("type", "object").put("additionalProperties", false);
+            var update = JSON.createObjectNode().put("type", "object").put("additionalProperties", false)
+                    .put("description", SAVE_ARGUMENTS);
             update.putObject("properties");
             tools.add(new Tool("update_invoice", update));
         }
@@ -182,19 +183,30 @@ public final class AgentRuntime {
                     return new Result(Status.FINISHED, ((Finish) finalizer).text(), null, history);
                 }
                 if (calls != null) {
-                    // Preflight the entire read-only batch before executing any member.
-                    // An approved invoice write is never allowed to share a provider turn.
+                    // Preflight the entire batch before executing any member. T37: real models batch "save, then
+                    // check" in one provider turn; in an approved turn the single save runs first and alone, the
+                    // reads see its result, and results are replayed in the provider's original order.
+                    var order = new ArrayList<Integer>();
+                    for (int i = 0; i < calls.size(); i++) order.add(i);
                     if (calls.size() > 1) {
-                        try { validateReadBatch(calls, enterprise); }
+                        int save = saveIndex(calls, approval);
+                        var reads = new ArrayList<>(calls);
+                        if (save >= 0) { order.remove(Integer.valueOf(save)); order.addFirst(save); reads.remove(save); }
+                        try { validateReadBatch(reads, enterprise); }
                         catch (DomainException e) { return error(e.code().name(), history, writeDispatched); }
                         catch (Exception e) { return error("INVALID_ARGUMENT", history, writeDispatched); }
                     }
-                    for (var call : calls) {
+                    var done = new Exchange[calls.size()];
+                    for (int index : order) {
+                    var call = calls.get(index);
                     long started = System.nanoTime();
                     emit(progressSink, new Progress("tool_start", call.id(), call.name(), 0, null));
                     ToolContract.Response<?> response;
                     try {
                         requireCallable(call.name());
+                        // The approval is executed at most once per turn; a further save call changes nothing.
+                        if (verifiedWrite && call.name().equals("update_invoice"))
+                            throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "本轮批准的保存已执行并核验，不会再次执行");
                         // Strict canonical DTO validation; identity/approval are never decoded here.
                         Object input = call.name().equals("update_invoice")
                                 ? approvedUpdate(call, approval)
@@ -239,29 +251,39 @@ public final class AgentRuntime {
                                 && data instanceof ToolContract.UpdateResult saved && saved.verified()
                                 && approval.update().key().equals(saved.key())
                                 && approval.update().changes().entrySet().stream().allMatch(e ->
-                                    e.getValue().equals(e.getKey().equals("purpose") ? saved.purpose() : saved.remarks())))
+                                    e.getValue().equals(e.getKey().equals("purpose") ? saved.purpose() : saved.remarks()))) {
                             verifiedWrite = true;
+                            // The read-back proves the approved save; an earlier failed call this turn (for example
+                            // malformed save arguments the model then corrected) no longer decides the outcome.
+                            toolError = null;
+                        }
                         response = new ToolContract.Response<>(data, null);
                         consecutiveErrors = 0;
                     } catch (DomainException e) {
-                        toolError = e.code().name();
-                        consecutiveErrors++;
+                        // A repeated save after the verified one was refused before execution: it is not a failure.
+                        if (!(verifiedWrite && call.name().equals("update_invoice"))) {
+                            toolError = e.code().name();
+                            consecutiveErrors++;
+                        }
                         // STORAGE_ERROR from the writer means the outcome may be unknown: stop before the model can
                         // try anything else or describe the save, and leave it to verify.
                         writeUnknown = call.name().equals("update_invoice") && e.code() == ErrorCode.STORAGE_ERROR;
                         response = new ToolContract.Response<>(null, new ToolContract.Error(e.code(), e.getMessage()));
-                    } catch (TimeoutException e) { return error("TOOL_TIMEOUT", history, writeDispatched);
-                    } catch (InterruptedException e) { Thread.currentThread().interrupt(); return error("INTERRUPTED", history, writeDispatched);
-                    } catch (Exception e) { return error("TOOL_FAILURE", history, writeDispatched); }
+                    } catch (TimeoutException e) { settle(done, history); return error("TOOL_TIMEOUT", history, writeDispatched);
+                    } catch (InterruptedException e) { Thread.currentThread().interrupt(); settle(done, history); return error("INTERRUPTED", history, writeDispatched);
+                    } catch (Exception e) { settle(done, history); return error("TOOL_FAILURE", history, writeDispatched); }
                     long durationMs = Math.max(0, (System.nanoTime() - started) / 1_000_000);
                     var full = JSON.writeValueAsString(response);
-                    history.add(new Exchange(call, full, durationMs, compactForModel(call.id(), full)));
+                    done[index] = new Exchange(call, full, durationMs, compactForModel(call.id(), full));
                     emit(progressSink, new Progress("tool_result", call.id(), call.name(), durationMs,
                             response.error() == null ? "SUCCESS" : response.error().code().name()));
-                    if (writeUnknown) return error(toolError, history, true);
+                    if (writeUnknown) { settle(done, history); return error(toolError, history, true); }
                     // T36 circuit breaker: repeated failing calls stop the turn instead of spending every step.
-                    if (consecutiveErrors >= MAX_CONSECUTIVE_TOOL_ERRORS) return error("TOOL_ERRORS_REPEATED", history, writeDispatched);
+                    if (consecutiveErrors >= MAX_CONSECUTIVE_TOOL_ERRORS) {
+                        settle(done, history); return error("TOOL_ERRORS_REPEATED", history, writeDispatched);
                     }
+                    }
+                    settle(done, history);
                 } else {
                     if (toolError != null) return error(toolError, history, writeDispatched);
                     if (decision instanceof Ask ask) return new Result(Status.NEEDS_INPUT, ask.text(), null, history);
@@ -283,15 +305,25 @@ public final class AgentRuntime {
      */
     private static ToolContract.InvoiceUpdate approvedUpdate(Call call, ApprovedWrite approval) {
         var arguments = call.arguments() == null || call.arguments().isBlank() ? "{}" : call.arguments();
+        // T37 evidence: real models wrap the empty call in noise ({"arguments":"{}"}, {"changes":"{}"}, request
+        // paths). The refusal stays, but its message tells the model exactly how to retry within the turn.
+        var hint = approval == null ? "Exact current-turn approval required" : SAVE_ARGUMENTS;
         boolean empty;
         try { var node = JSON.readTree(arguments); empty = node.isObject() && node.isEmpty(); }
-        catch (Exception malformed) { throw new DomainException(ErrorCode.INVALID_ARGUMENT, "Malformed update arguments"); }
+        catch (Exception malformed) { throw new DomainException(ErrorCode.INVALID_ARGUMENT, hint); }
         // Strict decoding still rejects forged fields (authorization, verified, ...) before approval is consulted.
-        var submitted = empty ? null : ToolContract.decode(arguments, ToolContract.InvoiceUpdate.class);
+        ToolContract.InvoiceUpdate submitted = null;
+        if (!empty) {
+            try { submitted = ToolContract.decode(arguments, ToolContract.InvoiceUpdate.class); }
+            catch (DomainException e) { throw new DomainException(ErrorCode.INVALID_ARGUMENT, hint); }
+        }
         if (approval == null || submitted != null && !approval.update().equals(submitted))
-            throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Exact current-turn approval required");
+            throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, hint);
         return approval.update();
     }
+    /** What the model is told about the save call, in its schema and when it gets the arguments wrong. */
+    public static final String SAVE_ARGUMENTS = "update_invoice 不接受任何参数：保存内容就是用户本轮在审核页批准的修改。"
+            + "请只传空对象 {} 再调用一次，不要添加任何字段、字符串、请求路径或修改内容。";
     /**
      * T34: a result too large to replay whole is shown to the model as totals plus the first rows, with how to page
      * the rest through recall_context. Totals are always computed over every row by the program. Returns null when
@@ -338,6 +370,21 @@ public final class AgentRuntime {
     /** A disconnected stream must never change the business outcome of the turn. */
     private static void emit(Consumer<Progress> sink, Progress progress) {
         try { sink.accept(progress); } catch (Exception ignored) { }
+    }
+    /** The index of the one save in an approved batch; -1 without approval or unless there is exactly one save. */
+    private static int saveIndex(List<Call> calls, ApprovedWrite approval) {
+        if (approval == null) return -1;
+        int found = -1;
+        for (int i = 0; i < calls.size(); i++) {
+            if (!calls.get(i).name().equals("update_invoice")) continue;
+            if (found >= 0) return -1;
+            found = i;
+        }
+        return found;
+    }
+    /** Appends executed batch results in the provider's call order, which the adapters' replay requires. */
+    private static void settle(Exchange[] done, List<Exchange> history) {
+        for (int i = 0; i < done.length; i++) if (done[i] != null) { history.add(done[i]); done[i] = null; }
     }
     /** All batch arguments must be valid and read-only before the first tool runs. */
     private void validateReadBatch(List<Call> calls, String enterprise) {
