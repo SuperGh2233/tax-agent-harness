@@ -17,6 +17,14 @@ public final class TaskPlan {
     public static TaskMemory.Plan derive(TaskMemory.Status status, List<String> pending,
                                          List<TaskMemory.Summary> recentTools,
                                          List<LlmClient.Exchange> history) {
+        return derive(status, pending, List.of(), recentTools, history);
+    }
+
+    /** T35: awaiting = stated invoice fields not yet saved by a verified write; they keep the write step open. */
+    public static TaskMemory.Plan derive(TaskMemory.Status status, List<String> pending, List<String> awaiting,
+                                         List<TaskMemory.Summary> recentTools,
+                                         List<LlmClient.Exchange> history) {
+        boolean hasAwaiting = awaiting != null && !awaiting.isEmpty();
         var tools = new HashSet<String>();
         for (var exchange : history) tools.add(exchange.call().name());
         for (var summary : recentTools) tools.add(summary.tool());
@@ -34,13 +42,18 @@ public final class TaskPlan {
                         queried ? "以工具结果为准，不采用模型心算" : "等待查询规则/用途"),
                 step("input", "补充或更正明确事实", hasPending ? "waiting" : "done",
                         hasPending ? "待补：" + String.join("、", pending) : "没有待补字段"),
-                step("write", "保存并回读核验",
-                        verified ? "done" : hasPending ? "optional" : writeAttempted ? "current" : "optional",
-                        verified ? "verified=true，数据库回读一致"
-                                : writeAttempted ? "已发起写入但未核验，禁止重复保存" : "只读、尚未授权保存"),
+                hasAwaiting
+                        ? step("write", "保存并回读核验", writeAttempted && !verified ? "current" : "waiting",
+                                (writeAttempted && !verified ? "已发起写入但未核验，禁止重复保存；" : "")
+                                        + "待保存：" + String.join("、", awaiting) + "（声明不等于已保存）")
+                        : step("write", "保存并回读核验",
+                                verified ? "done" : hasPending ? "optional" : writeAttempted ? "current" : "optional",
+                                verified ? "verified=true，数据库回读一致"
+                                        : writeAttempted ? "已发起写入但未核验，禁止重复保存" : "只读、尚未授权保存"),
                 step("close", "结项证据门", completed ? "done" : waiting ? "waiting" : "current",
                         completed ? "任务完成且证据门通过"
-                                : waiting ? "等待用户补充，不能提前结项" : "执行中，禁止用模型文字结项")));
+                                : waiting ? (hasAwaiting && !hasPending ? "等待确认保存或取消，不能提前结项" : "等待用户补充，不能提前结项")
+                                : "执行中，禁止用模型文字结项")));
     }
 
     private static TaskMemory.PlanStep step(String key, String title, String state, String detail) {

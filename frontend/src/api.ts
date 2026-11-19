@@ -1,7 +1,7 @@
 // Mirrors DemoController, TaskMemory, LlmClient and ToolContract. Tool JSON uses snake_case.
 export interface Session { csrfToken: string; profile: string; enterprise: string; identityNotice: string }
 export interface Statement { value: string; userRequest: string }
-export interface Task { id: string; status: 'ACTIVE' | 'WAITING_USER' | 'COMPLETED' | 'CANCELLED'; version: number; goal: string; pending: string[]; supplied: Record<string, Statement>; question: string | null; recentTools: {tool: string; outcome: string}[]; plan?: {steps: PlanStep[]} | null }
+export interface Task { id: string; status: 'ACTIVE' | 'WAITING_USER' | 'COMPLETED' | 'CANCELLED'; version: number; goal: string; pending: string[]; supplied: Record<string, Statement>; question: string | null; recentTools: {tool: string; outcome: string}[]; plan?: {steps: PlanStep[]} | null; awaitingSave?: string[] }
 
 /** Terminal tasks are historical context only; create a new task to continue work. */
 export function isTerminalTaskStatus(status: Task['status']): boolean {
@@ -11,7 +11,60 @@ export function isTerminalTaskStatus(status: Task['status']): boolean {
 export function findOpenTask(tasks: Task[]): Task | undefined {
   return tasks.find(task => task.status === 'ACTIVE' || task.status === 'WAITING_USER')
 }
-export interface Context { task: Task; preferences: Record<string, Statement> }
+// Mirrors TaskMemory (T33). The most specific scope wins for one name: USER_ENTERPRISE, then PERSONAL, then ENTERPRISE.
+export type MemoryScope = 'USER_ENTERPRISE' | 'PERSONAL' | 'ENTERPRISE'
+export interface Memory { scope: MemoryScope; name: string; value: string; userRequest: string; expiresOn: string | null; updatedAt: string | null; effective: boolean }
+export const SCOPE_LABEL: Record<MemoryScope, string> = {USER_ENTERPRISE: '仅我 · 当前企业', PERSONAL: '个人 · 所有企业', ENTERPRISE: '企业共享'}
+/** Client copy of the server checks, so the form explains a refusal before sending. */
+export function memoryProblem(scope: MemoryScope, name: string, value: string, userRequest: string, expiresOn: string, today: string): string | null {
+  if (!name.trim() || !value.trim() || !userRequest.trim()) return '名称、明确值和你的原话都必须填写。'
+  if (name.includes('·')) return '名称不能包含“·”。'
+  if (scope === 'PERSONAL' && /(^|[^A-Za-z0-9])[CFTcft][0-9]{3}(?![0-9])/.test(name + ' ' + value)) return '个人记忆跨企业使用，不能包含企业、发票或流水编号；请改为“仅我 · 当前企业”。'
+  if (expiresOn && expiresOn < today) return '有效期不能早于今天。'
+  return null
+}
+export interface Context { task: Task; preferences: Record<string, Statement>; agent?: AgentDef | null }
+// Mirrors AgentDirectory (T30). A turn uses the bound agent's version in force when the turn starts.
+export const AGENT_TOOLS = ['query_invoices', 'query_bank_entries', 'check_invoice_purpose', 'query_rules', 'search_knowledge', 'recall_context', 'update_invoice'] as const
+export interface AgentSpec { name: string; responsibility: string; instructions: string; modelProfile: string; model: string | null; tools: string[]; enterprises: string[]; skills?: string[] }
+export interface AgentDef { id: string; version: number; spec: AgentSpec; enabled: boolean; changedBy: string; changedAt: string }
+export interface ModelProfile { name: string; configured: boolean; model: string | null }
+export interface Effective { tools: string[]; disabledTools: string[]; skills: Skill[]; droppedSkills: string[] }
+export interface AgentsView { agents: AgentDef[]; effective?: Record<string, Effective>; profiles: ModelProfile[]; tools: string[] }
+// Mirrors CapabilityRegistry (T31).
+export interface ToolInfo { name: string; version: string; description: string; enabled: boolean; changedBy: string | null; changedAt: string | null; usedBy: string[] }
+export interface SkillSpec { name: string; description: string; instructions: string; tools: string[] }
+export interface Skill { id: string; version: number; spec: SkillSpec; enabled: boolean; changedBy: string; changedAt: string }
+export interface SkillInfo { skill: Skill; usedBy: string[] }
+export interface Capabilities { tools: ToolInfo[]; skills: SkillInfo[] }
+/** Shown before a global switch: who is affected, in plain words. */
+export function impactMessage(kind: '工具' | '技能', name: string, usedBy: string[], enabling: boolean): string {
+  const who = usedBy.length ? `将影响 ${usedBy.length} 个 Agent：${usedBy.join('、')}` : '当前没有 Agent 使用它'
+  return enabling ? `启用${kind} ${name}：${who}，从下一轮对话起可用。`
+    : `停用${kind} ${name}：${who}。从下一轮对话起不再提供给模型，调用会返回 CAPABILITY_DISABLED；进行中的一轮不受影响。`
+}
+export function skillProblem(id: string, spec: SkillSpec): string | null {
+  if (!/^[a-z][a-z0-9-]{2,39}$/.test(id)) return '技能编号需 3–40 位小写字母、数字或连字符，并以字母开头。'
+  if (!spec.name.trim() || !spec.instructions.trim()) return '名称和说明必须填写。'
+  if (spec.instructions.length > 2000) return '说明不能超过 2000 字。'
+  if (!spec.tools.length) return '至少选择一个工具。'
+  if (spec.tools.includes('update_invoice')) return '技能不能授予保存能力；保存只能直接授予 Agent。'
+  return null
+}
+/** Agents a new task in this enterprise may use; the server re-checks when the task starts and on every turn. */
+export function usableAgents(agents: AgentDef[], enterprise: string): AgentDef[] {
+  return agents.filter(agent => agent.enabled && agent.spec.enterprises.includes(enterprise))
+}
+/** Client-side check of the same rules AgentDirectory enforces, so the form explains a refusal before sending. */
+export function agentProblem(id: string, spec: AgentSpec): string | null {
+  if (!/^[a-z][a-z0-9-]{2,39}$/.test(id)) return 'Agent 编号需 3–40 位小写字母、数字或连字符，并以字母开头。'
+  if (!spec.name.trim() || !spec.responsibility.trim()) return '名称和职责必须填写。'
+  if (spec.instructions.length > 4000) return '提示词不能超过 4000 字。'
+  if (!spec.tools.length && !(spec.skills ?? []).length) return '至少选择一个能力或技能。'
+  if (spec.tools.length === 1 && spec.tools[0] === 'update_invoice' && !(spec.skills ?? []).length) return '只有保存能力的 Agent 无法回读核验，请同时选择查询能力。'
+  if (!spec.enterprises.length) return '至少选择一家适用企业。'
+  return null
+}
 export interface Exchange { call: {id: string; name: string; arguments: string}; resultJson: string }
 export interface Result { status: 'FINISHED' | 'NEEDS_INPUT' | 'ERROR'; text: string; errorCode: string | null; history: Exchange[] }
 export interface Verification { key: {enterpriseId: string; invoiceId: string}; purpose: string; remarks: string; verified: boolean }
@@ -35,6 +88,55 @@ export async function verifyPendingOperation(api: Pick<DemoApi, 'verify'>, opera
 export interface AuditEvent { id: number; requestId: string; taskId: string | null; tool: string | null; callId: string | null; month: string | null; invoiceId: string | null; fields: string | null; operationId: string | null; outcome: string; errorCode: string | null; verified: boolean; time: string }
 export interface SavedTrace { id: number; requestId: string; taskId: string; systemPrompt: string; userMessage: string; toolNames: string[]; historySize: number; memorySource: string | null; outcome: string | null; time: string }
 export interface Invoice { key: {enterprise_id: string; invoice_id: string}; invoice_date: string; seller: string; item: string; amount_cents: number; purpose: string; remarks: string }
+// Mirrors FileService (T29). Envelope fields are camelCase.
+export interface StoredFile { id: string; enterpriseId: string; name: string; version: number; sha256: string; kind: 'XLSX' | 'XLS' | 'DOCX' | 'PDF'; sizeBytes: number; uploadedBy: string; uploadedAt: string; knowledgeEnabled: boolean; latest: boolean }
+export interface RowIssue { sheet: string | null; row: number; recordId: string | null; reason: string }
+export interface UploadResult { status: 'IMPORTED' | 'DUPLICATE' | 'REJECTED'; file: StoredFile | null; invoicesImported: number; bankEntriesImported: number; conflicts: RowIssue[]; skipped: RowIssue[]; errors: RowIssue[]; chunks: number }
+export interface FileChunk { seq: number; location: string; text: string }
+export interface FileDetail { file: StoredFile; chunks: FileChunk[] }
+
+/** Same limits as FileService; the server re-checks everything, this only spares a doomed upload. */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+export const UPLOAD_ACCEPT = '.xlsx,.xls,.docx,.pdf'
+export function uploadProblem(file: {name: string; size: number}): string | null {
+  if (!/\.(xlsx|xls|docx|pdf)$/i.test(file.name)) return '只支持 Excel（.xlsx/.xls）、Word（.docx）和文字型 PDF。'
+  if (file.size === 0) return '文件是空的。'
+  if (file.size > MAX_UPLOAD_BYTES) return '文件超过 10 MB 上限。'
+  return null
+}
+const issueReasons: Record<string, string> = {
+  EXISTING_RECORD: '系统中已有同编号记录，未覆盖',
+  ENTERPRISE_MISMATCH: '属于其他企业，未导入',
+  INVALID_AMOUNT: '金额无效（须为数字且最多两位小数）',
+  INVALID_DATE: '日期无法识别',
+  INVALID_DIRECTION: '收支方向须为“收入”或“支出”',
+  MISSING_REQUIRED_FIELD: '缺少必填字段',
+  MISSING_ENTERPRISE: '缺少企业编号',
+  DUPLICATE_IN_FILE: '文件内编号重复',
+  NOT_TEXT_PDF: '不是文字型 PDF（扫描件无法读取文字）',
+  ENCRYPTED_PDF: 'PDF 已加密',
+  NO_TEXT: '文档没有可读取的文字',
+  TOO_MANY_SEGMENTS: '内容过多，超出分段上限',
+}
+export function issueReason(reason: string): string {
+  if (reason.startsWith('MISSING_COLUMNS:')) return `表头缺少必需列 ${reason.slice('MISSING_COLUMNS:'.length)}`
+  return issueReasons[reason] ?? reason
+}
+export function issueLocation(issue: RowIssue): string {
+  return [issue.sheet, issue.row > 0 ? `第${issue.row}行` : null, issue.recordId].filter(Boolean).join(' · ') || '整个文件'
+}
+/** One plain sentence about what the server actually stored; never claims more than the result says. */
+export function describeUpload(result: UploadResult): string {
+  if (result.status === 'REJECTED') return `文件未导入：发现 ${result.errors.length} 处问题，系统没有保存任何内容。`
+  if (result.status === 'DUPLICATE') return `相同内容已在 ${result.file?.name ?? '此前的文件'}（第 ${result.file?.version ?? '?'} 版）上传过，本次没有新增任何数据。`
+  const parts = [`已保存为 ${result.file?.name} 第 ${result.file?.version} 版`]
+  if (result.invoicesImported || result.bankEntriesImported) parts.push(`新增发票 ${result.invoicesImported} 张、流水 ${result.bankEntriesImported} 条`)
+  else parts.push('没有新增发票或流水')
+  if (result.conflicts.length) parts.push(`${result.conflicts.length} 条与已有记录同编号，未覆盖`)
+  if (result.skipped.length) parts.push(`${result.skipped.length} 条属于其他企业，未导入`)
+  parts.push(`共 ${result.chunks} 个可引用文本段`)
+  return parts.join('；') + '。'
+}
 
 /** Fail closed after an approved financial turn: a missing tool history is never proof of no write. */
 export function verifiedWriteResult(result: TurnView, operationId: string): boolean {
@@ -55,7 +157,7 @@ export type PlanState = 'done' | 'current' | 'waiting' | 'optional'
 export interface PlanStep { key: string; title: string; state: PlanState; detail: string }
 export interface RuleCitation { id: string; version: string; name?: string }
 
-const QUERY_TOOLS = new Set(['query_invoices', 'query_bank_entries', 'check_invoice_purpose', 'query_rules'])
+const QUERY_TOOLS = new Set(['query_invoices', 'query_bank_entries', 'check_invoice_purpose', 'query_rules', 'search_knowledge'])
 
 function hasVerifiedUpdate(history: Exchange[]) {
   return history.some(exchange => {
@@ -70,6 +172,8 @@ export function deriveExecutionPlan(task: Task | null, history: Exchange[], veri
   const toolNames = new Set([...history.map(exchange => exchange.call.name), ...task.recentTools.map(tool => tool.tool)])
   const queried = [...QUERY_TOOLS].some(name => toolNames.has(name))
   const pending = task.pending.length > 0
+  // T35: stated invoice values that no verified write has saved yet keep the save step open.
+  const awaiting = task.awaitingSave ?? []
   const completed = task.status === 'COMPLETED'
   const waiting = task.status === 'WAITING_USER'
   const verified = verification?.verified === true || hasVerifiedUpdate(history)
@@ -82,10 +186,13 @@ export function deriveExecutionPlan(task: Task | null, history: Exchange[], veri
       detail:queried ? '以工具结果为准，不采用模型心算' : '等待查询规则/用途'},
     {key:'input', title:'补充或更正明确事实', state:pending ? 'waiting' : 'done',
       detail:pending ? `待补：${task.pending.join('、')}` : '没有待补字段'},
-    {key:'write', title:'保存并回读核验', state:verified ? 'done' : pending ? 'optional' : writeAttempted ? 'current' : 'optional',
-      detail:verified ? 'verified=true，数据库回读一致' : writeAttempted ? '已发起写入但未核验，禁止重复保存' : '只读、尚未授权保存'},
+    awaiting.length > 0
+      ? {key:'write', title:'保存并回读核验', state:writeAttempted && !verified ? 'current' : 'waiting',
+        detail:`${writeAttempted && !verified ? '已发起写入但未核验，禁止重复保存；' : ''}待保存：${awaiting.join('、')}（声明不等于已保存）`}
+      : {key:'write', title:'保存并回读核验', state:verified ? 'done' : pending ? 'optional' : writeAttempted ? 'current' : 'optional',
+        detail:verified ? 'verified=true，数据库回读一致' : writeAttempted ? '已发起写入但未核验，禁止重复保存' : '只读、尚未授权保存'},
     {key:'close', title:'结项证据门', state:completed ? 'done' : waiting ? 'waiting' : 'current',
-      detail:completed ? '任务完成且证据门通过' : waiting ? '等待用户补充，不能提前结项' : '执行中，禁止用模型文字结项'}
+      detail:completed ? '任务完成且证据门通过' : waiting ? (awaiting.length > 0 && !pending ? '等待确认保存或取消，不能提前结项' : '等待用户补充，不能提前结项') : '执行中，禁止用模型文字结项'}
   ]
 }
 
@@ -109,11 +216,57 @@ export function citedRules(history: Exchange[]): RuleCitation[] {
   return [...found.values()]
 }
 
+export interface KnowledgeCitation { kind: 'RULE' | 'FILE'; name: string; version: string; location: string }
+/** Passages search_knowledge actually returned this turn; a model's own citation is never evidence by itself. */
+export function citedKnowledge(history: Exchange[]): KnowledgeCitation[] {
+  const found = new Map<string, KnowledgeCitation>()
+  for (const exchange of history) {
+    if (exchange.call.name !== 'search_knowledge') continue
+    const result = parseTool(exchange)
+    const hits = (result?.data as {hits?: unknown} | null)?.hits
+    if (!result || result.error || !Array.isArray(hits)) continue
+    for (const hit of hits) {
+      const kind = hit?.source_kind, version = hit?.version, location = hit?.location
+      const name = kind === 'RULE' ? hit?.source_id : hit?.source_name
+      if ((kind === 'RULE' || kind === 'FILE') && [name, version, location].every(v => typeof v === 'string'))
+        found.set(`${kind}:${name}@${version}:${location}`, {kind, name, version, location})
+    }
+  }
+  return [...found.values()]
+}
+
+/** T34: what the compressed conversation kept, read from the model input the server actually sent. */
+export interface ContextSummary { turnsTotal: number; omittedTurns: number; latestMonth: string | null; latestMonthTurn: number | null; constraints: {turn: number; user: string}[]; ids: string[] }
+export function contextSummary(modelInput: string | null | undefined): ContextSummary | null {
+  if (!modelInput) return null
+  try {
+    const conv = JSON.parse(modelInput)?.conversation
+    if (!conv || typeof conv !== 'object') return null
+    const latest = conv.key_objects?.latest_month
+    return {
+      turnsTotal: Number(conv.turns_total) || 0,
+      omittedTurns: Number(conv.omitted_turns?.count) || 0,
+      latestMonth: typeof latest?.value === 'string' ? latest.value : null,
+      latestMonthTurn: typeof latest?.turn === 'number' ? latest.turn : null,
+      constraints: Array.isArray(conv.earlier_constraints) ? conv.earlier_constraints.filter((c: {turn?: unknown; user?: unknown}) => typeof c?.turn === 'number' && typeof c?.user === 'string') : [],
+      ids: Array.isArray(conv.key_objects?.ids_mentioned) ? conv.key_objects.ids_mentioned.filter((v: unknown) => typeof v === 'string') : [],
+    }
+  } catch { return null }
+}
+
 export function friendlyError(code: string) {
   const messages: Record<string, string> = {
     MODEL_NOT_CONFIGURED: '真实模型未配置。请在服务端设置 LLM_ENDPOINT、LLM_API_KEY 和 LLM_MODEL；当前没有模拟回复。',
     MODEL_FAILURE: '模型没有给出可执行的结论；本轮没有据此执行保存。请重试，或查看工具与审计记录确认已发生的只读操作。',
     MODEL_TIMEOUT: '模型响应超时；本轮不能据此声明成功。请以工具和审计记录为准，勿重复写入。',
+    MODEL_RESPONSE_INVALID: '模型回复格式无法解析（已按统一策略纠正重试一次）；本轮没有据此执行保存，可稍后重新发送。',
+    MODEL_AUTH_FAILED: '模型服务拒绝了凭据；请在服务端检查 API Key 配置。本轮没有执行保存。',
+    MODEL_RATE_LIMITED: '模型服务限流；系统不会自动重发，请稍后重新发送。本轮没有执行保存。',
+    MODEL_TRANSPORT_ERROR: '无法连接模型服务；请检查网络与 LLM_ENDPOINT。本轮没有执行保存。',
+    MODEL_HTTP_ERROR: '模型服务返回错误；本轮没有据此执行保存，可稍后重新发送。',
+    MODEL_OUTPUT_LIMIT: '模型回复超过长度上限被截断；本轮没有据此执行保存，请缩小问题范围。',
+    TOOL_ERRORS_REPEATED: '连续多次工具调用出错，系统已停止重试；请核对企业、月份或权限后再提问。',
+    STORAGE_ERROR: '存储读写失败。若本轮涉及保存，结果未知：请先“核验”，不要重复保存。',
     CONFLICT: '任务版本或进行中的任务存在冲突，请重新加载任务核对。',
     CONFIRMATION_REQUIRED: '保存需要本轮明确确认；当前没有获得授权。',
     PERMISSION_DENIED: '当前身份没有该企业或操作权限。',
@@ -131,6 +284,12 @@ export function friendlyError(code: string) {
     INVALID_RESPONSE: '服务端返回无法识别的响应，请核查服务与实际执行状态。',
     WRITE_NOT_EXECUTED: '本轮未执行保存；旧批准已结束，如需保存请重新确认。',
     WRITE_NOT_VERIFIED: '写入结果未核验；保留操作锁，请核查台账与发票。',
+    UNSUPPORTED_SCOPE: '超出当前支持范围：文件类型与内容不符或不受支持，或没有适用的规则。',
+    REQUEST_TOO_LARGE: '请求超过大小上限（上传文件最大 10 MB）。',
+    LENGTH_REQUIRED: '上传请求缺少长度信息，请重新选择文件上传。',
+    NOT_FOUND: '没有找到该记录，或它不属于当前企业。',
+    CAPABILITY_NOT_GRANTED: '当前 Agent 没有被授予这项能力；可在“Agent 配置”中调整，或换用其他 Agent。',
+    CAPABILITY_DISABLED: '这项能力已在“能力中心”停用；重新启用前任何 Agent 都不能使用。',
   }
   return `${messages[code] ?? '请求未完成，请核查服务、权限与实际执行结果。'} (${code})`
 }
@@ -166,7 +325,17 @@ export class DemoApi {
   async select(profile: string, enterprise: string) { const s = await this.request<Session>('/session', 'POST', {profile, enterprise}); this.csrf = s.csrfToken; return s }
   async logout() { await this.request('/session', 'DELETE'); return this.session() }
   tasks() { return this.request<Task[]>('/tasks') }
-  start(goal: string, pending: string[]) { return this.request<Task>('/tasks', 'POST', {goal, pending}) }
+  start(goal: string, pending: string[], agentId?: string) { return this.request<Task>('/tasks', 'POST', {goal, pending, ...(agentId ? {agentId} : {})}) }
+  agents() { return this.request<AgentsView>('/agents') }
+  agentHistory(id: string) { return this.request<AgentDef[]>(`/agents/${encodeURIComponent(id)}/history`) }
+  /** Creates the agent or saves a new version; existing versions are never rewritten. */
+  saveAgent(id: string, spec: AgentSpec) { return this.request<AgentDef>('/agents', 'POST', {id, spec}) }
+  capabilities() { return this.request<Capabilities>('/capabilities') }
+  setToolEnabled(name: string, enabled: boolean) { return this.request<ToolInfo>(`/capabilities/tools/${encodeURIComponent(name)}/enabled`, 'POST', {enabled}) }
+  saveSkill(id: string, spec: SkillSpec) { return this.request<Skill>('/capabilities/skills', 'POST', {id, spec}) }
+  setSkillEnabled(id: string, enabled: boolean) { return this.request<Skill>(`/capabilities/skills/${encodeURIComponent(id)}/enabled`, 'POST', {enabled}) }
+  skillHistory(id: string) { return this.request<Skill[]>(`/capabilities/skills/${encodeURIComponent(id)}/history`) }
+  setAgentEnabled(id: string, enabled: boolean) { return this.request<AgentDef>(`/agents/${encodeURIComponent(id)}/enabled`, 'POST', {enabled}) }
   /** Explicit user action only. Cancelling a task never modifies or rolls back financial records. */
   cancel(id: string, version: number) { return this.request<Task>(`/tasks/${encodeURIComponent(id)}/cancel`, 'POST', {version, confirmed: true}) }
   load(id: string) { return this.request<Context>(`/tasks/${encodeURIComponent(id)}`) }
@@ -213,8 +382,32 @@ export class DemoApi {
   preferences() { return this.request<Record<string, Statement>>('/preferences') }
   putPreference(name: string, value: string, userRequest: string) { return this.request<Record<string, Statement>>('/preferences', 'POST', {name, value, userRequest}) }
   deletePreference(name: string) { return this.request<Record<string, Statement>>(`/preferences/${encodeURIComponent(name)}`, 'DELETE') }
+  memories() { return this.request<Memory[]>('/memories') }
+  putMemory(scope: MemoryScope, name: string, value: string, userRequest: string, expiresOn: string | null) {
+    return this.request<Memory[]>('/memories', 'POST', {scope, name, value, userRequest, expiresOn})
+  }
+  /** Erases the memory and its values in stored model inputs; it cannot be restored. */
+  deleteMemory(scope: MemoryScope, name: string) { return this.request<Memory[]>(`/memories/${scope}/${encodeURIComponent(name)}`, 'DELETE') }
   verify(taskId: string, operationId: string) { return this.request<OperationVerification>(`/tasks/${encodeURIComponent(taskId)}/operations/${encodeURIComponent(operationId)}/verify`, 'POST') }
   audit() { return this.request<AuditEvent[]>('/audit') }
+  /** Multipart upload; the browser sets the boundary and length. Never retried automatically. */
+  async upload(file: File): Promise<UploadResult> {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    let response: Response
+    try {
+      response = await fetch('/api/demo/files', {method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: {'X-CSRF-Token': this.csrf}, body: form})
+    } catch { throw new ApiError('NETWORK_UNKNOWN') }
+    let data: UploadResult & {errorCode?: string}
+    try { data = await response.json() } catch { throw new ApiError('INVALID_RESPONSE', response.status) }
+    if (!response.ok) throw new ApiError(data.errorCode ?? `HTTP_${response.status}`, response.status)
+    return data
+  }
+  files() { return this.request<StoredFile[]>('/files') }
+  /** Takes effect on the next search; the stored file never changes. */
+  setKnowledge(id: string, enabled: boolean) { return this.request<StoredFile>(`/files/${encodeURIComponent(id)}/knowledge`, 'POST', {enabled}) }
+  file(id: string) { return this.request<FileDetail>(`/files/${encodeURIComponent(id)}`) }
   /** Persisted model inputs; survives reload and restart, newest first. */
   traces(id: string) { return this.request<SavedTrace[]>(`/tasks/${encodeURIComponent(id)}/traces`) }
 }
@@ -228,8 +421,10 @@ export async function createAndRunFirstTurn(
   pending: string[],
   onCreated: (task: Task) => void,
   handlers?: {onText?: (text: string) => void; onTool?: (event: ToolProgress) => void},
+  agentId?: string,
 ): Promise<{created: Task; response: TurnView | null; executionError: Error | null}> {
-  const created = await api.start(goal, pending)
+  // Without a choice the server binds the default agent; the call stays exactly as before.
+  const created = agentId ? await api.start(goal, pending, agentId) : await api.start(goal, pending)
   onCreated(created)
   try {
     const response = handlers && api.streamTurn

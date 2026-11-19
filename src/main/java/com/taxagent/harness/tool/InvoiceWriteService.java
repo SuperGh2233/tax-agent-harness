@@ -131,7 +131,7 @@ public final class InvoiceWriteService {
     /** SELECT only, with current READ permission. No retry or inference from payload/model history. */
     public Verification verify(Session session, String enterprise, String taskId, String operationId) {
         text(enterprise); text(taskId); text(operationId);
-        try (var c = connect()) {
+        try (var c = connect(false)) {
             try (var s = c.createStatement()) { s.execute("PRAGMA query_only=ON"); }
             c.setAutoCommit(false);
             guard.require(c, session, enterprise, PermissionGuard.Access.READ);
@@ -169,8 +169,9 @@ public final class InvoiceWriteService {
             }
         }
     }
-    private Connection connect() throws SQLException {
-        var c = DriverManager.getConnection(url);
+    private Connection connect() throws SQLException { return connect(true); }
+    private Connection connect(boolean write) throws SQLException {
+        var c = write ? Sqlite.open(url) : Sqlite.openForRead(url);
         try (var s = c.createStatement()) { s.execute("PRAGMA foreign_keys=ON"); s.execute("PRAGMA busy_timeout=5000"); }
         return c;
     }

@@ -28,7 +28,8 @@ public final class DemoAudit {
     }
     public DemoAudit(Path db) { url = "jdbc:sqlite:" + db.toAbsolutePath().toUri().toASCIIString() + "?mode=rw"; }
     private Connection open() throws SQLException {
-        var c = DriverManager.getConnection(url);
+        // Read-then-write transactions begin IMMEDIATE (see Sqlite): parallel requests otherwise fail closed.
+        var c = com.taxagent.harness.tool.Sqlite.open(url);
         try (var s = c.createStatement()) {
             s.execute("PRAGMA busy_timeout=5000");
             s.execute("CREATE TABLE IF NOT EXISTS demo_audit (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,enterprise_id TEXT NOT NULL,request_id TEXT NOT NULL,task_id TEXT,tool TEXT,call_id TEXT,month TEXT,invoice_id TEXT,fields TEXT,operation_id TEXT,outcome TEXT NOT NULL,error_code TEXT,verified INTEGER NOT NULL,time TEXT NOT NULL,rule_version TEXT,memory_source TEXT,duration_ms INTEGER)");
@@ -44,7 +45,8 @@ public final class DemoAudit {
             s.execute("CREATE TRIGGER IF NOT EXISTS demo_audit_no_replace BEFORE INSERT ON demo_audit WHEN EXISTS (SELECT 1 FROM demo_audit WHERE id=NEW.id) BEGIN SELECT RAISE(ABORT,'append only'); END");
             s.execute("CREATE TRIGGER IF NOT EXISTS demo_audit_no_delete BEFORE DELETE ON demo_audit BEGIN SELECT RAISE(ABORT,'append only'); END");
             s.execute("CREATE TABLE IF NOT EXISTS agent_trace (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,enterprise_id TEXT NOT NULL,request_id TEXT NOT NULL,task_id TEXT NOT NULL,system_prompt TEXT NOT NULL,user_message TEXT NOT NULL,tool_names TEXT NOT NULL,history_size INTEGER NOT NULL,memory_source TEXT,outcome TEXT,time TEXT NOT NULL)");
-            s.execute("CREATE TRIGGER IF NOT EXISTS agent_trace_no_update BEFORE UPDATE ON agent_trace BEGIN SELECT RAISE(ABORT,'append only'); END");
+            // Shared with TaskMemory, which lifts it only inside the transaction that erases a deleted memory (T33).
+            s.execute(com.taxagent.harness.runtime.TaskMemory.TRACE_NO_UPDATE);
             s.execute("CREATE TRIGGER IF NOT EXISTS agent_trace_no_delete BEFORE DELETE ON agent_trace BEGIN SELECT RAISE(ABORT,'append only'); END");
             return c;
         } catch (SQLException e) { c.close(); throw e; }

@@ -37,7 +37,7 @@ public final class ToolContract {
 
     public static <T> T decode(String json, Class<T> type) {
         // An allowlist prevents callers from deserializing trusted server context.
-        if (!Set.of(Query.class, PurposeCheck.class, RuleQuery.class, InvoiceUpdate.class,
+        if (!Set.of(Query.class, PurposeCheck.class, RuleQuery.class, KnowledgeQuery.class, RecallQuery.class, InvoiceUpdate.class,
                 StateRequest.class, RuleRequest.class).contains(type)) throw invalid("Unsupported tool input");
         try {
             T value = MAPPER.readValue(json, type);
@@ -67,8 +67,8 @@ public final class ToolContract {
     }
     public record PurposeCheck(String enterpriseId, String month) {
         public PurposeCheck {
+            // Applicability is decided by the stored rules in force, not by a fixed month.
             required(enterpriseId); ToolContract.month(month);
-            if (!month.equals("2026-09")) throw new DomainException(ErrorCode.UNSUPPORTED_SCOPE, "Purpose check supports 2026-09 only");
         }
     }
     public record InvoiceKey(String enterpriseId, String invoiceId) {
@@ -138,6 +138,41 @@ public final class ToolContract {
     public record RuleQueryResult(List<RuleSummary> rules) {
         public RuleQueryResult { rules = List.copyOf(rules); }
     }
+    /** T32: text search over enabled rules and current uploaded files of the trusted enterprise. */
+    public record KnowledgeQuery(String enterpriseId, String query, LocalDate date, Integer limit) {
+        public static final int DEFAULT_LIMIT = 5, MAX_LIMIT = 10, MAX_QUERY_CHARS = 200;
+        public KnowledgeQuery {
+            required(enterpriseId); required(query);
+            if (query.length() > MAX_QUERY_CHARS) throw invalid("Query too long");
+            if (limit != null && (limit < 1 || limit > MAX_LIMIT)) throw invalid("limit must be 1-10");
+        }
+        public int effectiveLimit() { return limit == null ? DEFAULT_LIMIT : limit; }
+    }
+    /** One cited passage: source kind RULE (id@version) or FILE (name, vN), with its location in the source. */
+    public record KnowledgeHit(String sourceKind, String sourceId, String sourceName, String version, String location,
+                               String text, double score) {}
+    public record KnowledgeResult(List<KnowledgeHit> hits, int searchedSegments) {
+        public KnowledgeResult { hits = List.copyOf(hits); }
+    }
+    /**
+     * T34: read the original behind the compressed view, within the current task and enterprise only.
+     * TURN needs seq; TOOL_RESULT needs call_id (offset/limit page its rows); FILE needs file_id and location
+     * (limit = neighbouring segments on each side).
+     */
+    public record RecallQuery(String source, Integer seq, String callId, String fileId, String location, Integer offset, Integer limit) {
+        public static final int MAX_ROWS = 50, MAX_NEIGHBOURS = 3;
+        public RecallQuery {
+            if (source == null || !Set.of("TURN", "TOOL_RESULT", "FILE").contains(source)) throw invalid("source must be TURN, TOOL_RESULT or FILE");
+            switch (source) {
+                case "TURN" -> { if (seq == null || seq < 1 || callId != null || fileId != null || location != null) throw invalid("TURN needs seq only"); }
+                case "TOOL_RESULT" -> { required(callId); if (seq != null || fileId != null || location != null) throw invalid("TOOL_RESULT needs call_id"); }
+                default -> { required(fileId); required(location); if (seq != null || callId != null) throw invalid("FILE needs file_id and location"); }
+            }
+            if (offset != null && offset < 0) throw invalid("offset must be >= 0");
+            if (limit != null && (limit < 1 || limit > ("FILE".equals(source) ? MAX_NEIGHBOURS : MAX_ROWS))) throw invalid("limit out of range");
+        }
+    }
+    public record RecallResult(String source, String reference, String content, Integer total, Integer offset, Integer returned, String note) {}
     public record PurposeResult(List<InvoiceKey> missing, List<RuleReference> rules) {
         public PurposeResult { missing = List.copyOf(missing); rules = List.copyOf(rules); }
     }

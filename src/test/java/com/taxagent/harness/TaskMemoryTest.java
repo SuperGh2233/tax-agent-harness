@@ -155,14 +155,91 @@ class TaskMemoryTest {
                 Map.of("F002.purpose", explicit("办公室采购")));
         assertThat(supplemented.status()).isEqualTo(Status.ACTIVE);
         assertThat(supplemented.pending()).isEmpty();
+        assertThat(supplemented.awaitingSave()).containsExactly("F002.purpose");
+        // T35: the statement is not a save, so a later query turn keeps the task open for the controlled save.
         var resumed = memory.continueTask(u1, "C001", task.id(), "继续完成核查", runtime(r -> {
-            assertThat(r.userMessage()).contains("办公室采购", "继续完成核查");
+            assertThat(r.userMessage()).contains("办公室采购", "继续完成核查", "awaitingSave");
             return new Finish("补充后核查完成");
         }));
-        assertThat(resumed.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
-        assertThat(resumed.task().status()).isEqualTo(Status.COMPLETED);
+        assertThat(resumed.result().status()).isEqualTo(AgentRuntime.Status.NEEDS_INPUT);
+        assertThat(resumed.task().status()).isEqualTo(Status.WAITING_USER);
         assertThat(resumed.task().pending()).isEmpty();
-        assertThat(resumed.task().question()).isNull();
+        assertThat(resumed.task().awaitingSave()).containsExactly("F002.purpose");
+        assertThat(resumed.task().question()).contains("F002.purpose＝“办公室采购”", "尚未保存").doesNotContain("补充后核查完成");
+        assertThat(resumed.task().plan().steps()).anySatisfy(step -> {
+            assertThat(step.key()).isEqualTo("write"); assertThat(step.detail()).contains("待保存：F002.purpose");
+        });
+        // The same task can still be saved; the verified write closes it.
+        var saved = memory.continueTask(u1, "C001", task.id(), "现在保存 F002 的明确用途", approvedSave(task.id(), "F002", "办公室采购"),
+                approval(task.id(), "F002", "办公室采购"));
+        assertThat(saved.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(saved.task().status()).isEqualTo(Status.COMPLETED);
+        assertThat(saved.task().awaitingSave()).isEmpty();
+        assertThat(saved.task().question()).isNull();
+    }
+    @Test void correctionReopensOnlyItsFieldAndKeepsTheRestOfTheWork() {
+        var task = memory.start(u1, "C001", "补齐两张发票用途", List.of("F002.purpose", "F004.purpose"));
+        var stated = memory.supplement(u1, "C001", task.id(), 0, Map.of("F002.purpose", explicit("办公室采购")));
+        assertThat(stated.pending()).containsExactly("F004.purpose");
+        var saved = memory.continueTask(u1, "C001", task.id(), "保存 F002", approvedSave(task.id(), "F002", "办公室采购"),
+                approval(task.id(), "F002", "办公室采购"));
+        assertThat(saved.task().status()).isEqualTo(Status.WAITING_USER);
+        assertThat(saved.task().pending()).containsExactly("F004.purpose");
+        assertThat(saved.task().awaitingSave()).isEmpty();
+        // Correcting F002 after its save reopens F002 only; F004 is still pending and nothing is written.
+        var corrected = memory.supplement(u1, "C001", task.id(), saved.task().version(),
+                Map.of("F002.purpose", explicit("差旅住宿")));
+        assertThat(corrected.pending()).containsExactly("F004.purpose");
+        assertThat(corrected.awaitingSave()).containsExactly("F002.purpose");
+        assertThat(corrected.supplied().get("F002.purpose").value()).isEqualTo("差旅住宿");
+        assertThat(f002Purpose()).isEqualTo("办公室采购");
+        var asked = memory.continueTask(u1, "C001", task.id(), "继续", runtime(r -> new Finish("完成")));
+        assertThat(asked.task().status()).isEqualTo(Status.WAITING_USER);
+        assertThat(asked.task().question()).contains("F004.purpose", "F002.purpose＝“差旅住宿”");
+        // A save of a different value than stated is the newer explicit statement and replaces it.
+        var resaved = memory.continueTask(u1, "C001", task.id(), "按审核页保存 F002", approvedSave(task.id(), "F002", "差旅交通"),
+                approval(task.id(), "F002", "差旅交通"));
+        assertThat(resaved.task().awaitingSave()).isEmpty();
+        assertThat(resaved.task().pending()).containsExactly("F004.purpose");
+        assertThat(resaved.task().supplied().get("F002.purpose").value()).isEqualTo("差旅交通");
+        assertThat(f002Purpose()).isEqualTo("差旅交通");
+    }
+    @Test void cancelledTaskRefusesTheApprovedSaveAndWritesNothing() {
+        var task = memory.start(u1, "C001", "补齐 F002 用途", List.of("F002.purpose"));
+        var stated = memory.supplement(u1, "C001", task.id(), 0, Map.of("F002.purpose", explicit("办公室采购")));
+        var cancelled = memory.cancel(u1, "C001", task.id(), stated.version());
+        assertThat(cancelled.status()).isEqualTo(Status.CANCELLED);
+        assertThat(cancelled.awaitingSave()).containsExactly("F002.purpose");
+        code(() -> memory.continueTask(u1, "C001", task.id(), "现在保存", approvedSave(task.id(), "F002", "办公室采购"),
+                approval(task.id(), "F002", "办公室采购")), ErrorCode.CONFLICT);
+        code(() -> memory.supplement(u1, "C001", task.id(), cancelled.version(), Map.of("F002.purpose", explicit("差旅"))),
+                ErrorCode.CONFLICT);
+        assertThat(f002Purpose()).isEmpty();
+        try (var c = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var s = c.createStatement(); var rows = s.executeQuery("SELECT count(*) FROM invoice_operations")) {
+            assertThat(rows.next()).isTrue();
+            assertThat(rows.getInt(1)).isZero();
+        } catch (SQLException e) { throw new AssertionError(e); }
+    }
+    private final Map<String, String> operations = new java.util.HashMap<>();
+    private AgentRuntime.ApprovedWrite approval(String taskId, String invoice, String purpose) {
+        var update = new ToolContract.InvoiceUpdate(new ToolContract.InvoiceKey("C001", invoice), Map.of("purpose", purpose));
+        var operation = operations.computeIfAbsent(taskId + invoice + purpose, k -> UUID.randomUUID().toString());
+        return new AgentRuntime.ApprovedWrite(taskId, operation, update,
+                InvoiceWriteService.authorizeExplicitRequest(u1, taskId, operation, update, InvoiceWriteService.Intent.SAVE_NOW));
+    }
+    /** Model that saves once (the runtime executes the approval payload) and then finishes. */
+    private AgentRuntime approvedSave(String taskId, String invoice, String purpose) {
+        var step = new java.util.concurrent.atomic.AtomicInteger();
+        return new AgentRuntime(r -> step.getAndIncrement() == 0
+                ? new Call("save-" + invoice, "update_invoice",
+                    "{\"key\":{\"enterprise_id\":\"C001\",\"invoice_id\":\"" + invoice + "\"},\"changes\":{\"purpose\":\"" + purpose + "\"}}")
+                : new Finish("已保存"), new ReadOnlyFinanceTools(database), new RuleService(database),
+                AgentRuntime.Limits.defaults(), new InvoiceWriteService(database));
+    }
+    private String f002Purpose() {
+        return new ReadOnlyFinanceTools(database).queryInvoices(u1, new ToolContract.Query("C001", "2026-09"))
+                .rows().stream().filter(row -> row.key().invoiceId().equals("F002")).findFirst().orElseThrow().purpose();
     }
     @Test void verifiedApprovedWriteResolvesOnlyTheMatchingPendingField() {
         var task = memory.start(u1, "C001", "补充并核查发票用途", List.of("F002.purpose", "F004.purpose"));

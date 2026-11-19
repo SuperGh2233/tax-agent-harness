@@ -1,6 +1,11 @@
 spring:
   application:
     name: tax-agent-harness
+  servlet:
+    multipart:
+      # Backstop for the upload endpoint; DemoSecurity enforces the same limit before parsing.
+      max-file-size: 10MB
+      max-request-size: 11MB
 server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:8080}

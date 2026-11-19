@@ -94,7 +94,9 @@ class AgentRuntimeTest {
     void allUnexposedToolsIncludingWritesAreDenied(String tool) throws Exception {
         byte[] before = Files.readAllBytes(database);
         var fake = new FakeLlmClient(call(tool), new Finish("已保存"));
-        assertThat(runtime(fake).run(new Session("U001"), "保存").errorCode()).isEqualTo("INVALID_ARGUMENT");
+        // T31: a known tool the runtime was not given is CAPABILITY_NOT_GRANTED; unknown names stay INVALID_ARGUMENT.
+        assertThat(runtime(fake).run(new Session("U001"), "保存").errorCode())
+                .isEqualTo(tool.equals("update_invoice") ? "CAPABILITY_NOT_GRANTED" : "INVALID_ARGUMENT");
         assertThat(Files.readAllBytes(database)).isEqualTo(before);
     }
     @ParameterizedTest @ValueSource(strings = {

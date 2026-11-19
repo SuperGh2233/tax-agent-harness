@@ -181,6 +181,15 @@ class InvoiceWriteServiceTest {
         fails(ErrorCode.UNSUPPORTED_SCOPE, () -> service.execute(user,"service-task","a",u,a));
         assertThat(count()).isZero();
     }
+    @Test void writesFollowTheRuleInForceOnTheInvoiceDate() throws Exception {
+        // C002 August invoices are covered by R003 1.0; C001 August only by the disabled R002 1.0.
+        var c002 = update("C002","F016",Map.of("purpose","八月补充"));
+        assertThat(save("a",c002).verified()).isTrue();
+        assertThat(new ReadOnlyFinanceTools(db).queryInvoices(user,new Query("C002","2026-08")).rows().stream()
+                .filter(i -> i.key().invoiceId().equals("F016")).findFirst().orElseThrow().purpose()).isEqualTo("八月补充");
+        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> save("b",update("C001","F016",Map.of("purpose","八月补充"))));
+        assertThat(count()).isEqualTo(1);
+    }
     @Test void disabledAndAmbiguousRulesRejected() throws Exception {
         sql("UPDATE rules SET status='启用' WHERE id='R002' AND version='1.0'");
         fails(ErrorCode.CONFLICT, () -> save("a",purpose("C001","用途")));

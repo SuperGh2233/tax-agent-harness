@@ -142,44 +142,60 @@ public final class RuleService {
         if (query == null) throw invalid("Purpose query required");
         return transaction(false, c -> {
             guard.require(c, session, query.enterpriseId(), PermissionGuard.Access.READ);
-            var date = LocalDate.parse(query.month() + "-01");
-            var rule = purposeRule(c, query.enterpriseId(), date);
-            var requirement = requirement(rule.definition().content());
+            var month = LocalDate.parse(query.month() + "-01");
+            // Each invoice is judged by the rule in force on its own date, as writes are; a version
+            // that takes effect mid-month therefore applies from that day, never to the whole month.
+            var byDate = new HashMap<LocalDate, StoredRule>();
+            var used = new LinkedHashMap<RuleKey, RuleReference>();
             var missing = new ArrayList<InvoiceKey>();
             try (var s = c.prepareStatement("""
-                    SELECT id,amount_cents,purpose FROM invoices
+                    SELECT id,invoice_date,amount_cents,purpose FROM invoices
                     WHERE enterprise_id=? AND invoice_date>=? AND invoice_date<? ORDER BY invoice_date,id
                     """)) {
-                s.setString(1, query.enterpriseId()); s.setString(2, date.toString());
-                s.setString(3, date.plusMonths(1).toString());
+                s.setString(1, query.enterpriseId()); s.setString(2, month.toString());
+                s.setString(3, month.plusMonths(1).toString());
                 try (var r = s.executeQuery()) {
                     while (r.next()) {
+                        var date = LocalDate.parse(r.getString("invoice_date"));
+                        var rule = byDate.get(date);
+                        if (rule == null) { rule = purposeRule(c, query.enterpriseId(), date); byDate.put(date, rule); }
+                        used.putIfAbsent(rule.key(), new RuleReference(rule.key(), rule.definition().name()));
                         String purpose = r.getString("purpose");
-                        if (requirement.requires(r.getLong("amount_cents")) && (purpose == null || purpose.isBlank()))
+                        if (requirement(rule.definition().content()).requires(r.getLong("amount_cents"))
+                                && (purpose == null || purpose.isBlank()))
                             missing.add(new InvoiceKey(query.enterpriseId(), r.getString("id")));
                     }
                 }
             }
-            return new PurposeResult(missing, List.of(new RuleReference(rule.key(), rule.definition().name())));
+            if (used.isEmpty()) { // No invoices: still cite the rule in force, or refuse when none applies.
+                var rule = purposeRule(c, query.enterpriseId(), month);
+                requirement(rule.definition().content());
+                used.put(rule.key(), new RuleReference(rule.key(), rule.definition().name()));
+            }
+            return new PurposeResult(missing, List.copyOf(used.values()));
         });
     }
 
-    /** The single enabled purpose rule of the enterprise; multiple enabled versions stay ambiguous. */
+    /**
+     * The single enabled purpose rule of the enterprise, found from stored rules rather than a fixed id map.
+     * A rule id is a purpose rule when any stored version for the enterprise states a purpose requirement,
+     * so a reworded later version stays in scope and is refused instead of silently ignored.
+     */
     private static StoredRule purposeRule(Connection c, String enterprise, LocalDate date) throws SQLException {
-        String id = switch (enterprise) {
-            case "C001" -> "R002";
-            case "C002" -> "R003";
-            default -> throw unsupported();
-        };
-        var candidates = rules(c, enterprise, date).stream().filter(r -> r.key().ruleId().equals(id)).toList();
-        // No invented precedence for multiple enabled versions.
+        var ids = new HashSet<String>();
+        for (var rule : rules(c, enterprise, null)) {
+            var content = rule.definition().content();
+            if (content != null && MUST_FILL.matcher(content.replaceAll("\\s+", "")).find()) ids.add(rule.key().ruleId());
+        }
+        var candidates = rules(c, enterprise, date).stream().filter(r -> ids.contains(r.key().ruleId())).toList();
+        // No invented precedence for multiple enabled versions or multiple purpose rule ids.
         if (candidates.size() > 1) throw new DomainException(ErrorCode.CONFLICT, "Ambiguous enabled rule versions");
         if (candidates.isEmpty()) throw unsupported();
         return candidates.getFirst();
     }
 
+    /** Writes need an executable purpose rule in force on the invoice date; no month is special-cased. */
     static void requireSupportedWriteRules(Connection c, String enterprise, LocalDate date) throws SQLException {
-        if (!date.toString().startsWith("2026-09")) throw unsupported();
         requirement(purposeRule(c, enterprise, date).definition().content());
     }
 
@@ -203,7 +219,7 @@ public final class RuleService {
     }
 
     private <T> T transaction(boolean write, Operation<T> operation) {
-        try (var c = DriverManager.getConnection(url + (write ? "?mode=rw" : "?mode=ro"))) {
+        try (var c = Sqlite.open(url + (write ? "?mode=rw" : "?mode=ro"))) {
             try (var s = c.createStatement()) {
                 s.execute("PRAGMA foreign_keys=ON"); s.execute("PRAGMA busy_timeout=5000");
             }

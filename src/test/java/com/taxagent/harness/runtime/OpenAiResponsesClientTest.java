@@ -116,7 +116,7 @@ class OpenAiResponsesClientTest {
             for (int code : List.of(302, 500, 200)) {
                 status.set(code);
                 assertThatThrownBy(() -> client.next(new Request("test", List.of(), List.of())))
-                        .hasMessage(code == 200 ? "MODEL_FAILURE" : "MODEL_HTTP_ERROR").hasNoCause();
+                        .hasMessage(code == 200 ? "MODEL_RESPONSE_INVALID" : "MODEL_HTTP_ERROR").hasNoCause(); // T36: same codes as Messages
             }
             assertThat(targetCount.get()).isZero();
         } finally { server.stop(0); }

@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
@@ -34,7 +35,7 @@ public final class DemoController {
     private final Map<String, CachedTurn> turnCache = new ConcurrentHashMap<>();
     private record CachedTurn(String fingerprint, TurnView view, long expiresAt) {}
     private final Path database;
-    private final LlmClient model;
+    private final ModelProfiles profiles;
     private final DemoAudit audit;
     // Presentation transport only; each turn still runs under the same mutation lock and audit rules.
     private final ExecutorService streamExecutor = Executors.newCachedThreadPool(task -> {
@@ -43,11 +44,16 @@ public final class DemoController {
     // Never deserialized from HTTP. Only the fixed profile mapping below constructs this identity.
     record DemoPrincipal(String profile, String enterprise, Session trustedSession) {}
     public record Selection(String profile, String enterprise) {}
-    public record Start(String goal, List<String> pending) {}
+    public record Start(String goal, List<String> pending, String agentId) {}
+    public record AgentSave(String id, AgentDirectory.Spec spec) {}
+    public record AgentToggle(Boolean enabled) {}
+    /** Task context plus the agent the task is bound to (its current version, even if since disabled). */
+    public record LoadView(TaskMemory.Task task, Map<String, TaskMemory.Input> preferences, AgentDirectory.Agent agent) {}
     public record Approval(String operationId, String invoiceId, Map<String,String> changes, boolean confirmed) {}
     public record Turn(String message, Approval approval, String requestId) {}
     public record Supplement(long version, Map<String,TaskMemory.Input> statements) {}
     public record Preference(String name, String value, String userRequest) {}
+    public record MemoryInput(TaskMemory.Scope scope, String name, String value, String userRequest, String expiresOn) {}
     public record Cancel(Long version, Boolean confirmed) {}
     public record TurnView(TaskMemory.Turn turn, UpdateResult verification, String errorCode, String message,
                            String operationId, String modelInput, AgentRuntime.Trace promptTrace) {
@@ -60,9 +66,12 @@ public final class DemoController {
             this(turn, verification, errorCode, message, operationId, modelInput, null);
         }
     }
-    public DemoController(@Value("${taxagent.database:data/harness.db}") String database, LlmClient model) {
-        this.database = Path.of(database); this.model = model; audit = new DemoAudit(this.database);
+    @org.springframework.beans.factory.annotation.Autowired
+    public DemoController(@Value("${taxagent.database:data/harness.db}") String database, ModelProfiles profiles) {
+        this.database = Path.of(database); this.profiles = profiles; audit = new DemoAudit(this.database);
     }
+    /** One client as the default profile (tests and single-model setups). */
+    public DemoController(String database, LlmClient model) { this(database, ModelProfiles.single(model)); }
     private static <T> T decode(JsonNode body, Class<T> type) {
         try { T value = JSON.treeToValue(body, type); if (value == null) throw invalid(); return value; }
         catch (Exception e) { throw invalid(); }
@@ -77,7 +86,16 @@ public final class DemoController {
         if (p == null) throw new DomainException(ErrorCode.AUTHENTICATION_REQUIRED, "Select local demo identity");
         return p;
     }
-    private FinanceAgent agent(DemoPrincipal p) { return new FinanceAgent(database, p.trustedSession(), p.enterprise(), model); }
+    /** Task, memory and verification operations; no model call happens through this agent. */
+    private FinanceAgent agent(DemoPrincipal p) { return new FinanceAgent(database, p.trustedSession(), p.enterprise(), profiles.profile("default")); }
+    private AgentDirectory agents() { return new AgentDirectory(database); }
+    /** A turn runs with the version of the task's agent in force now; later edits apply from the next turn. */
+    private FinanceAgent turnAgent(DemoPrincipal p, String taskId) {
+        agent(p).load(taskId); // Missing or foreign tasks stay NOT_FOUND before any agent lookup.
+        var directory = agents();
+        var definition = directory.resolve(p.trustedSession(), p.enterprise(), directory.agentOf(p.trustedSession(), p.enterprise(), taskId));
+        return new FinanceAgent(database, p.trustedSession(), p.enterprise(), profiles, definition);
+    }
     private DemoAudit.Event event(String request, String task, String tool, String call, String month,
                                   String invoice, String fields, String operation, String outcome, String code, boolean verified) {
         return event(request, task, tool, call, month, invoice, fields, operation, outcome, code, verified, null, null, null);
@@ -151,7 +169,131 @@ public final class DemoController {
         var p = principal(session); text(name);
         return request(p, null, "preference-delete", () -> {
             agent(p).deletePreference(name);
+            var user = p.trustedSession().userId() + "|";
+            turnCache.keySet().removeIf(key -> key.startsWith(user)); // A replay must not bring the deleted memory back.
             return agent(p).preferences();
+        });
+    }
+    // Uploads are scoped to the session's enterprise; FileService rechecks WRITE in its own transaction.
+    @PostMapping(value = "/files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Object upload(@RequestParam("file") MultipartFile file, HttpSession session) {
+        var p = principal(session);
+        if (file == null || file.isEmpty() || file.getSize() > FileService.MAX_BYTES) throw invalid();
+        byte[] content;
+        try { content = file.getBytes(); } catch (java.io.IOException e) { throw invalid(); }
+        synchronized (mutationLock(p)) {
+            return request(p, null, "file-upload", () -> new FileService(database)
+                    .upload(p.trustedSession(), p.enterprise(), file.getOriginalFilename(), content));
+        }
+    }
+    public record KnowledgeToggle(Boolean enabled) {}
+    /** Enable/disable a file as knowledge (T32); the next search reflects it. The file itself never changes. */
+    @PostMapping("/files/{id}/knowledge") public Object knowledge(@PathVariable String id, @RequestBody JsonNode body, HttpSession session) {
+        var p = principal(session); taskId(id);
+        var toggle = decode(body, KnowledgeToggle.class);
+        if (toggle.enabled() == null) throw invalid();
+        synchronized (mutationLock(p)) {
+            return request(p, null, toggle.enabled() ? "knowledge-enable" : "knowledge-disable",
+                    () -> new FileService(database).setKnowledgeEnabled(p.trustedSession(), p.enterprise(), id, toggle.enabled()));
+        }
+    }
+    @GetMapping("/files") public Object files(HttpSession session) {
+        var p = principal(session);
+        return request(p, null, "files", () -> new FileService(database).list(p.trustedSession(), p.enterprise()));
+    }
+    @GetMapping("/files/{id}") public Object file(@PathVariable String id, HttpSession session) {
+        var p = principal(session); taskId(id);
+        return request(p, null, "file", () -> new FileService(database).detail(p.trustedSession(), p.enterprise(), id));
+    }
+    // T30 agent configuration. Reading needs READ on the session enterprise; changes need WRITE on every covered enterprise.
+    @GetMapping("/agents") public Object listAgents(HttpSession session) {
+        var p = principal(session);
+        return request(p, null, "agents", () -> {
+            var list = agents().list(p.trustedSession(), p.enterprise());
+            var registry = new CapabilityRegistry(database);
+            var effective = new LinkedHashMap<String, CapabilityRegistry.Effective>();
+            for (var a : list) effective.put(a.id(), registry.effective(a));
+            return Map.of("agents", list, "effective", effective, "profiles", profiles.describe(),
+                    "tools", AgentDirectory.TOOLS.stream().sorted().toList());
+        });
+    }
+    // T31 capabilities: tools (global switch), skills (versioned) and who uses them.
+    public record SkillSave(String id, CapabilityRegistry.SkillSpec spec) {}
+    @GetMapping("/capabilities") public Object capabilities(HttpSession session) {
+        var p = principal(session);
+        return request(p, null, "capabilities", () -> {
+            var registry = new CapabilityRegistry(database);
+            return Map.of("tools", registry.tools(p.trustedSession(), p.enterprise()), "skills", registry.skills(p.trustedSession(), p.enterprise()));
+        });
+    }
+    @PostMapping("/capabilities/tools/{name}/enabled") public Object toggleTool(@PathVariable String name, @RequestBody JsonNode body, HttpSession session) {
+        var input = decode(body, AgentToggle.class); var p = principal(session); text(name);
+        if (input.enabled() == null) throw invalid();
+        synchronized (mutationLock(p)) {
+            return request(p, null, input.enabled() ? "tool-enable" : "tool-disable",
+                    () -> new CapabilityRegistry(database).setToolEnabled(p.trustedSession(), p.enterprise(), name, input.enabled()));
+        }
+    }
+    @PostMapping("/capabilities/skills") public Object saveSkill(@RequestBody JsonNode body, HttpSession session) {
+        var input = decode(body, SkillSave.class); var p = principal(session);
+        synchronized (mutationLock(p)) {
+            return request(p, null, "skill-save", () -> new CapabilityRegistry(database).saveSkill(p.trustedSession(), p.enterprise(), input.id(), input.spec()));
+        }
+    }
+    @PostMapping("/capabilities/skills/{id}/enabled") public Object toggleSkill(@PathVariable String id, @RequestBody JsonNode body, HttpSession session) {
+        var input = decode(body, AgentToggle.class); var p = principal(session); text(id);
+        if (input.enabled() == null) throw invalid();
+        synchronized (mutationLock(p)) {
+            return request(p, null, input.enabled() ? "skill-enable" : "skill-disable",
+                    () -> new CapabilityRegistry(database).setSkillEnabled(p.trustedSession(), p.enterprise(), id, input.enabled()));
+        }
+    }
+    @GetMapping("/capabilities/skills/{id}/history") public Object skillHistory(@PathVariable String id, HttpSession session) {
+        var p = principal(session); text(id);
+        return request(p, null, "skill-history", () -> new CapabilityRegistry(database).skillHistory(p.trustedSession(), p.enterprise(), id));
+    }
+    @GetMapping("/agents/{id}/history") public Object agentHistory(@PathVariable String id, HttpSession session) {
+        var p = principal(session); text(id);
+        return request(p, null, "agent-history", () -> agents().history(p.trustedSession(), p.enterprise(), id));
+    }
+    @PostMapping("/agents") public Object saveAgent(@RequestBody JsonNode body, HttpSession session) {
+        var input = decode(body, AgentSave.class); var p = principal(session);
+        synchronized (mutationLock(p)) {
+            return request(p, null, "agent-save", () -> agents().save(p.trustedSession(), p.enterprise(), input.id(), input.spec()));
+        }
+    }
+    @PostMapping("/agents/{id}/enabled") public Object toggleAgent(@PathVariable String id, @RequestBody JsonNode body, HttpSession session) {
+        var input = decode(body, AgentToggle.class); var p = principal(session); text(id);
+        if (input.enabled() == null) throw invalid();
+        synchronized (mutationLock(p)) {
+            return request(p, null, input.enabled() ? "agent-enable" : "agent-disable",
+                    () -> agents().setEnabled(p.trustedSession(), p.enterprise(), id, input.enabled()));
+        }
+    }
+    // T33 long-term memory with scopes and expiry. Deleting erases stored values and stored model inputs.
+    @GetMapping("/memories") public Object memories(HttpSession session) {
+        var p = principal(session);
+        return request(p, null, "memories", () -> agent(p).memories());
+    }
+    @PostMapping("/memories") public Object putMemory(@RequestBody JsonNode body, HttpSession session) {
+        var input = decode(body, MemoryInput.class); var p = principal(session);
+        if (input.scope() == null) throw invalid();
+        text(input.name()); text(input.value()); text(input.userRequest());
+        return request(p, null, "memory-put-" + input.scope().name().toLowerCase(Locale.ROOT), () -> {
+            agent(p).putMemory(input.scope(), input.name(), new TaskMemory.Input(input.value(), input.userRequest()), input.expiresOn());
+            return agent(p).memories();
+        });
+    }
+    @DeleteMapping("/memories/{scope}/{name}") public Object deleteMemory(@PathVariable String scope, @PathVariable String name, HttpSession session) {
+        var p = principal(session); text(name);
+        TaskMemory.Scope parsed;
+        try { parsed = TaskMemory.Scope.valueOf(scope); } catch (Exception e) { throw invalid(); }
+        return request(p, null, "memory-delete-" + parsed.name().toLowerCase(Locale.ROOT), () -> {
+            agent(p).deleteMemory(parsed, name);
+            // Cached turn replies carry model input; a deleted memory must not come back through a replay.
+            var user = p.trustedSession().userId() + "|";
+            turnCache.keySet().removeIf(key -> parsed == TaskMemory.Scope.ENTERPRISE ? key.contains("|" + p.enterprise() + "|") : key.startsWith(user));
+            return agent(p).memories();
         });
     }
     @GetMapping("/tasks") public Object tasks(HttpSession session) {
@@ -159,10 +301,24 @@ public final class DemoController {
     }
     @PostMapping("/tasks") public Object start(@RequestBody JsonNode body, HttpSession session) {
         var input = decode(body, Start.class); var p = principal(session);
-        return request(p,null,"start",() -> agent(p).start(input.goal(),input.pending() == null ? List.of() : input.pending()));
+        return request(p,null,"start",() -> {
+            // The agent must be usable here before the task exists, so a task is never bound to an agent it cannot use.
+            var directory = agents();
+            var chosen = directory.resolve(p.trustedSession(), p.enterprise(), input.agentId());
+            var created = agent(p).start(input.goal(),input.pending() == null ? List.of() : input.pending());
+            directory.bindTask(p.trustedSession(), p.enterprise(), created.id(), chosen.id());
+            return created;
+        });
     }
     @GetMapping("/tasks/{id}") public Object load(@PathVariable String id, HttpSession session) {
-        var p = principal(session); taskId(id); return request(p,id,"load",() -> agent(p).load(id));
+        var p = principal(session); taskId(id);
+        return request(p,id,"load",() -> {
+            var context = agent(p).load(id);
+            var directory = agents();
+            var bound = directory.agentOf(p.trustedSession(), p.enterprise(), id);
+            var current = directory.list(p.trustedSession(), p.enterprise()).stream().filter(a -> a.id().equals(bound)).findFirst().orElse(null);
+            return new LoadView(context.task(), context.preferences(), current);
+        });
     }
     @PostMapping("/tasks/{id}/supplement") public Object supplement(@PathVariable String id, @RequestBody JsonNode body, HttpSession session) {
         var input = decode(body, Supplement.class); var p = principal(session); taskId(id);
@@ -206,16 +362,20 @@ public final class DemoController {
                 if (view.turn() != null && view.turn().result() != null)
                     streamText(emitter, view.turn().result().text());
                 emit(emitter, "done", view);
-                emitter.complete();
+                close(emitter);
             } catch (DomainException e) {
                 emit(emitter, "error", Map.of("errorCode", e.code().name(), "message", "请求未完成：" + e.code().name()));
-                emitter.complete();
+                close(emitter);
             } catch (Exception e) {
                 emit(emitter, "error", Map.of("errorCode", "RUNTIME_FAILURE", "message", "流式请求失败"));
-                emitter.complete();
+                close(emitter);
             }
         });
         return emitter;
+    }
+    /** T36: completing a stream the client already left must not throw; the turn's outcome is already persisted. */
+    private static void close(SseEmitter emitter) {
+        try { emitter.complete(); } catch (Exception ignored) { }
     }
     private static void emit(SseEmitter emitter, String event, Object data) {
         try { emitter.send(SseEmitter.event().name(event).data(data, MediaType.APPLICATION_JSON)); }
@@ -250,7 +410,7 @@ public final class DemoController {
         return run(p, taskId, input, progress -> {});
     }
     private TurnView run(DemoPrincipal p, String taskId, Turn input, Consumer<AgentRuntime.Progress> progress) {
-        var a = agent(p); a.load(taskId);
+        var a = turnAgent(p, taskId);
         if (input.approval() != null && !"operator".equals(p.profile()))
             throw new DomainException(ErrorCode.PERMISSION_DENIED, "Only operator may approve writes");
         String requestId = input.requestId() == null ? UUID.randomUUID().toString() : input.requestId();
@@ -306,13 +466,16 @@ public final class DemoController {
                 var call = exchange.call(); JsonNode args;
                 try { args = JSON.readTree(call.arguments()); } catch (Exception malformed) { args = JSON.createObjectNode(); }
                 JsonNode result = JSON.readTree(exchange.resultJson());
-                String tool = Set.of("query_invoices","query_bank_entries","check_invoice_purpose","query_rules","update_invoice").contains(call.name()) ? call.name() : "rejected_tool";
+                String tool = Set.of("query_invoices","query_bank_entries","check_invoice_purpose","query_rules","search_knowledge","update_invoice").contains(call.name()) ? call.name() : "rejected_tool";
                 boolean ok = result.path("error").isNull();
                 boolean saved = "update_invoice".equals(tool) && ok && result.at("/data/verified").asBoolean(false);
                 String code = ok ? null : safe(result.at("/error/code").asText());
+                // An approved write executes the trusted approval payload, not the model's (empty) arguments.
+                boolean approvedWrite = "update_invoice".equals(tool) && update != null;
                 audit.append(p.trustedSession(),p.enterprise(),event(requestId,taskId,tool,safe(call.id()),
-                        month(args.path("month").asText()),safe(args.at("/key/invoice_id").asText()),
-                        fields(keys(args.path("changes"))),approval == null ? null : approval.operationId(),ok ? "TOOL_RESULT" : "TOOL_ERROR",code,saved,
+                        month(args.path("month").asText()),
+                        approvedWrite ? safe(update.key().invoiceId()) : safe(args.at("/key/invoice_id").asText()),
+                        fields(approvedWrite ? update.changes().keySet() : keys(args.path("changes"))),approval == null ? null : approval.operationId(),ok ? "TOOL_RESULT" : "TOOL_ERROR",code,saved,
                         ruleVersion(result),turn.memorySource(),exchange.durationMs()));
                 if (saved && update != null) verified = a.recover(taskId,approval.operationId(),update).orElse(null);
             }
@@ -386,7 +549,8 @@ public final class DemoController {
     @RestControllerAdvice(assignableTypes=DemoController.class)
     public static class Errors {
         @ExceptionHandler(DomainException.class) public ResponseEntity<?> domain(DomainException e) {
-            int status = switch(e.code()) { case AUTHENTICATION_REQUIRED -> 401; case PERMISSION_DENIED -> 403;
+            int status = switch(e.code()) { case AUTHENTICATION_REQUIRED -> 401; case PERMISSION_DENIED, CAPABILITY_NOT_GRANTED -> 403;
+                case CAPABILITY_DISABLED -> 409;
                 case NOT_FOUND -> 404; case CONFLICT -> 409; case STORAGE_ERROR -> 500; default -> 400; };
             return ResponseEntity.status(status).body(Map.of("errorCode",e.code().name(),"message","请求未完成："+e.code().name()));
         }

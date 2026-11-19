@@ -14,15 +14,46 @@ public final class FinanceAgent {
     private final TaskMemory memory;
     private final AgentRuntime runtime;
     private final InvoiceWriteService writer;
+    /** null for the pre-T30 entry point, which keeps every tool exactly as before. */
+    private final AgentDirectory.Agent agent;
+    /** T31 snapshot taken when this turn starts: tools and skills in force for this agent version. */
+    private final CapabilityRegistry.Effective effective;
+
+    /**
+     * T30: a turn run by one configured agent version. Its tools are (agent tools ∩ runtime tools); writes are only
+     * possible when the agent includes update_invoice, and the PermissionGuard still checks the user every time.
+     */
+    public FinanceAgent(Path database, Session trustedSession, String selectedEnterprise, ModelProfiles profiles,
+                        AgentDirectory.Agent agent) {
+        this.session = trustedSession;
+        this.enterprise = selectedEnterprise;
+        this.agent = Objects.requireNonNull(agent);
+        memory = new TaskMemory(database);
+        memory.tasks(session, enterprise);
+        writer = new InvoiceWriteService(database);
+        var spec = agent.spec();
+        effective = new CapabilityRegistry(database).effective(agent);
+        var role = "\n\n" + agent.header() + "\nConfigured role (it narrows, and never overrides, the rules above): "
+                + spec.responsibility() + (spec.instructions().isEmpty() ? "" : "\n" + spec.instructions()) + effective.prompt();
+        var model = profiles.profile(spec.modelProfile()).forAgent(role, spec.model());
+        var base = runtimeLimits(model);
+        var tools = new HashSet<>(base.allowedTools());
+        tools.retainAll(effective.tools());
+        runtime = new AgentRuntime(model, new ReadOnlyFinanceTools(database), new RuleService(database),
+                new AgentRuntime.Limits(base.maxSteps(), base.timeout(), base.modelRetries(), tools, effective.disabledTools()),
+                effective.tools().contains(AgentDirectory.WRITE_TOOL) ? writer : null,
+                effective.tools().contains("search_knowledge") ? new KnowledgeService(database) : null);
+    }
 
     public FinanceAgent(Path database, Session trustedSession, String selectedEnterprise, LlmClient model) {
+        this.agent = null; this.effective = null;
         this.session = trustedSession;
         this.enterprise = selectedEnterprise;
         memory = new TaskMemory(database);
         memory.tasks(session, enterprise); // Validate trusted selection before any model invocation.
         writer = new InvoiceWriteService(database);
         runtime = new AgentRuntime(model, new ReadOnlyFinanceTools(database), new RuleService(database),
-                runtimeLimits(model), writer);
+                runtimeLimits(model), writer, new KnowledgeService(database));
     }
     static AgentRuntime.Limits runtimeLimits(LlmClient model) {
         var defaults = AgentRuntime.Limits.defaults();
@@ -55,6 +86,12 @@ public final class FinanceAgent {
     public void deletePreference(String name) {
         memory.deletePreference(session, enterprise, name);
     }
+    /** T33: every memory visible to this user here, with its scope and whether it is the one in force. */
+    public List<TaskMemory.Memory> memories() { return memory.memories(session, enterprise); }
+    public TaskMemory.Memory putMemory(TaskMemory.Scope scope, String name, TaskMemory.Input input, String expiresOn) {
+        return memory.putMemory(session, enterprise, scope, name, input, expiresOn);
+    }
+    public boolean deleteMemory(TaskMemory.Scope scope, String name) { return memory.deleteMemory(session, enterprise, scope, name); }
     public TaskMemory.Turn turn(String id, String message) {
         return turn(id, message, progress -> {});
     }
@@ -77,6 +114,11 @@ public final class FinanceAgent {
         load(id);
         if (update == null || !enterprise.equals(update.key().enterpriseId()))
             throw new DomainException(ErrorCode.PERMISSION_DENIED, "Selected enterprise required");
+        // A read-only agent can never be handed a write, whatever the user's own rights are.
+        if (agent != null && !agent.allows(AgentDirectory.WRITE_TOOL))
+            throw new DomainException(ErrorCode.CAPABILITY_NOT_GRANTED, "This agent is not allowed to save");
+        if (effective != null && effective.disabledTools().contains(AgentDirectory.WRITE_TOOL))
+            throw new DomainException(ErrorCode.CAPABILITY_DISABLED, "Saving is switched off");
         var authorization = InvoiceWriteService.authorizeExplicitRequest(session, id, operationId, update, explicitIntent);
         return memory.continueTask(session, enterprise, id, message, runtime,
                 new AgentRuntime.ApprovedWrite(id, operationId, update, authorization), progress);

@@ -13,7 +13,15 @@
 
 未抑制漏洞时退出码为 1；`scripts/osv_suppressions.json` 中的每条抑制都必须写明原因。
 
-## 当前结果（2026-11-06）
+## 当前结果（2026-11-18，T29 新增文件解析依赖后）
+
+- 新增 Apache POI `5.5.1`（poi-ooxml，含 xmlbeans、commons-compress 等传递依赖）与 PDFBox `3.0.8`，运行时依赖由 35 个增至 51 个。
+- 已升级到修复版本：commons-lang3 `3.18.0`（Spring Boot 3.5.16 默认 `3.17.0`，命中 GHSA-j288-q9x7-2f5v，经 commons-compress 传递引入）。
+- 0 个未抑制漏洞；2 个已抑制（同下）。
+- **待复查**：GHSA-j9f9-w8pj-32f8 的抑制理由写的是“未暴露 SSE 端点”，但 T22 已合并 `POST /api/demo/tasks/{id}/turn/stream`（SSE）。理由已不成立，需重新评估是否仍接受该风险；本次未改抑制文件。
+- 运行方式：scratchpad 中 JDK 21 执行 `mvn dependency:list -DincludeScope=runtime` 后运行 `scripts/osv_scan.py`，退出码 0。
+
+## 历史结果（2026-11-06）
 
 - 扫描 35 个 Maven runtime 依赖。
 - 已升级到修复版本：

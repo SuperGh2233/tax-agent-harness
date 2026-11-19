@@ -15,6 +15,8 @@ public final class DemoSecurity extends OncePerRequestFilter {
     static final String CSRF = DemoSecurity.class.getName() + ".csrf";
     static final String PRINCIPAL = DemoSecurity.class.getName() + ".principal";
     private static final long MAX_BODY_BYTES = 64 * 1024;
+    // File uploads only: 10 MB of content plus multipart overhead. A length must be declared.
+    private static final long MAX_UPLOAD_BYTES = 10L * 1024 * 1024 + 64 * 1024;
     private static final int MAX_REQUESTS_PER_MINUTE = 600;
     private static final ConcurrentHashMap<String, long[]> RATE = new ConcurrentHashMap<>();
     static String token(HttpSession session) {
@@ -47,7 +49,9 @@ public final class DemoSecurity extends OncePerRequestFilter {
                 || req.getHeader("X-Forwarded-Host") != null || "cross-site".equals(req.getHeader("Sec-Fetch-Site"))) {
             reject(res, "LOOPBACK_REQUIRED"); return;
         }
-        if (req.getContentLengthLong() > MAX_BODY_BYTES) { reject(res, "REQUEST_TOO_LARGE", 413); return; }
+        boolean upload = "POST".equals(req.getMethod()) && "/api/demo/files".equals(req.getRequestURI());
+        if (upload && req.getContentLengthLong() < 0) { reject(res, "LENGTH_REQUIRED", 411); return; }
+        if (req.getContentLengthLong() > (upload ? MAX_UPLOAD_BYTES : MAX_BODY_BYTES)) { reject(res, "REQUEST_TOO_LARGE", 413); return; }
         if (!rateAllows(req.getRemoteAddr())) { reject(res, "RATE_LIMITED", 429); return; }
         String origin = req.getHeader("Origin");
         if (origin != null) {

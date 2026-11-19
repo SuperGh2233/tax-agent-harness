@@ -6,6 +6,7 @@
 |---|---|---|
 | [开发交接说明](agent-handoff.md) | current | 当前 Git 工作区、测试证据、未完成事项和接手顺序 |
 | [BUSINESS_CONTRACT.md](BUSINESS_CONTRACT.md) | completed | T01 冻结业务边界，只读保留原路径 |
+| [FINAL_ROUND_CONTRACT.md](FINAL_ROUND_CONTRACT.md) | completed | 复赛契约修订（2026-11-18 批准）：替代/保留的初赛条款、新增约束与已定事项；与初赛契约冲突时以此为准 |
 | [T02 计划](plans/active/PLAN-20261029-backend-bootstrap.md) | completed | 后端骨架目标、验收和风险，保留原路径 |
 
 任务执行证据见根目录 TASKS.md，启动见 README.md。新增文档按类型存放，本次不重组冻结契约。

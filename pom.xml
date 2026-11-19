@@ -20,6 +20,8 @@
         <jackson-bom.version>2.21.7</jackson-bom.version>
         <tomcat.version>10.1.59</tomcat.version>
         <log4j2.version>2.25.5</log4j2.version>
+        <!-- OSV fix: GHSA-j288-q9x7-2f5v (commons-lang3 < 3.18.0, transitive via POI's commons-compress). -->
+        <commons-lang3.version>3.18.0</commons-lang3.version>
     </properties>
     <dependencies>
         <dependency>
@@ -31,6 +33,17 @@
             <artifactId>sqlite-jdbc</artifactId>
             <version>3.53.4.0</version>
             <scope>runtime</scope>
+        </dependency>
+        <!-- T29 file processing: Excel (xls/xlsx) and Word (docx) via POI, text PDF via PDFBox. -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.5.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.8</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

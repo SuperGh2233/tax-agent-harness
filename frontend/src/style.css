@@ -1357,3 +1357,71 @@ body:has(.dialog) {
   font-size:11px;
   color:#c9d4e8
 }
+
+/* T29b source files page */
+.files-page .hint { color:var(--muted); font-size:12px; margin:8px 0 }
+.files-page h2 { font-size:14px; color:#c7d5eb; margin:0 0 12px }
+.upload-form { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px }
+.upload-drop { position:relative; flex:1 1 320px; display:flex; align-items:center; gap:12px; padding:16px 18px;
+  border:1px dashed var(--border); border-radius:10px; color:#a9b6cc; cursor:pointer }
+.upload-drop:focus-within, .upload-drop:hover { border-color:var(--accent) }
+.upload-drop span { display:grid; gap:2px; min-width:0 }
+.upload-drop strong { font-weight:600; overflow-wrap:anywhere; color:#e5e8ef }
+.upload-drop small { color:var(--muted); font-size:11px }
+.upload-drop input { position:absolute; inset:0; opacity:0; cursor:pointer }
+.upload-drop input:disabled { cursor:not-allowed }
+.upload-drop:has(input:disabled) { opacity:.55; border-style:solid }
+.upload-result { margin:22px 0; padding:16px 18px; border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:8px }
+.upload-result.rejected { border-left-color:#d9705f }
+.upload-result.duplicate { border-left-color:var(--muted) }
+.upload-result p { margin:0 0 10px; line-height:1.7 }
+.issue-list { margin-top:8px; font-size:12px }
+.issue-list ul { margin:8px 0 0; padding:0; list-style:none; display:grid; gap:4px }
+.issue-list li { display:flex; gap:10px; flex-wrap:wrap }
+.issue-list code, .file-detail code { color:#a9c6fd; font-size:11px }
+.file-list { margin-top:28px; overflow-x:auto }
+.file-list table { width:100%; border-collapse:collapse; font-size:12px; min-width:560px }
+.file-list th { text-align:left; color:var(--muted); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border) }
+.file-list td { padding:10px; border-bottom:1px solid var(--border); vertical-align:top; overflow-wrap:anywhere }
+.file-list td small { display:block; color:var(--muted); font-size:10px }
+.file-detail { margin-top:28px }
+.file-detail ol { margin:0; padding:0; list-style:none; display:grid; gap:6px; font-size:12px }
+.file-detail li { display:grid; grid-template-columns:minmax(90px,160px) minmax(0,1fr); gap:12px; padding:6px 0; border-bottom:1px solid var(--border) }
+.file-detail li span { overflow-wrap:anywhere; white-space:pre-wrap }
+@media (max-width:640px) {
+  .file-detail li { grid-template-columns:1fr; gap:2px }
+}
+.knowledge-state { display:inline-block; font-size:11px; margin-right:6px }
+.knowledge-state.on { color:#8fd3a8 }
+.knowledge-state.off { color:var(--muted) }
+/* T30 agents page */
+.agent-picker { display:flex; align-items:center; gap:8px; margin:12px 0 0; font-size:12px; color:var(--muted) }
+.agent-picker select { max-width:280px }
+.inline-icon { display:inline; vertical-align:-2px }
+.agents-page h2 { font-size:15px; color:#c7d5eb; margin:0 }
+.agent-list { display:grid; gap:14px; margin-top:20px }
+.agent-card { border:1px solid var(--border); border-radius:10px; padding:16px 18px }
+.agent-card.disabled { opacity:.6 }
+.agent-card header { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap }
+.agent-card small { color:var(--muted); font-size:11px }
+.agent-card p { margin:10px 0 }
+.agent-card dl { display:grid; grid-template-columns:70px minmax(0,1fr); gap:6px 12px; font-size:12px; margin:0 0 8px }
+.agent-card dt { color:var(--muted) }
+.agent-card dd { margin:0; overflow-wrap:anywhere }
+.agent-card .prompt { white-space:pre-wrap }
+.rule-chip.write { border-color:#d9a55f; color:#f0c88a }
+.agent-history { margin:8px 0 0; padding-left:18px; font-size:12px; color:var(--muted) }
+.agent-form { border:1px solid var(--accent); border-radius:10px; padding:16px 18px; margin-top:12px }
+.agent-form fieldset { border:1px solid var(--border); border-radius:8px; padding:10px 12px; display:grid; gap:6px }
+.agent-form legend { font-size:12px; color:var(--muted); padding:0 6px }
+.agent-form-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px }
+@media (max-width:640px) { .agent-card dl { grid-template-columns:1fr } }
+/* T31 capabilities page */
+.rule-chip.off { opacity:.6; text-decoration:line-through }
+.skills-section { margin-top:32px }
+.capabilities-page .file-list td small { display:block }
+.agents-page .page-heading .button { white-space:nowrap; flex-shrink:0 }
+/* T33 memory list */
+.memory-row { display:grid; gap:4px; padding:8px 0; border-bottom:1px solid var(--border) }
+.memory-row.overridden { opacity:.6 }
+.memory-row p { margin:0; overflow-wrap:anywhere }

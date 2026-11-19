@@ -62,7 +62,8 @@ class ToolContractTest {
 
     @Test void purposeScopeAndStateRuleValidation() {
         new PurposeCheck("C001", "2026-09");
-        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> new PurposeCheck("C001", "2026-08"));
+        new PurposeCheck("C001", "2026-08"); // Applicability is decided by stored rules, not the DTO.
+        fails(ErrorCode.INVALID_ARGUMENT, () -> new PurposeCheck("C001", "2026-13"));
         fails(ErrorCode.INVALID_ARGUMENT, () -> new StateRequest("C001", StateAction.PUT, "task1", null));
         fails(ErrorCode.INVALID_ARGUMENT, () -> new StateRequest("C001", StateAction.DELETE, null, null));
         fails(ErrorCode.INVALID_ARGUMENT, () -> new StateRequest("C001", StateAction.GET, null, "x"));

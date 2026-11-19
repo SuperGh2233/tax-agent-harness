@@ -149,8 +149,9 @@ class FinanceAgentIntegrationTest {
         assertThat(secondModel.requests.getFirst().tools()).extracting(Tool::name).doesNotContain("update_invoice");
         var writeSchema = secondModel.requests.get(1).tools().stream()
                 .filter(t -> t.name().equals("update_invoice")).findFirst().orElseThrow().parameters();
-        assertThat(writeSchema.at("/properties/key")).isEqualTo(ToolContract.schema().at("/$defs/InvoiceKey"));
-        assertThat(writeSchema.at("/properties/changes")).isEqualTo(ToolContract.schema().at("/$defs/InvoiceUpdate/properties/changes"));
+        // The model decides only whether to save; the payload is the trusted approval.
+        assertThat(writeSchema.path("properties").isEmpty()).isTrue();
+        assertThat(writeSchema.path("additionalProperties").asBoolean(true)).isFalse();
         assertThat(writeSchema.toString()).doesNotContain("$ref", "authorization", "user_id");
         var restarted = agent("U001", enterprise, new FakeLlmClient(check(enterprise), new Ask("继续补其余用途")));
         assertThat(restarted.load(task.id()).task()).isEqualTo(saved.task());
@@ -194,7 +195,9 @@ class FinanceAgentIntegrationTest {
         var task = agent.start("保存指定发票", List.of());
         var turn = agent.approvedTurn(task.id(), "现在保存", "missing", update("C001"), SAVE_NOW);
         failed(turn, "WRITE_NOT_EXECUTED");
-        assertThat(turn.result().text()).isEqualTo("本次请求未成功完成：WRITE_NOT_EXECUTED");
+        // T36: the reply states the real data state, not just the code.
+        assertThat(turn.result().text()).startsWith("本次请求未成功完成：WRITE_NOT_EXECUTED。")
+                .contains("本轮没有修改任何发票").doesNotContain("已写入", "已保存", "verified\":true");
         assertThat(turn.result().history()).isEmpty();
         assertThat(agent.load(task.id()).task().status()).isEqualTo(TaskMemory.Status.ACTIVE);
         assertThat(ledgerCount()).isZero();
@@ -204,6 +207,45 @@ class FinanceAgentIntegrationTest {
         var agent = agent("U001", "C001", new FakeLlmClient(new Finish("查询说明完成")));
         var task = agent.start("查询说明", List.of());
         assertThat(agent.turn(task.id(), "说明查询能力").task().status()).isEqualTo(TaskMemory.Status.COMPLETED);
+    }
+
+    @Test void modelSearchesKnowledgeWithSourcesAndCannotLeaveTheTaskEnterprise() throws Exception {
+        var search = new Call("k1", "search_knowledge",
+                "{\"enterprise_id\":\"C001\",\"query\":\"银行记录能证明发票已付款吗\",\"date\":\"2026-09-15\",\"limit\":3}");
+        var model = new FakeLlmClient(search, new Finish("依据《银行资料说明》1.0 版，银行记录不能证明已付款。"));
+        var agent = agent("U001", "C001", model);
+        var turn = agent.turn(agent.start("规则问答", List.of()).id(), "银行记录能证明发票已付款吗");
+        assertThat(turn.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        var hit = data(turn, 0).path("hits").get(0);
+        assertThat(hit.path("source_kind").asText()).isEqualTo("RULE");
+        assertThat(hit.path("source_id").asText()).isEqualTo("R004");
+        assertThat(hit.path("version").asText()).isEqualTo("1.0");
+        assertThat(hit.path("location").asText()).startsWith("第");
+        assertThat(model.requests.getFirst().tools()).extracting(Tool::name).contains("search_knowledge");
+        var foreign = agent("U001", "C001", new FakeLlmClient(new Call("k2", "search_knowledge",
+                "{\"enterprise_id\":\"C002\",\"query\":\"用途规则\"}"), new Finish("x")));
+        failed(foreign.turn(foreign.start("跨企业", List.of()).id(), "查乙企业资料"), "PERMISSION_DENIED");
+    }
+
+    @Test void approvedTurnSavesTrustedPayloadFromEmptyArguments() throws Exception {
+        var update = update("C001");
+        var agent = agent("U001", "C001", new FakeLlmClient(new Call("save", "update_invoice", "{}"),
+                query("query_invoices", "C001", "2026-09"), new Finish("已回查")));
+        var task = agent.start("保存 F002", List.of("F002.purpose", "F002.remarks"));
+        var saved = agent.approvedTurn(task.id(), "保存 F002", "empty-args", update, SAVE_NOW);
+        assertThat(saved.result().status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(data(saved, 0).path("verified").asBoolean()).isTrue();
+        assertThat(data(saved, 0).path("purpose").asText()).isEqualTo("办公室实际采购");
+        assertThat(data(saved, 0).path("remarks").asText()).isEqualTo("用户核对");
+        assertThat(saved.task().pending()).isEmpty();
+        assertThat(ledgerCount()).isEqualTo(1);
+    }
+
+    @Test void emptyWriteArgumentsWithoutApprovalNeverWrite() throws Exception {
+        var agent = agent("U001", "C001", new FakeLlmClient(new Call("save", "update_invoice", "{}"), new Finish("模型宣称保存成功")));
+        var task = agent.start("用途信息不是授权", List.of());
+        failed(agent.turn(task.id(), "直接保存"), "CONFIRMATION_REQUIRED");
+        assertThat(ledgerCount()).isZero();
     }
 
     @Test void forgedVerificationInApprovedToolArgumentsCannotComplete() throws Exception {

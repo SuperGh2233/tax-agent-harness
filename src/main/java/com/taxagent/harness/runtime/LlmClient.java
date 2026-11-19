@@ -10,10 +10,41 @@ public interface LlmClient {
     Decision next(Request request) throws Exception;
     /** The static system prompt is part of the exact model input trace; never contains secrets. */
     default String systemPrompt() { return ""; }
+    /**
+     * The same client for one configured agent (T30): its role text is appended after the fixed system prompt and
+     * can never replace it; model, when given, replaces this profile's model name. Fakes only record the prompt.
+     */
+    default LlmClient forAgent(String role, String model) {
+        var base = this;
+        return new LlmClient() {
+            public Decision next(Request request) throws Exception { return base.next(request); }
+            public String systemPrompt() { return base.systemPrompt() + role; }
+        };
+    }
+
+    /**
+     * T36: every provider adapter gives a malformed reply exactly one corrective retry with this note, then fails
+     * with MODEL_RESPONSE_INVALID. The runtime itself never retries the model.
+     */
+    String CORRECTION = "上一次回复无法被解析。请严格遵守：没有工具调用时只输出 JSON "
+            + "{\"kind\":\"ask\" 或 \"finish\",\"text\":\"...\"}；"
+            + "单轮工具调用不得超过 8 个；需要更多月份时先追问，不要一次并行发起。";
+    /** T36: the same sanitized code for the same HTTP failure, whichever provider protocol is in use. */
+    static String httpFailure(int status) {
+        if (status == 401 || status == 403) return "MODEL_AUTH_FAILED";
+        if (status == 429) return "MODEL_RATE_LIMITED";
+        return "MODEL_HTTP_ERROR";
+    }
 
     record Tool(String name, JsonNode parameters) {}
-    record Exchange(Call call, String resultJson, long durationMs) {
-        public Exchange(Call call, String resultJson) { this(call, resultJson, 0); }
+    /**
+     * resultJson is the full tool result: evidence for the UI, task memory and verification. modelJson (T34), when
+     * set, is the compacted view actually sent to the model for a result too large to replay whole.
+     */
+    record Exchange(Call call, String resultJson, long durationMs, String modelJson) {
+        public Exchange(Call call, String resultJson) { this(call, resultJson, 0, null); }
+        public Exchange(Call call, String resultJson, long durationMs) { this(call, resultJson, durationMs, null); }
+        public String forModel() { return modelJson == null ? resultJson : modelJson; }
     }
     record Request(String userMessage, List<Tool> tools, List<Exchange> history) {
         public Request { tools = List.copyOf(tools); history = List.copyOf(history); }

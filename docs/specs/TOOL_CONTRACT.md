@@ -28,7 +28,9 @@ JSON 字段使用 snake_case；必填字符串非空，未知字段拒绝。月�
 |---|---|---|
 | query_invoices | Query(enterprise_id, month) | InvoiceResult：rows、total_cents；每行 Invoice 含 key(enterprise_id, invoice_id)、invoice_date、seller、item、amount_cents、purpose、remarks |
 | query_bank_entries | Query(enterprise_id, month) | BankResult：rows、income_cents、expense_cents；BankEntry 含 key(enterprise_id, entry_id)、transaction_date、direction(收入/支出)、amount_cents、counterparty、remarks |
-| check_invoice_purpose | PurposeCheck(enterprise_id, month)，仅 2026-09 | PurposeResult：missing 发票复合键列表、rules 规则引用(name/id/version)列表；有效版本筛选和计算留 T06 |
+| check_invoice_purpose | PurposeCheck(enterprise_id, month)，月份 yyyy-MM；按每张发票日期当日启用的用途规则判断（T28，复赛契约 A2） | PurposeResult：missing 发票复合键列表、rules 规则引用(name/id/version)列表；有效版本筛选和计算留 T06 |
+| search_knowledge（T32） | KnowledgeQuery(enterprise_id, query ≤200 字, date 可选（缺省为当天）, limit 1–10 可选，缺省 5) | KnowledgeResult：hits 列表（source_kind RULE/FILE、source_id、source_name、version、location、text ≤400 字、score）与 searched_segments。只检索当前企业在该日期启用且已生效的规则，以及上传文件中每个文件名的最新版本且“作为知识”启用的分段；停用规则、停用文件和旧版本不检索、不回退。字符二元组 BM25，查询与文档同用一份小型财税同义词表归一化；无命中返回空列表 |
+| recall_context（T34） | RecallQuery(source TURN/TOOL_RESULT/FILE；TURN 只带 seq ≥1；TOOL_RESULT 只带 call_id，可选 offset ≥0、limit 1–50（缺省 20）；FILE 带 file_id + location，可选 limit 1–3 前后相邻段（缺省 1）)。无 enterprise_id/task_id：绑定当前任务与企业，未绑定任务时不提供 | RecallResult：source、reference（`#seq` / call_id / `文件名 vN · 位置`）、content（轮次与文件原文 ≤4000 字，工具结果 ≤12000 字）、total/offset/returned、note。只读；每次经 TaskMemory/FileService 重新校验访问；他人任务、其他企业、停用文件一律 NOT_FOUND。工具结果分页保持原行序，合计字段仍是全部行的程序计算结果；取回内容不是当前数据库事实，业务数据须重新查询 |
 | query_rules | RuleQuery(enterprise_id, date) | RuleQueryResult：rules 列表，每项 key(rule_id, version)、name、effective_from、status、content；仅当前企业、指定日期启用且已生效的版本 |
 | update_invoice | InvoiceUpdate(key, changes) | UpdateResult(key, purpose, remarks, verified)；verified 仅真实保存并回读一致后为 true |
 | task | StateRequest(enterprise_id, action, id, content) | StateResult(id, content)；action=GET/PUT/DELETE，GET 的 id 可空表示当前未完成任务；其余必填；PUT content 必填，其他不得带 content |
@@ -49,7 +51,7 @@ changes 为非空 Map<string,string>，仅允许 purpose、remarks；省略表�
 | AUTHENTICATION_REQUIRED | 无可信会话 |
 | PERMISSION_DENIED | 用户/企业未知或无权限、只读拒写、规则管理未授权 |
 | FIELD_NOT_ALLOWED | 发票更新含白名单外字段 |
-| UNSUPPORTED_SCOPE | 用途检查月份不是 2026-09 |
+| UNSUPPORTED_SCOPE | 某张发票日期（或无发票时该月首日）没有可执行的启用用途规则（T28 起；此前为“月份不是 2026-09”） |
 | CONFIRMATION_REQUIRED | 无精确用户修改授权（T09） |
 | NOT_FOUND | 已授权范围内目标不存在（后续执行器） |
 | CONFLICT | 任务唯一性、版本或幂等冲突（后续执行器） |
@@ -61,7 +63,7 @@ changes 为非空 Map<string,string>，仅允许 purpose、remarks；省略表�
 
 `InvoiceWriteService(Path)` 仅供可信后端调用，在指定既有库执行 `invoice-operations.sql` 增量建表，不导入业务记录。当前无启动注册、HTTP 或模型入口。可信入口核对真实用户指令后才调用 `authorizeExplicitRequest(session, operationId, update, intent)`：EXPLANATION 拒绝，SAVE_NOW 表示明确立即修改，CLEAR_NOW 还确认清空本次所有空白字段。禁止把此方法或 intent 暴露为模型工具；Authorization 构造器私有，不在 DTO 解码白名单。当前没有自然语言授权识别或生产认证链路，不能由模型自称已获授权。
 
-一次性对象绑定用户、企业、票据、精确 changes 和 operationId（即 idempotencyKey），尝试执行即消费；同一对象不能再次执行。字段仅 purpose/remarks，省略保留，空白原样保存但须明确清空授权；不新增备注必填或长度限制，拒绝异常控制字符及空白标识符。不从票面项目猜用途，允许低于门槛主动补充。内部执行范围仅 2026-09，其他月份 UNSUPPORTED_SCOPE，不推断历史规则。
+一次性对象绑定用户、企业、票据、精确 changes 和 operationId（即 idempotencyKey），尝试执行即消费；同一对象不能再次执行。字段仅 purpose/remarks，省略保留，空白原样保存但须明确清空授权；不新增备注必填或长度限制，拒绝异常控制字符及空白标识符。不从票面项目猜用途，允许低于门槛主动补充。内部执行范围仅 2026-09，其他月份 UNSUPPORTED_SCOPE，不推断历史规则。（T28 起按发票日期当日启用的用途规则执行，不限月份；“不推断历史规则”、停用不回退不变。）
 
 执行事务内复查 WRITE 权限、对象、当前启用规则，复用 T06 完整官方定义匹配；缺失/停用/未知正文或未知启用规则拒绝，多个用途版本 CONFLICT。SQLite 事务快照及写锁保证检查与写入一致，竞争失败不自动重试。`invoice_operations.operation_id` 全库唯一，台账绑定用户/企业/票据/规范化 payload 及实际 purpose/remarks，与更新原子提交。已有值相同只记操作、不 UPDATE；同键同内容仅查询台账和实际值，不重复更新；不同内容或归属 CONFLICT。后续实际值偏离台账也 CONFLICT，不覆盖后续修改。
 
@@ -71,7 +73,7 @@ changes 为非空 Map<string,string>，仅允许 purpose、remarks；省略表�
 
 `RuleService` 的服务层查询仍为 `queryRules(session, enterprise, date)`；P1 追加的 `query_rules` 只读模型工具复用同一查询，仅返回当前企业、指定日期启用且已生效的规则，不返回停用历史。
 
-确定性用途执行仅支持官方 R002 2.0 / R003 1.0，完整定义必须匹配已核对种子中的语义基线；当前状态与关联以 DB 为准，停用绝不回退。缺失/未知正文或版本为 UNSUPPORTED_SCOPE，同一用途规则多个启用版本适用为 CONFLICT，不推定官方未定义的版本优先级。用途月份仍仅 2026-09。
+确定性用途执行从已存规则选择（T19、T25 起；复赛契约 A3）：某规则编号在该企业任一已存版本正文含“必须填写用途”即为用途规则，取其在该日期唯一启用版本，并只解析“每张发票都必须填写用途”与“大于或等于X元…必须填写用途”两种表述。当前状态与关联以 DB 为准，停用绝不回退。矛盾、缺失或无法解析的正文为 UNSUPPORTED_SCOPE；同一用途规则多个启用版本、或多个用途规则编号同时启用为 CONFLICT，不推定官方未定义的优先级。用途检查不限月份，每张发票按其日期选规则，月中生效的版本只从其生效日起适用（T28）。
 
 普通 Session 的管理全部拒绝（包括 U001），PermissionGuard 保持不变。仅可信本地代码显式创建 ManagementContext 可调用 importVersion/disableVersion；不得从模型、HTTP 或自然语言构造此上下文，当前无入口签发它。它是本地管理能力，不代表官方已定义管理员身份。导入事务原子保存规则及非空企业集合，未知企业/非法定义 INVALID_ARGUMENT、已存在版本 CONFLICT；更新使用新版本，保留旧正文。停用针对全局版本及其所有企业关联，保留正文与历史记录；目标缺失 NOT_FOUND。SQL 失败回滚并返回 STORAGE_ERROR。无数据库迁移。
 

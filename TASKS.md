@@ -429,3 +429,149 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - **脚本原句错误**：面板按 id 倒序，写入成功后系统还会追加「查询核对（query_invoices）」和「本轮结束（turn FINISHED）」两条，工作台任务状态再追加两条，因此 `update_invoice · TOOL_RESULT` 实测在第 4～5 条，从不是第一条。证据：`/tmp/taxagent-test-AXRSwm/test.db` 中 id 61 = `update_invoice/TOOL_RESULT/fields=purpose/verified=1`，紧随其后 62=`query_invoices`、63=`turn/FINISHED`、64/65=`tasks`。
 - 已改 `DEMO_SCRIPT.md`：3:30 段落改为「按倒序找第 4～5 条」，补实测顺序表（5 行）与自查条件「列表里完全没有 update_invoice 行 = 这次没有真正写入，不得指着别的行说已保存」。
 - 附带发现（未改代码）：用裸 HTTP 直接构造批准轮（`/tasks/{id}/turn` + approval）连续两次返回 `CONFIRMATION_REQUIRED`，模型 `update_invoice` 参数与批准值不严格相等即被 fail-closed 拒；UI 路径历史上可成功（库中已有 TOOL_RESULT 记录）。录制前建议走一遍真实浏览器全链路确认。
+
+### T25 — 用途规则按存储规则选择，去除企业→规则编号硬编码（2026-11-18）
+- 状态：DONE；认领人：Coding Agent。依据用户指示，为复赛“未公开的数据组合、规则变化”做准备。
+- 范围：仅 `RuleService.purposeRule` 与 `RuleServiceTest`。不改 2026-09 月份限制（冻结契约 `BUSINESS_CONTRACT.md` 第 87/161 行明确要求，需用户另行决定），不改工具契约、种子或前端。
+- 实现：`purposeRule` 删除 `C001→R002 / C002→R003` 映射。某规则编号只要在该企业任一已存版本正文中含“必须填写用途”即视为用途规则，再取其在该日期唯一启用版本；改写措辞的后续版本仍被拒绝（UNSUPPORTED_SCOPE），停用不回退，同编号多启用版本或多个用途规则编号同时启用均为 CONFLICT。写入前检查 `requireSupportedWriteRules` 复用同一选择逻辑。
+- 新增测试 2 项：新企业 C003 + 自有规则 R107（≥500.01 元）可执行并引用 R107；C002 换用新编号 R203 后生效；R002 与 R005 同时启用为 CONFLICT，R001/R004 不被当作用途规则。
+- 验证：JDK 21.0.13、Maven 离线，`RuleServiceTest` 13/13；全量后端 254/0/0/0（在 scratchpad 本地副本运行，因 /mnt 挂载盘编译极慢；源文件与工作树一致）。前端未改，未跑。
+- 未改：2026-09 月份限制（冻结契约）、`docs/specs/TOOL_CONTRACT.md` 第 74 行“仅支持官方 R002 2.0 / R003 1.0”的旧描述（T19 起已不准确，属已 DONE 任务的规格文档，待用户决定是否更新）。未提交/未推送。
+
+### T26 — 批准轮保存载荷由程序生成，模型只决定是否保存（2026-11-18）
+- 状态：DONE；认领人：Coding Agent。依据用户指示。背景：T24 记录批准轮因模型 `update_invoice` 参数与批准值不严格相等而连续 `CONFIRMATION_REQUIRED`。
+- 范围：`AgentRuntime`（批准轮写工具无参数，执行可信批准载荷）、`TaskMemory.remainingPending`、`DemoController` 审计字段来源、两个客户端系统提示及相应测试。不改写服务、授权、台账、证据门与前端。
+- 实现：批准轮发布的 `update_invoice` 改为无参数 schema（`properties:{}`、`additionalProperties:false`）；`AgentRuntime.approvedUpdate` 对 `{}` 直接执行可信 `ApprovedWrite.update()`。兼容旧式完整载荷：仍严格解码（伪造 `verified`/`authorization` 等字段 → INVALID_ARGUMENT），且必须与批准完全相等，否则 CONFIRMATION_REQUIRED；无批准时一律 CONFIRMATION_REQUIRED、零写入。批次内写入仍拒绝，证据门、一次性授权、台账幂等、事务回读均未改。
+- 连带：`TaskMemory.remainingPending` 不再解码模型参数，改以本轮 verified 结果的键与各字段值对齐批准为证据；`DemoController` 审计在批准写入时从可信批准取 `invoice_id`/`fields`（保持 `fields=purpose` 演示口径）；两个客户端系统提示补充“批准轮以空参数 {} 调用，由服务端保存已批准的精确修改”（保留 `OpenAiResponsesClientTest` 断言的原短语）。模型历史中的调用参数保持原样（两客户端续接校验要求回放与模型原始参数一致）。
+- 新增测试 3 项：空参数批准写入 verified、用途/备注与批准一致、待补字段清空、台账 1 行；无批准空参数 CONFIRMATION_REQUIRED 零写入；API 层空参数写入的审计记录 `invoiceId=F002`、`fields=purpose` 且无明文用途。更新 1 项：写工具 schema 断言改为无参数。
+- 验证：JDK 21.0.13 离线全量后端 257/0/0/0（scratchpad 副本，`diff -rq src` 与工作树一致）。前端未改、未跑。**真实模型（qwen3.7-flash）未复测**：需在浏览器重走一次受控保存，确认模型按新提示以 `{}` 调用；旧式完整载荷仍兼容。未提交/未推送。
+
+### T27 — 复赛契约修订草案（2026-11-18）
+- 状态：DONE（草案）；认领人：Coding Agent。依据用户指示，读取 `赛题二：财税Agent Harness系统设计与实现复赛要求.zip`（PDF 3 页，SHA-256 见草案）后起草。
+- 产出：`docs/FINAL_ROUND_CONTRACT.md`（状态：草案，待用户批准）；`docs/index.md` 新增一行。未修改 `docs/BUSINESS_CONTRACT.md`、`AGENTS.md`、`CLAUDE.md`、`TOOL_CONTRACT.md` 及官方材料。
+- 批准：用户 2026-11-18（“approved, use your defaults”），六项待确认按默认值确定；截止时间与大小限制仍未知。
+- 同步：草案改为已批准；`docs/index.md` 状态 completed；`AGENTS.md`、`CLAUDE.md` 硬约束指向复赛契约；`TOOL_CONTRACT.md` 第 31/52/64 行加 A2 注记（代码仍限 2026-09，未假装已取消），第 74 行改写为 T19/T25 后的实际行为；下方拆分 T28–T37。未改 `BUSINESS_CONTRACT.md` 与官方材料。未提交/未推送。
+
+## 复赛任务池（依据 `docs/FINAL_ROUND_CONTRACT.md`，2026-11-18 拆分）
+
+每项先认领再实施，一次一项；验收须实际运行，真实模型验证与自动化测试分开记录。建议顺序：T28 → T29 → T30 → T31 → T32，其余可并行。截止时间未知，按主办方通知调整。
+
+### T28 — 取消用途检查月份硬限制（契约 A2）
+- 状态：DONE（2026-11-18，Coding Agent）。范围：`ToolContract` PurposeCheck 月份校验、`RuleService.requireSupportedWriteRules`、`InvoiceWriteService` 内部 2026-09 范围、相应测试与系统提示。
+- 验收：官方基线（C001 九月 5 张、C002 3 张）不变；导入生效于 2026-10 的用途规则后十月检查可执行并引用该版本；8 月仍因无适用启用规则返回 UNSUPPORTED_SCOPE（停用 R002 1.0 不回退）；写入同样按日期选规则。
+- 实现：删除 `PurposeCheck` 的 2026-09 校验与 schema `const`（改为与 Query 相同的 yyyy-MM pattern）；删除 `requireSupportedWriteRules` 的月份判断。`checkInvoicePurpose` 改为每张发票按其日期当日的用途规则判断（与写入一致），按日期缓存；月内任一发票无适用规则即整体 UNSUPPORTED_SCOPE（不静默跳过）；无发票的月份按月首日引用规则或拒绝；返回本月实际用到的全部规则引用。`InvoiceWriteService` 原本即按发票日期调用，无需改。
+- 验收实测（自动化）：官方九月基线不变（C001 5 张、C002 3 张，`officialBaselineAndTraceableContent` 通过）。**8 月按企业区分**：C001 无适用启用规则 → UNSUPPORTED_SCOPE；C002 由 R003 1.0（生效 2026-08-01）覆盖，缺用途仅 F016（1000.01 元；F011/F018 为 999.99 元不必填）——此前为月份硬拒绝，现为依规则可执行，属 A2 预期行为变化。十月无发票时引用 R002 2.0、缺 0 张。R002 3.0 于 10-15 生效时 10-20 发票按 3.0 判断，10-05 发票无规则覆盖 → 整月拒绝。写入：C002 F016（8 月）verified，C001 F016（8 月）UNSUPPORTED_SCOPE 零台账新增。
+- 测试：新增 4 项（RuleService 2、InvoiceWriteService 1、Schema 用例 1），改 3 处旧断言（RuleService/ToolContract/ToolSchema 的 8 月拒绝）。JDK 21 离线全量后端 261/0/0/0（scratchpad 副本，`diff -rq src` 一致）。前端未改、未跑；真实模型未复测。
+- 同步：`CLAUDE.md`、`TOOL_CONTRACT.md` 第 31/52/64/74 行、`FINAL_ROUND_CONTRACT.md` 注记改为已实现。
+- 遗留设计问题（未改，待用户决定）：同一规则编号两个启用版本仍一律 CONFLICT（初赛契约“不推定版本优先级”）。因此“月中换版本”只能先停用旧版，导致新版生效前的同月发票无规则覆盖而被拒。若复赛要支持无缝换版，需在复赛契约中明确优先级（如“同编号取生效日最晚的启用版本”）。未提交/未推送。
+
+### T29 — 文件上传与解析（契约 B1–B3，“文件处理”）
+- 状态：DONE（2026-11-18，Coding Agent）。拆为 T29a 后端（存储、解析、导入、API、测试）与 T29b React 上传面板，两部分均已完成；已知缺口见 T29a 末条。
+- T29a 实现：
+  - 依赖：POI 5.5.1（xls/xlsx/docx）、PDFBox 3.0.8（文字型 PDF）；commons-lang3 覆盖为 3.18.0（OSV）。
+  - 存储 `file-store.sql`（`FileService` 构造时可加迁移）：`uploaded_files`（企业、名称、版本、SHA-256、类型、大小、上传者、时间、原文 BLOB；`UNIQUE(enterprise_id,sha256)` 防重，`UNIQUE(enterprise_id,name,version)`；触发器禁止 UPDATE/DELETE）、`file_chunks`（带位置的文本段）、`record_sources`（导入记录 → 文件与“工作表!第N行”）。
+  - `FileService.upload`：先检查 WRITE 权限，再按扩展名＋文件头判定类型（不符即 UNSUPPORTED_SCOPE），解析成功才落库。同企业同内容 → DUPLICATE 零新增；同名不同内容 → 新版本，旧版保留。Excel 按**表头文字**定位发票/流水表（需同行含“发票编号＋开票日期”或“流水编号＋交易日期”，列名去括号与空白，支持常见别名），不依赖工作表位置；无“企业编号”列时归当前企业。行级：非法金额（超两位小数不四舍五入）、日期、方向、缺必填、文件内重复键 → 整个文件 REJECTED、零落库；其他企业行 → skipped（ENTERPRISE_MISMATCH）；已存在键 → conflicts（EXISTING_RECORD），**不覆盖**。所有非空行另存为可引用文本段。Word 按段落/表格行、PDF 按页与行号分段；无文字层 PDF → REJECTED（NOT_TEXT_PDF）。上传文档只作知识，不成为可执行规则。
+  - 兼容官方工作簿的 ISO 日期单元格（`t="d"`，POI schema 不支持）：解析前仅把工作表中该属性改写为字符串单元格，带 200MB 解压上限（此预处理绕过 POI 自身的 zip bomb 检查）。
+  - API：`POST /api/demo/files`（multipart，CSRF，按会话企业；同一用户/企业互斥锁；审计 `file-upload`）、`GET /api/demo/files`、`GET /api/demo/files/{id}`（段落及位置；他企业文件视同不存在）。`DemoSecurity`：仅该路径放宽到 10MB＋64KB，且必须声明 Content-Length（否则 411）；Spring multipart 上限 10MB/11MB 兜底。
+- T29a 验收实测（自动化）：官方 `02_示例数据.xlsx` 上传到新库为 C001 → 导入 0、冲突 44、跨企业跳过 44；**删除 C001 全部发票/流水后从该 Excel 重导：20 张发票、24 条流水，8/9 月行数与合计和种子完全一致，九月缺用途仍为 F002/F004/F003/F006/F009**，F011 来源 `发票!第6行`。改名重传同内容 → DUPLICATE；新版本与旧版并存；同内容可作为另一企业的文件；查看者上传两企业均 PERMISSION_DENIED；跨企业 detail → NOT_FOUND；伪装扩展名、txt、空文件、坏 zip 均拒绝；`../../etc/规则.pdf` 名称净化为 `规则.pdf`。新增 FileServiceTest 8 项、DemoApiTest 1 项（CSRF、411、413、查看者 403、审计）。JDK 21 全量后端 270/0/0/0；OSV 51 依赖 0 未抑制。
+- T29a 未完成 / 已知缺口：① 工具结果尚未带出来源位置（`record_sources` 已存，模型答复引用工作表/单元格需在 T32 或后续扩展 `query_invoices`）；② 文本段尚无检索工具（T32）；③ 上传不能新建企业：契约 A1 写了“导入新的合成企业”，但第 3 项已定上传不能新增用户/权限，无权限的企业不可用——如需新企业须经可信配置，二者措辞待用户确认；④ 仓库 `.m2/repository` 尚无 POI/PDFBox，按 README 离线构建前须先联网构建一次；⑤ `mvn package`（含前端）与真实模型未跑；⑥ SSE 抑制理由已失效，见 `DEPENDENCY_SECURITY.md`。未提交/未推送。
+- T29b 实现：顶部导航新增“资料文件”页（`FilesPage`）。选择文件 → “上传并解析”；结果区按服务端返回逐项说明（已导入 / 重复内容未新增 / 未导入），列出需修正的问题、同编号未覆盖、他企业未导入的行（工作表·行号·编号＋中文原因，最多 200 条）；文件列表显示名称、版本、类型、大小、上传者与时间；“查看内容”显示按原文位置分段的文本与 SHA-256 前缀。只读成员可浏览，上传控件禁用并说明原因。上传前客户端只做扩展名/空文件/10MB 预检，服务端仍全量校验；响应丢失时刷新列表并提示“结果未确认，重复上传相同内容不会产生新数据”，不自动重试。`api.ts` 新增类型、`upload()`（FormData，带 CSRF，不手设 Content-Type）、`files()`、`file(id)`、`describeUpload` 等纯函数与 4 个错误码文案。样式限定在 `.files-page` 下，表格在窄屏内部横向滚动。
+- T29b 验证：Node 22.23.5（官方校验和通过）在 scratchpad 副本 `npm ci` 后 `npm run verify`：typecheck、ESLint、Vitest **41/41**（新增 4 项）、vite build 均通过。用该构建打包 JAR（`-Dfrontend.skip=true`，JAR 内含新 bundle 与 POI/PDFBox），新建临时库、`127.0.0.1:18090`、未配置模型：
+  - 真实 HTTP（curl）：官方 Excel → IMPORTED、新增 0、冲突 44、跨企业跳过 44、152 段；改名重传 → DUPLICATE；官方规则 docx → 37 段；无 CSRF 403；11MB 文件 413 `REQUEST_TOO_LARGE`；查看者上传 403、可列出 2 个文件；库内仍为 40 张发票 / 48 条流水。
+  - 真实浏览器（Playwright 1.56.1 + Chromium headless）：选身份 → 资料文件 → 上传合成十月 Excel（F101、F102 新票＋一行伪造 F002）→ 页面显示“新增发票 2 张…1 条与已有记录同编号，未覆盖”，问题行 `发票 · 第6行 · F002`；查看内容显示 `发票!第5行` 带表头的分段；再次上传 → “重复内容，未新增”；切换只读成员上传控件禁用；390px 宽无横向溢出；控制台 0 错误。数据库核对：F101 123450 分、F102 260000 分及来源行已入库，F002 仍为 80000 分、原销售方、用途为空。
+  - 截图：`docs/evidence/ui-files-20261118-{1-files,2-uploaded,3-detail,4-viewer,5-phone}.png`（合成数据，截于“只读成员上传框变暗”样式修正之前；修正后已重跑 verify，未重新截图）。
+  - `frontend/dist`（gitignore，`scripts/package_offline.ps1` 依赖它）已替换为本次验证通过的构建，原为不含资料页的旧构建。
+- T29b 未做：拖放上传、上传进度条；真实模型下“上传后提问”的问答链路依赖 T32。范围：原入口上传 Excel / Word / 文字型 PDF；文件表记录上传者、企业、时间、内容哈希、版本；Excel 发票/流水导入业务表（只补缺失键，同键冲突逐条报告，不覆盖）；Word/PDF 分段入知识库并保留文件、版本、段落/页定位。只能写入上传者有修改权限的企业；不能新增用户/权限。
+- 验收：同一文件重复上传零新增；同名改内容为新版本且旧版可查；无权企业上传被拒；导入后金额查询正确并能指向工作表/单元格；越权或同键覆盖尝试有明确错误码与审计。
+
+### T30 — Agent 配置管理（契约 A5、B4，“Agent 管理”）
+- 状态：DONE（2026-11-18，Coding Agent）；真实模型未复测。范围：Agent 定义（名称、职责、提示词、模型配置引用、允许的 Tool/Skill/知识、适用企业）存于 SQLite 并可经原入口增改停用；运行时按会话选定 Agent；有效权限 = 用户权限 ∩ Agent 能力；配置变更只影响之后开始的轮次。
+- 验收：不改代码新增第二个只读 Agent 并生效；只读 Agent 收不到写工具，伪造调用被拒；进行中轮次不受配置变更影响；模型输入 trace 记录所用 Agent 与配置版本。
+- 实现：
+  - 存储 `agent-config.sql`：`agent_definitions`（id、version、JSON 定义、enabled、changed_by/at；触发器禁止 UPDATE/DELETE，编辑与启停都追加新版本，最高版本生效）；`task_agents`（任务 → Agent 绑定，T30 前的任务无记录即用默认 Agent）。`AgentDirectory` 构造时只播种一次默认 Agent `finance-assistant`（全部能力、全部企业、`default` 模型配置），重复迁移不改写。
+  - 定义（`Spec`）：名称、职责、提示词（≤4000 字）、模型配置名、可选模型名覆盖、能力（6 个工具的子集，禁止只有 `update_invoice`）、适用企业。修改需对会话企业及 Agent 覆盖的**每家**企业有修改权限，配置不能扩大用户权限。
+  - 运行：`FinanceAgent(…, ModelProfiles, Agent)`——提示词以 `[Agent id vN · 名称]` 头部追加在固定系统提示之后（“narrows, never overrides”），因此持久化的 `agent_trace.system_prompt` 即记录所用 Agent 与版本；工具 = Agent 能力 ∩ 运行时工具；无 `update_invoice` 时运行时不注入写服务、`approvedTurn` 在调用模型前 PERMISSION_DENIED；无 `search_knowledge` 时不注入检索服务。`DemoController` 每轮开始时按任务绑定解析当时版本（停用或不覆盖该企业 → PERMISSION_DENIED），本轮内不再变化。
+  - 模型配置 `ModelProfiles`：`default` = `LLM_*`，命名配置 = `LLM_<NAME>_*`；`LlmClient.forAgent(role, model)` 由两个真实客户端实现为带追加提示词与可选模型名的副本；未配置名称 → MODEL_NOT_CONFIGURED，不回退。`DemoConfiguration` 的 `LlmClient` bean 改为 `ModelProfiles` bean（`DemoApiTest` 相应改为取 `default` 配置，断言不变）。
+  - API：`GET /api/demo/agents`（Agent、模型配置名/是否已配置/模型名、可选能力；不含密钥与 endpoint）、`GET /agents/{id}/history`、`POST /agents {id, spec}`、`POST /agents/{id}/enabled {enabled}`（CSRF、互斥锁、审计 agent-save / agent-enable / agent-disable）；`POST /tasks` 可带 `agentId`（先校验可用再建任务并绑定）；`GET /tasks/{id}` 增加 `agent`。
+  - 前端：导航“Agent 配置”页（卡片显示能力、企业、模型配置、提示词与版本历史；操作员可新建 / 编辑为新版本 / 启停，表单先按服务端同样规则预检，新建时默认不勾选写能力；只读成员仅查看）；首页任务输入框下“由谁处理”选择（仅启用且覆盖当前企业的 Agent）；工作区标题显示绑定的 Agent 与版本。保存失败时表单保持打开，不丢输入。
+- 验收（自动化）：AgentConfigTest 7 项——默认 Agent 只播种一次；第二个只读 Agent 经配置创建、编辑为 v2、停用为 v3，历史 3/2/1，停用后 resolve 拒绝，表行不可改/删；查看者不能配置，任何人不能覆盖自己无修改权的企业，非法编号/未知能力/只写/超长提示词/非法配置名均拒绝，不覆盖 C002 的 Agent 在 C002 不可用；**只读 Agent 的批准保存在调用模型前即拒绝（模型零请求）**，普通轮伪造 `update_invoice` 不被发布且执行报错，台账 0；只含 query_rules 的 Agent 发给模型的工具只有 query_rules，调用 query_invoices → INVALID_ARGUMENT；Agent 头部、职责与提示词出现在系统提示中，命名配置 `SECOND` 实际被调用，未配置的 `MISSING` → MODEL_NOT_CONFIGURED；**本轮进行中修改为 v2 不影响本轮（仍可用 query_invoices），下一轮按 v2 只剩 query_rules 且头部为 v2**。DemoApiTest 新增 1 项（HTTP 列表/保存/绑定/只读拒绝批准保存/停用后拒绝/历史/审计/查看者 403）。全量后端 **286/0/0/0**；前端 Vitest **46/46**、typecheck、lint、build。
+- 验收（真实 JAR＋浏览器，未配置模型）：表单新建 finance-reader（写能力默认未勾选）→ 卡片 v1 · U001；首页选择该 Agent 建任务 → 工作区显示“只读查询员 v1”，首轮如实报 MODEL_NOT_CONFIGURED；库中 `task_agents` 绑定 finance-reader，持久化 trace 含 `[Agent finance-reader v1 · 只读查询员]`，工具为 5 个只读工具、无 update_invoice；控制台 0 错误。截图 `docs/evidence/ui-agents-20261118-{1-list,2-task}.png`。`frontend/dist` 已更新。
+- 未做 / 局限：真实模型未跑（提示词效果、命名配置的真实连通需用密钥联调）；“多 Agent 协作”（一个任务内由多个 Agent 分工、相互移交）未实现，目前是多 Agent 共存、按任务选择；Skill 概念与能力的独立版本/启停属 T31；Agent 页的企业选项沿用前端固定的 C001/C002 列表（与身份选择一致），服务端仍校验。未提交/未推送。
+
+### T31 — 能力注册、版本与启停（契约 B5，“能力组织与复用”）
+- 状态：DONE（2026-11-18，Coding Agent）；真实模型未复测。范围：Tool、Skill（可复用的提示/流程片段＋所需 Tool 组合）与知识资料统一登记版本和启停状态；同一能力可被多个 Agent 引用；停用后不发给模型、调用返回明确错误码。
+- 验收：同一 Tool 被两个 Agent 使用；停用一个 Tool 后两个 Agent 均不可用且有错误码；Skill 按任务组合 Tool；变更影响可在界面或 CLI 查看。
+- 实现：
+  - 存储（并入 `agent-config.sql`）：`tool_status`（全局工具启停历史，只追加，最新一行生效，无记录 = 启用）、`skill_definitions`（技能版本不可改，最高版本生效，启停亦为新版本）；触发器禁止 UPDATE/DELETE。`CapabilityRegistry` 构造时只播种一次两个示例技能（`purpose-gap-check` 用途缺口检查、`bank-evidence` 银行资料解释），未被 Agent 引用前不生效。
+  - 工具版本：代码内置契约版本（query_invoices / query_bank_entries / query_rules / search_knowledge 1.0；check_invoice_purpose 2.0（T28）；update_invoice 2.0（T26））。
+  - 组合规则：Agent 定义新增 `skills`（旧定义无该字段视为空，7 参构造保留）。每轮可用工具 = (Agent 工具 ∪ 启用技能的工具) ∩ 已启用工具；技能只能含查询工具，**保存能力只能直接授予 Agent**；技能说明以 `[Skill id vN · 名称]` 块追加在 Agent 角色之后，trace 因此记录所用技能版本；停用或缺失的技能不生效并列入 `droppedSkills`。快照在每轮开始时取（`FinanceAgent` 构造），与 T30 一致：修改从下一轮生效。
+  - 错误码：新增 `CAPABILITY_NOT_GRANTED`（HTTP 403）与 `CAPABILITY_DISABLED`（HTTP 409）。运行时：未知工具名仍 INVALID_ARGUMENT；已知但未授予 → NOT_GRANTED；已停用 → DISABLED（工具结果与本轮错误码均可见）；批量中的写工具/未知工具仍 CONFIRMATION_REQUIRED。批准轮：Agent 无保存能力 → NOT_GRANTED（T30 为 PERMISSION_DENIED，已改）、保存被全局停用 → DISABLED，均在调用模型前。
+  - 权限：工具开关与技能修改是全局的，需对**所有**企业有修改权限（U001）；查看只需当前企业读权限。
+  - API：`GET /api/demo/capabilities`（工具：版本/说明/状态/最后修改人/使用它的 Agent；技能：定义与使用者）、`POST /capabilities/tools/{name}/enabled`、`POST /capabilities/skills`、`POST /capabilities/skills/{id}/enabled`、`GET /capabilities/skills/{id}/history`（审计 tool-enable/disable、skill-save/enable/disable）；`GET /agents` 增加每个 Agent 的 `effective`（实际可用工具、被停用工具、生效与未生效技能）。
+  - 前端：导航“能力中心”页（工具表含版本、状态、使用者与启停；技能卡片含工具、使用者、说明、版本历史与新建/编辑/启停；知识区说明规则 CLI 与资料文件启停并可跳转）；全局启停前弹窗列出受影响的 Agent 与生效时机；Agent 表单可勾选技能，Agent 卡片显示技能与“实际可用”能力（被停用者划线标注，含来自技能的工具）。
+- 改动的既有断言（有意，语义更清楚）：`AgentRuntimeTest` 未暴露的 `update_invoice` → CAPABILITY_NOT_GRANTED（其余未知名称仍 INVALID_ARGUMENT）；`AgentConfigTest` 规则顾问调用 query_invoices → NOT_GRANTED、只读 Agent 批准保存 → NOT_GRANTED；`DemoApiTest` 同上（HTTP 仍 403）。
+- 验收（自动化）：CapabilityTest 5 项——query_rules 版本 1.0、使用者为两个 Agent；停用后两个 Agent 均不再收到该工具，调用返回 CAPABILITY_DISABLED，重新启用后恢复，状态历史 2 行且不可改/删；停用 update_invoice 后批准保存在调用模型前 CAPABILITY_DISABLED、台账 0；**无自有工具、只含技能的 Agent 恰好获得技能的 3 个工具，系统提示含技能块**；技能 v2 下一轮只剩 check_invoice_purpose 且提示为 v2；停用技能后下一轮工具为空、提示无技能块、`droppedSkills` 记录，历史 3/2/1；未授予调用返回 CAPABILITY_NOT_GRANTED；技能不能含 update_invoice、非法编号、无工具均拒绝，查看者不能改开关/技能，未知工具 NOT_FOUND，Agent 引用不存在的技能 INVALID_ARGUMENT，查看者可读注册表。全量后端 **291/0/0/0**；前端 Vitest **49/49**、typecheck、lint、build。
+- 验收（真实 JAR＋浏览器，未配置模型）：能力中心停用 query_rules，确认弹窗显示“将影响 1 个 Agent：finance-assistant…调用会返回 CAPABILITY_DISABLED；进行中的一轮不受影响”，`tool_status` 记 U001、审计 tool-disable REQUESTED+COMPLETED；表单新建只含技能 purpose-gap-check 的“用途检查员”，卡片“实际可用”为检查用途缺口、查询发票（query_rules 已停用）；以其建任务 → 持久化 trace 含 `[Skill purpose-gap-check v1 · 用途缺口检查]`，提供给模型的工具仅 check_invoice_purpose、query_invoices；控制台 0 错误。截图 `docs/evidence/ui-capabilities-20261118-{1-tools,2-agents}.png`（截于“技能来源工具的停用标注”与“刷新按钮不换行”两处小修正之前；修正后已重跑 verify）。`frontend/dist` 已更新。
+- 未做 / 局限：真实模型未跑；工具版本是代码内置的（随代码发布变更，不能在界面“升级”工具本身）；技能尚不能按任务临时挑选（通过选择不同 Agent 组合）；规则的增改停仍走 CLI（已有，T06/T19），界面只读说明。未提交/未推送。
+
+### T32 — 知识检索与溯源（“知识库策略”）
+- 状态：DONE（2026-11-18，Coding Agent）；真实模型未复测。范围：`search_knowledge` 只读工具，对启用的规则与知识分段做简单文本检索（允许 BM25/关键词，不强制向量库），返回来源文件、版本、位置；停用资料彻底排除。
+- 验收：同一问题 5 种问法召回同一依据；新版本导入后立即切换；停用资料从结果与模型输入中消失。
+- 实现：`KnowledgeService.search` + 只读工具 `search_knowledge`（`KnowledgeQuery` DTO、schema、`AgentRuntime` 单调用与批量预检、两个客户端系统提示、`DemoController` 审计白名单）。检索范围：当前企业在指定日期（缺省当天）启用且已生效的规则（按行分段）＋上传文件中每个文件名**最新版本**且“作为知识”启用的分段；停用规则、停用文件、旧版本不检索、不回退。算法：字符二元组＋英数词 BM25，查询与文档用同一份小型财税同义词表（酒店→住宿、出差→差旅、不超过/最多→上限、价税合计→金额等）与停用词归一化；同分保持原文顺序；片段 ≤400 字；无命中返回空列表，系统提示要求此时说明资料不足。`AgentRuntime` 未传入 `KnowledgeService` 时不发布、不执行该工具。
+- 知识启停：`file_knowledge_status`（无记录 = 启用，文件本身仍不可改）；`FileService.setKnowledgeEnabled`（需 WRITE，他企业文件 NOT_FOUND）；`POST /api/demo/files/{id}/knowledge {enabled}`（CSRF、互斥锁、审计 knowledge-enable/disable）。`StoredFile` 增加 `knowledgeEnabled`、`latest`。前端：文件列表显示“检索中 / 已停用 / 不检索（旧版本）”与启停按钮（仅操作员、仅最新版本）；检查器“上下文来源”新增“知识检索”栏，只取本轮成功的 search_knowledge 结果。
+- **修复 T29 遗留的跨企业泄露**：官方工作簿含 C002 的发票行与汇总行，原先作为 C001 文件的文本段存储，C001 的只读成员 U002（无 C002 权限）可经检索读到。现解析时跳过表格中企业编号为其他已存在企业的行，以及任一单元格等于其他企业编号的行；仅在说明文字中提及“C002”字样的行保留（无 C002 数据）。同时：公式单元格改用 Excel 保存的计算结果（原重新求值在 `说明` 表产生 `#VALUE!`，若出现在金额列会误判为非法金额）；只有记录行带列名标签，表下说明行保持原文；ISO 午夜时间显示为日期。
+- 验收（自动化）：KnowledgeServiceTest 5 项——R004 1.0 回答“银行流水能否证明付款”，C001 检索不出停用的 R002 1.0 与 C002 的 R003，8 月日期检索不到 9 月生效的 R002 2.0；**5 种问法**（“出差住酒店每晚最多报多少钱”“住宿费报销上限是多少”“差旅住宿标准”“出差住宾馆一天能报多少”“酒店费用最高多少”）首条均为《差旅报销制度.docx》v1 第2段；上传 v2 后立即命中 600 元、v1 不出现，停用 v2 后无任何文件命中且不回退 v1，重新启用后恢复；Excel 行“F011 的开票日期和金额”命中 `发票!第6行`；C002 检索不到 C001 文件，U002 检索 C001 结果中无 C002 记录行；无关问题返回空。FileServiceTest 新增 2 项（公式缓存值、跨企业行不入库）。FinanceAgentIntegrationTest 新增 1 项（模型经 search_knowledge 取得 R004 及来源；跨企业参数 PERMISSION_DENIED）。全量后端 **278/0/0/0**；前端 verify：Vitest **43/43**、typecheck、lint、build。
+- 验收（真实 JAR＋浏览器，未配置模型）：新库上传 v1、v2 → v1 显示“已被新版本取代 · 不检索（旧版本）”；停用 / 启用 v2 写入 `file_knowledge_status`（changed_by=U001），审计 knowledge-disable/enable 各 REQUESTED+COMPLETED；控制台 0 错误。截图 `docs/evidence/ui-knowledge-20261118-{1-versions,2-disabled}.png`。`frontend/dist` 已更新为本次构建。
+- 未验证 / 局限：**真实模型（qwen3.7-flash）未跑**——模型是否主动调用 search_knowledge 并按来源引用需联调；检索为字面＋同义词表，表外的同义说法（如“房费”）可能召回不稳，扩表需同时加测试；每次检索全量扫描当前企业分段（演示规模可接受，大文件多时需索引）；`docs/evidence/ui-files-20261118-*.png` 截于本次修复之前，其中文本段内容不受影响。未提交/未推送。
+
+### T33 — 长期记忆生命周期（契约 B6，“长期记忆”）
+- 状态：DONE（2026-11-19，Coding Agent）；真实模型未复测。范围：新旧冲突以最新明确陈述覆盖；删除/失效记忆从存储与模型输入彻底清除（审计仅脱敏元数据）；个人记忆与企业记忆分开存放与授权；可选有效期。
+- 验收：更正偏好后旧值不再出现在模型输入；删除后重启也不出现；跨用户、跨企业不可见。
+- 实现：
+  - 范围（分表存放、分开授权）：`USER_ENTERPRISE`＝原 `agent_preferences`（增列 `expires_on`、`updated_at`，可加迁移）；`PERSONAL`＝`personal_preferences`（本人跨企业，**不得含 C/F/T+三位数字形式的企业、发票、流水编号**，防止一家企业的事实被带入另一家）；`ENTERPRISE`＝`enterprise_preferences`（企业共享，读需该企业读权限，写需修改权限）。
+  - 覆盖策略：同一范围同名 → 最新明确陈述覆盖，旧值不再提供给模型；同名跨范围 → 越具体越优先（本人·本企业 > 个人 > 企业共享），模型输入只含胜出者，键名带 `个人·`/`企业·` 前缀以示来源；名称禁止含“·”。
+  - 有效期：可选 `expiresOn`（不得早于今天）；到期记忆在下一次访问时**按删除处理擦除**，不是仅隐藏。
+  - 彻底清除：删除/到期时 `PRAGMA secure_delete=ON`（更正覆盖时同样开启）使旧字节不留在数据库文件；并在该范围的 `agent_trace.user_message` 中按 JSON 键结构（不是按值做文本搜索）把该记忆的每个历史值替换为 `"[已删除的记忆]"`——只追加触发器仅在该事务内临时解除并立即恢复（DDL 常量由 `TaskMemory.TRACE_NO_UPDATE` 与 `DemoAudit` 共用）。控制器删除时同步清掉该用户（企业范围则该企业）的 turn 缓存，防止重放带回。审计只记录 `memory-put-*`/`memory-delete-*` 元数据。
+  - API：`GET /api/demo/memories`、`POST /memories {scope,name,value,userRequest,expiresOn}`、`DELETE /memories/{scope}/{name}`；原 `/preferences` 端点保留（即 USER_ENTERPRISE），删除同样清缓存。前端“长期记忆”对话框：范围选择（企业共享仅操作员可选）、有效期、每条显示范围/有效期/是否生效（被覆盖者标注且变灰）、删除，表单先按服务端同样规则预检。
+- 过程中发现并修复的缺陷：
+  1. **（隐私）前端切换身份后，长期记忆对话框仍显示上一身份的记忆**（服务端未泄露，浏览器内存残留）；现切换身份与每次打开时先清空。浏览器复测：只读成员仅见企业共享一条、无删除按钮、不可选企业范围。
+  2. **（稳定性）登录后页面并行请求偶发 HTTP 500 `AUDIT_STORAGE_ERROR`**：`DemoAudit` 写入事务先读（权限检查）后写，并发时 SQLite 无法升级读锁且不等待 `busy_timeout`；T30 新增的登录时 Agent 列表请求使其显现。修复：审计写入改用 `transaction_mode=IMMEDIATE`（先取写锁，会等待）；另把 T29–T31 新服务的建表/播种改为每库每进程只执行一次且带 `busy_timeout`（`tool/Migrations`）。新增并发回归测试（24 个并行 GET）：修复前 3/3 失败，修复后 5/5 通过。
+  3. 保存后清空表单发生在后续刷新请求之后，期间输入会被抹掉；改为保存成功后立即清空。
+  4. 对话框内的错误被页面级横幅挡在遮罩后不可见；现于保存按钮正上方显示（可访问的 alert）。
+  5. 迁移脚本按 `;` 切分，注释中的分号会产生空语句导致初始化失败；已改注释并注明。
+- 验收（自动化）：MemoryLifecycleTest 6 项——更正后模型输入只有新值、重启后仍为新值；三范围同名时按优先级只给模型胜出者，逐个删除后正确回退到企业共享；U001 个人记忆跟随到 C002，C001 的企业/本人记忆不进入 C002，U002 只见企业共享且不能改删，同名个人记忆互不影响；个人记忆拒绝 F002/C001/T013 等编号（本人·本企业可含），名称含“·”、过去日期、非日期、空原话均拒绝；到期记忆被物理删除；**删除与更正后数据库文件字节中不再含旧文本**。DemoApiTest 新增 2 项：删除个人记忆后（含“重启”新控制器）历史 trace 中该值被替换为 `[已删除的记忆]`、未删除的记忆保留、只追加约束恢复、审计无明文，只读成员可读不可写企业记忆；并发登录请求全部 200。全量后端 **299/0/0/0**；前端 Vitest **51/51**、typecheck、lint、build。
+- 验收（真实 JAR＋浏览器，未配置模型）：操作员依次保存企业共享/个人/本人三条同名 style → 列表显示本人一条生效、其余两条“被更具体范围的同名记忆覆盖”；切换只读成员 → 仅见企业共享一条；个人记忆输入 F002 → 对话框内提示且未发送请求；审计无 ERROR、控制台 0 错误（连续两轮）。截图 `docs/evidence/ui-memory-20261118-{m1-operator,m2-viewer,m3-guard}.png`（m1/m2 截于对话框内错误提示位置调整之前）。`frontend/dist` 已更新。
+- 未做 / 局限：真实模型未跑；跨范围冲突只按名称判断，语义相近但名称不同的旧要求（如 style 与 tone）不会自动识别为冲突；个人记忆的编号拦截是格式规则，不能识别不带编号的企业事实；已更正（未删除）记忆的旧值仍保留在当时的运行记录中（运行记录如实反映当时模型输入），删除时才一并擦除。未提交/未推送。
+
+### T34 — 上下文压缩与原文回溯（契约 B7，“上下文管理”）
+- 状态：IN_PROGRESS（2026-11-19，Coding Agent）。范围：长对话与大文件下的投影策略（保留任务对象、用户限制、待办）；只读回溯工具按需取回被裁剪的对话、文件片段、工具结果。
+- 验收：30 轮含更正的脚本对话后，模型输入仍含企业、月份、待办与最新更正；大文件问答通过回溯取回原文定位。
+
+### T35 — 多轮办理补强（“多轮办理”）
+- 状态：IN_PROGRESS（2026-11-19，Coding Agent；与 T34 待验证并行，按用户指示只写代码，测试由用户在 Mac 本地运行）。范围：修复“补充清空待补字段后再查询即结项、写入按钮禁用”的陷阱；局部更正只改动对应授权范围并保留剩余待办；歧义时追问。
+- 验收：补充后仍可在同任务受控保存；局部更正后其余待办与已批准范围不变；取消任务后不再写入。
+- 实现（代码已写，**未运行任何测试**，待用户 Mac 本地验证后才可标 DONE）：
+  - 根因：`supplement` 把字段移出 `pending` 即视为办完，但声明不等于保存；下一轮模型 `finish` 时 `pending` 为空 → `COMPLETED` → 审核页禁用写入。
+  - `TaskMemory.Task` 新增 `awaitingSave`（旧任务 JSON 无此字段即为空）：补充的发票字段（`<发票号>.purpose|remarks`）进入“待保存”；只有本轮可信批准写入 `verified=true` 且键/值与批准一致才移出。`pending` 或 `awaitingSave` 非空时模型 `finish` 改为 `WAITING_USER`，追问列出“已记录但尚未保存：F002.purpose＝“…””，提示审核页确认保存、更正或取消。非发票字段（如 `month`）沿用原行为。
+  - 局部更正：已保存后再补充同一字段只把该字段重新放回 `awaitingSave`，其余 `pending`/`awaitingSave` 不变；批准保存的值与此前声明不同时，以批准值（最新明确陈述）覆盖 `supplied`，批准清空则删除该声明。取消任务后 `continueTask`/`supplement` 均 CONFLICT，零台账。
+  - `TaskPlan`/前端 `deriveExecutionPlan`：有待保存时“保存并回读核验”为 waiting 并列出字段，结项步骤显示“等待确认保存或取消”。`ContextProjector` 投影保留 `awaitingSave`；`AgentRuntime` 上下文说明加一句“awaitingSave 不得说成已保存”。前端任务面板与上下文来源显示“待保存”。
+  - 测试（未运行）：`TaskMemoryTest` 改写 `modelFinishCannotComplete…AndCanResumeAfterSupplement`（原断言即陷阱行为），新增 `correctionReopensOnlyItsFieldAndKeepsTheRestOfTheWork`、`cancelledTaskRefusesTheApprovedSaveAndWritesNothing`；`DemoApiTest.modelFinishCannotCloseTaskWithPendingFieldsAtHttpBoundary` 末段由 COMPLETED 改为 WAITING_USER + awaitingSave；前端 `api.test.ts` 新增 T35 计划用例。
+  - 验证后待办：同步 `DEMO_SCRIPT.md` 第 250 行“补充后再查询会让任务结项”与 `CLAUDE.md` 演示顺序坑；“歧义时追问”目前只覆盖确定性追问（待补/待保存字段），未做自然语言歧义识别。
+
+### T36 — 异常恢复补强（“异常恢复”）
+- 状态：IN_PROGRESS（2026-11-19，Coding Agent；与 T34/T35 待验证并行，只写代码，测试由用户在 Mac 本地运行）。范围：明确重试策略（只读可重试、写入只走 verify）；连续报错熔断与如实反馈；`/turn/stream` SSE 测试（末帧 `done` 携带核验结果、中途断开不改业务结果）；`AnthropicMessagesClient` 与 OpenAI 客户端畸形回复纠正一致。
+- 验收：故障注入覆盖模型超时、连续错误、响应丢失、进程重启；已完成操作不重做，待确认操作不执行，回复说明真实状态。
+- T33 遗留给本任务：除审计外，`TaskMemory`、`FileService.upload`、`AgentDirectory.save`、`InvoiceWriteService` 等写事务同样“先读后写”，并发写时可能 SQLITE_BUSY 后 fail closed（业务上安全但体验差）；应统一改为 IMMEDIATE 写事务并补并发写测试。
+  - 核查（2026-11-19）：代码中已统一——所有 `mode=rw` 连接都经 `tool/Sqlite.open`（`transaction_mode=IMMEDIATE`），只读事务走 `openForRead`/`mode=ro`；`DemoApiTest.parallelReadsAndWritesDoNotFailOnStorageLocks` 已含并发任务创建与记忆写入。本任务未再改动。
+- 实现（代码已写，**未运行任何测试**，待用户 Mac 本地验证后才可标 DONE）：
+  - 重试策略（`AgentRuntime`）：运行时不重试模型；只读工具在超时或 `STORAGE_ERROR` 时重试一次（`readWithRetry`），业务拒绝（权限、参数、范围、NOT_FOUND）不重试；`update_invoice` 永不重试——写入返回 `STORAGE_ERROR`（结果可能未知）时立即结束本轮，不再询问模型，结果只能经 verify/recover 判定。
+  - 熔断：同一轮连续 3 次工具错误（`MAX_CONSECUTIVE_TOOL_ERRORS`）返回 `TOOL_ERRORS_REPEATED`；中间任一成功即清零。
+  - 如实反馈：`AgentRuntime.honest` 按本轮工具证据生成失败回复——已有 verified 保存则“不会重做”；写入已派发但无核验则“结果未知，勿重复保存，请核验”；写入被明确拒绝或未派发则“没有修改任何发票”；附只读查询次数及模型类错误“不会自动重发”。错误码不变，仅文本更具体。前端 `friendlyError` 补齐 `MODEL_RESPONSE_INVALID / AUTH_FAILED / RATE_LIMITED / TRANSPORT_ERROR / HTTP_ERROR / OUTPUT_LIMIT`、`TOOL_ERRORS_REPEATED`、`STORAGE_ERROR`。
+  - 畸形回复一致：`LlmClient.CORRECTION` + `httpFailure`；Messages、Chat Completions、Responses 三种协议对无法解析的回复都纠正重试一次（纠正说明放在 system/instructions），再失败统一 `MODEL_RESPONSE_INVALID`；HTTP 401/403→`MODEL_AUTH_FAILED`、429→`MODEL_RATE_LIMITED`、其他→`MODEL_HTTP_ERROR`，均不重试；OpenAI 适配器新增 `MODEL_TRANSPORT_ERROR`。行为变化：Responses 此前不纠正、Messages 此前不纠正。
+  - SSE：`DemoController.turnStream` 的 `complete` 改为不抛异常（客户端已断开时）。
+  - 测试（未运行）：新增 `runtime/MalformedReplyConsistencyTest`（三协议×纠正一次/二次失败/HTTP 映射）、`runtime/RetryPolicyTest`（只读重试与不重试、`honest` 文本）、`FaultRecoveryTest`（模型超时、熔断与清零、写入结果未知立即停止且不重试、丢失响应＋重启不重做、未执行的批准重启后失效）；`DemoApiTest` 新增 `streamEndsWithDoneCarryingTheVerifiedResult`、`clientDisconnectMidStreamDoesNotChangeTheBusinessOutcome`（经 `MockAsyncContext` 的 `AsyncListener.onError` 模拟断开）。改动既有断言：`OpenAiResponsesClientTest` 200 畸形由 `MODEL_FAILURE` 改为 `MODEL_RESPONSE_INVALID`；`FinanceAgentIntegrationTest.approvedFinishWithoutWriteFailsClosed` 由精确文本改为前缀＋“没有修改任何发票”。
+  - 风险：熔断可能改变既有测试中“同一轮连续 ≥3 次工具报错”脚本的错误码（未逐一核实）；SSE 断开测试依赖 Spring 对 `AsyncListener.onError` 的处理，若 Mac 上不稳定请反馈。
+
+### T37 — 复赛交付文档与创新对比（契约 B8）
+- 状态：TODO。范围：根目录 `作品使用说明.md`（启动、配置 Agent/能力、上传、对话、查看业务数据变化/执行记录/模型输入）；`自主创新说明.md`，候选题目为 T26“批准轮保存载荷由程序生成”，需用 `qwen3.7-flash` 在同一任务下分别运行 T26 前（上一提交）与 T26 后版本，记录通过次数/运行次数与失败码。
+- 验收：评委按说明可独立完成全部操作；创新对比为真实运行记录，不是推断。

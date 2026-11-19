@@ -97,6 +97,128 @@ class DemoApiTest {
         assertThat(event.path("tool").asText()).isEqualTo("verify");
         assertThat(event.toString()).doesNotContain("private-purpose");
     }
+    MockHttpServletRequestBuilder upload(String name, byte[] bytes, int declaredLength) {
+        return multipart("/api/demo/files").file(new org.springframework.mock.web.MockMultipartFile("file", name, null, bytes))
+                .with(req -> { if (declaredLength >= 0) req.setContent(new byte[declaredLength]); return req; });
+    }
+    @Test void uploadEndpointRequiresWriteAccessDeclaredLengthAndIsAudited() throws Exception {
+        var bytes = FileServiceTest.workbook(true, new Object[]{"C001","F101","2026-10-08","销售方","项目",10,"",""});
+        select("operator","C001");
+        var result = body(mvc.perform(upload("十月.xlsx",bytes,bytes.length).session(session).header("X-CSRF-Token",csrf))
+                .andExpect(status().isOk()).andReturn());
+        assertThat(result.path("status").asText()).isEqualTo("IMPORTED");
+        assertThat(result.path("invoicesImported").asInt()).isEqualTo(1);
+        var id = result.at("/file/id").asText();
+        assertThat(ok(get("/api/demo/files"))).hasSize(1);
+        assertThat(ok(get("/api/demo/files/"+id)).path("chunks").size()).isPositive();
+        assertThat(ok(get("/api/demo/audit")).toString()).contains("file-upload");
+        mvc.perform(upload("十月.xlsx",bytes,bytes.length).session(session)).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("CSRF_REQUIRED"));
+        mvc.perform(upload("十月.xlsx",bytes,-1).session(session).header("X-CSRF-Token",csrf)).andExpect(status().is(411));
+        mvc.perform(upload("大.xlsx",bytes,11*1024*1024).session(session).header("X-CSRF-Token",csrf)).andExpect(status().is(413));
+        select("viewer","C001");
+        mvc.perform(upload("十月-v2.xlsx",bytes,bytes.length).session(session).header("X-CSRF-Token",csrf))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.errorCode").value("PERMISSION_DENIED"));
+        assertThat(count("uploaded_files")).isEqualTo(1);
+    }
+    @Test void agentsAreConfiguredOverHttpAndBindTasks() throws Exception {
+        var fake = new FakeLlmClient(new Ask("请明确月份"), new Ask("仍需月份"));
+        setup(fake); select("operator","C001");
+        var listed = ok(get("/api/demo/agents"));
+        assertThat(listed.path("agents").findValuesAsText("id")).containsExactly("finance-assistant");
+        assertThat(listed.path("tools").size()).isEqualTo(7); // T34 added recall_context.
+        var spec = Map.of("name","只读查询员","responsibility","只回答查询，不保存","instructions","简短回答",
+                "modelProfile","default","tools",List.of("query_invoices","query_rules"),"enterprises",List.of("C001"));
+        var saved = ok(postJson("/agents", Map.of("id","finance-reader","spec",spec)));
+        assertThat(saved.path("version").asInt()).isEqualTo(1);
+        String task = ok(postJson("/tasks",Map.of("goal","只读查询","pending",List.of(),"agentId","finance-reader"))).path("id").asText();
+        assertThat(ok(get("/api/demo/tasks/"+task)).at("/agent/id").asText()).isEqualTo("finance-reader");
+        var turn = turn(task, Map.of("message","查询发票"));
+        assertThat(turn.at("/promptTrace/systemPrompt").asText()).contains("[Agent finance-reader v1 · 只读查询员]");
+        assertThat(fake.seen.getFirst().tools()).extracting(Tool::name).containsExactlyInAnyOrder("query_invoices","query_rules");
+        // A read-only agent is never handed a save, even for an operator.
+        mvc.perform(postJson("/tasks/"+task+"/turn",approved(UUID.randomUUID().toString())).session(session).header("X-CSRF-Token",csrf))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.errorCode").value("CAPABILITY_NOT_GRANTED"));
+        assertThat(purpose()).isEmpty();
+        ok(postJson("/agents/finance-reader/enabled", Map.of("enabled", false)));
+        mvc.perform(postJson("/tasks/"+task+"/turn",Map.of("message","再查")).session(session).header("X-CSRF-Token",csrf))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.errorCode").value("PERMISSION_DENIED"));
+        assertThat(ok(get("/api/demo/agents/finance-reader/history"))).hasSize(2);
+        assertThat(ok(get("/api/demo/audit")).toString()).contains("agent-save","agent-disable");
+        select("viewer","C001");
+        assertThat(ok(get("/api/demo/agents")).path("agents")).hasSize(2);
+        mvc.perform(postJson("/agents", Map.of("id","viewer-agent","spec",spec)).session(session).header("X-CSRF-Token",csrf))
+                .andExpect(status().isForbidden());
+    }
+    @Test void deletedMemoryIsErasedFromStoredModelInputsButOtherMemoriesStay() throws Exception {
+        setup(new FakeLlmClient(new Ask("好的"), new Ask("好的")));
+        select("operator","C001");
+        ok(postJson("/memories", Map.of("scope","PERSONAL","name","tone","value","先给结论再展开","userRequest","以后先给结论")));
+        ok(postJson("/memories", Map.of("scope","USER_ENTERPRISE","name","focus","value","关注九月发票","userRequest","我主要看九月")));
+        String task=start(); turn(task, Map.of("message","你好"));
+        var before = ok(get("/api/demo/tasks/"+task+"/traces")).get(0).path("userMessage").asText();
+        assertThat(before).contains("个人·tone","先给结论再展开","关注九月发票");
+        var listed = ok(delete("/api/demo/memories/PERSONAL/tone"));
+        assertThat(listed.findValuesAsText("name")).containsExactly("focus");
+        setup(new FakeLlmClient()); // Restart: a new controller over the same database.
+        var after = ok(get("/api/demo/tasks/"+task+"/traces")).get(0).path("userMessage").asText();
+        assertThat(after).doesNotContain("先给结论再展开","以后先给结论").contains("个人·tone","[已删除的记忆]","关注九月发票");
+        // The append-only guard is back in force after the erase.
+        assertThatThrownBy(() -> sql("UPDATE agent_trace SET user_message='x'")).isInstanceOf(SQLException.class).hasMessageContaining("append only");
+        assertThat(ok(get("/api/demo/audit")).toString()).contains("memory-delete-personal").doesNotContain("先给结论再展开");
+        // Enterprise memory: viewers read it but cannot change it.
+        ok(postJson("/memories", Map.of("scope","ENTERPRISE","name","approval","value","报销需负责人签字","userRequest","公司规定")));
+        select("viewer","C001");
+        assertThat(ok(get("/api/demo/memories")).findValuesAsText("name")).containsExactly("approval");
+        mvc.perform(postJson("/memories", Map.of("scope","ENTERPRISE","name","approval","value","无需签字","userRequest","x")).session(session).header("X-CSRF-Token",csrf))
+                .andExpect(status().isForbidden());
+    }
+    @Test void parallelReadsAndWritesDoNotFailOnStorageLocks() throws Exception {
+        select("operator","C001");
+        // The workspace fires these together after login; each used to run schema migrations on its own connection.
+        var paths = List.of("/api/demo/tasks","/api/demo/agents","/api/demo/capabilities","/api/demo/memories","/api/demo/files","/api/demo/preferences");
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(12);
+        try {
+            var futures = new ArrayList<java.util.concurrent.Future<String>>();
+            for (int round = 0; round < 4; round++)
+                for (var path : paths)
+                    futures.add(pool.submit(() -> {
+                        var response = mvc.perform(get(path).session(session).header("X-CSRF-Token",csrf)).andReturn().getResponse();
+                        return response.getStatus() == 200 ? "OK" : path + " " + response.getStatus() + " " + response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+                    }));
+            // Writes in the same burst: creating the task (as the workspace does right after login) and memory saves.
+            futures.add(pool.submit(() -> {
+                var response = mvc.perform(postJson("/tasks", Map.of("goal","并发创建","pending",List.of())).session(session).header("X-CSRF-Token",csrf)).andReturn().getResponse();
+                return response.getStatus() == 200 ? "OK" : "POST /tasks " + response.getStatus() + " " + response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            }));
+            for (int i = 0; i < 6; i++) {
+                int n = i;
+                futures.add(pool.submit(() -> {
+                    var response = mvc.perform(postJson("/memories", Map.of("scope","USER_ENTERPRISE","name","m" + n,"value","v" + n,"userRequest","r" + n))
+                            .session(session).header("X-CSRF-Token",csrf)).andReturn().getResponse();
+                    return response.getStatus() == 200 ? "OK" : "POST /memories " + response.getStatus() + " " + response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+                }));
+            }
+            var failures = new ArrayList<String>();
+            for (var f : futures) { var r = f.get(60, java.util.concurrent.TimeUnit.SECONDS); if (!r.equals("OK")) failures.add(r); }
+            assertThat(failures).isEmpty();
+            assertThat(count("agent_tasks")).isEqualTo(1);
+            assertThat(count("agent_preferences")).isEqualTo(6);
+        } finally { pool.shutdownNow(); }
+    }
+    @Test void approvedWriteWithEmptyArgumentsAuditsTrustedInvoiceAndFields() throws Exception {
+        setup(new FakeLlmClient(new Call("save","update_invoice","{}"),new Finish("saved")));
+        select("operator","C001"); String task=start(), op=UUID.randomUUID().toString();
+        var result=turn(task,approved(op));
+        assertThat(result.at("/verification/verified").booleanValue()).isTrue();
+        assertThat(purpose()).isEqualTo("private-purpose");
+        JsonNode write=null;
+        for (var event:ok(get("/api/demo/audit"))) if ("update_invoice".equals(event.path("tool").asText())) write=event;
+        assertThat(write).isNotNull();
+        assertThat(write.path("invoiceId").asText()).isEqualTo("F002");
+        assertThat(write.path("fields").asText()).isEqualTo("purpose");
+        assertThat(write.toString()).doesNotContain("private-purpose");
+    }
     @Test void approvedFinishWithoutWriteIsTerminalNotExecutedAndKeepsTaskOpen() throws Exception {
         setup(new FakeLlmClient(new Finish("已保存")));
         select("operator","C001"); String task=start(), op=UUID.randomUUID().toString();
@@ -425,11 +547,16 @@ class DemoApiTest {
                 "statements",Map.of("F002.purpose",Map.of("value","办公室采购","userRequest","用户明确补充：办公室采购")))));
         assertThat(supplemented.path("status").asText()).isEqualTo("ACTIVE");
         assertThat(supplemented.path("pending").isEmpty()).isTrue();
+        assertThat(supplemented.path("awaitingSave").toString()).isEqualTo("[\"F002.purpose\"]");
+        // T35: a stated value is not a save, so the task stays open and the review page keeps its save button.
         setup(new FakeLlmClient(new Finish("补充后核查完成")));
         var resumed=turn(task,Map.of("message","根据已补充事实继续完成核查"));
-        assertThat(resumed.at("/turn/result/status").asText()).isEqualTo("FINISHED");
-        assertThat(resumed.at("/turn/task/status").asText()).isEqualTo("COMPLETED");
+        assertThat(resumed.at("/turn/result/status").asText()).isEqualTo("NEEDS_INPUT");
+        assertThat(resumed.at("/turn/task/status").asText()).isEqualTo("WAITING_USER");
         assertThat(resumed.at("/turn/task/pending").isEmpty()).isTrue();
+        assertThat(resumed.at("/turn/task/awaitingSave").toString()).isEqualTo("[\"F002.purpose\"]");
+        assertThat(resumed.at("/turn/task/question").asText()).contains("办公室采购","尚未保存");
+        assertThat(purpose()).isEmpty();
     }
     @Test void ordinaryChatCannotWriteAndExactConfirmationWritesOnceWithReadback() throws Exception {
         setup(new FakeLlmClient(new Call("unapproved","update_invoice",WRITE),new Ask("请确认"),new Call("approved","update_invoice",WRITE),new Ask("已保存请继续"),new Call("repeat","update_invoice",WRITE),new Ask("已回查")));
@@ -439,6 +566,68 @@ class DemoApiTest {
         var saved=turn(task,approved(operation));assertThat(saved.at("/verification/verified").asBoolean()).isTrue();assertThat(purpose()).isEqualTo("private-purpose");
         sql("CREATE TRIGGER no_rewrite BEFORE UPDATE ON invoices BEGIN SELECT RAISE(ABORT,'must not replay'); END");
         assertThat(turn(task,approved(operation)).at("/verification/verified").asBoolean()).isTrue();assertThat(count("invoice_operations")).isEqualTo(1);
+    }
+    /** SSE frames in order as (event, data) pairs. */
+    static List<Map.Entry<String,JsonNode>> frames(String body) throws Exception {
+        var frames = new ArrayList<Map.Entry<String,JsonNode>>();
+        for (var block : body.split("\n\n")) {
+            String event = null; var data = new StringBuilder();
+            for (var line : block.split("\n")) {
+                if (line.startsWith("event:")) event = line.substring(6).strip();
+                else if (line.startsWith("data:")) data.append(line.substring(5));
+            }
+            if (event != null) frames.add(Map.entry(event, JSON.readTree(data.toString())));
+        }
+        return frames;
+    }
+    @Test void streamEndsWithDoneCarryingTheVerifiedResult() throws Exception {
+        setup(new FakeLlmClient(new Call("save","update_invoice",WRITE),new Finish("已保存并回查")));
+        select("operator","C001"); String task=start(); String operation=UUID.randomUUID().toString();
+        var started=mvc.perform(postJson("/tasks/"+task+"/turn/stream",approved(operation)).session(session).header("X-CSRF-Token",csrf))
+                .andExpect(request().asyncStarted()).andReturn();
+        started.getAsyncResult(20_000);
+        var frames=frames(started.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(frames.getFirst().getKey()).isEqualTo("status");
+        assertThat(frames).extracting(Map.Entry::getKey).contains("tool","text");
+        // Status and verification come only from the terminal frame; text chunks are presentation.
+        var done=frames.getLast();
+        assertThat(done.getKey()).isEqualTo("done");
+        assertThat(done.getValue().at("/verification/verified").asBoolean()).isTrue();
+        assertThat(done.getValue().at("/turn/task/status").asText()).isEqualTo("COMPLETED");
+        assertThat(frames).filteredOn(f -> f.getKey().equals("done")).hasSize(1);
+        assertThat(purpose()).isEqualTo("private-purpose"); assertThat(count("invoice_operations")).isEqualTo(1);
+    }
+    @Test void clientDisconnectMidStreamDoesNotChangeTheBusinessOutcome() throws Exception {
+        var reachedFinal=new CountDownLatch(1); var disconnected=new CountDownLatch(1);
+        var steps=new AtomicInteger();
+        setup(request -> {
+            if (steps.getAndIncrement()==0) return new Call("save","update_invoice",WRITE);
+            reachedFinal.countDown();
+            assertThat(disconnected.await(10, TimeUnit.SECONDS)).isTrue();
+            return new Finish("已保存并回查");
+        });
+        select("operator","C001"); String task=start(); String operation=UUID.randomUUID().toString();
+        long versionBefore=ok(get("/api/demo/tasks/"+task)).at("/task/version").asLong();
+        var started=mvc.perform(postJson("/tasks/"+task+"/turn/stream",approved(operation)).session(session).header("X-CSRF-Token",csrf))
+                .andExpect(request().asyncStarted()).andReturn();
+        assertThat(reachedFinal.await(10, TimeUnit.SECONDS)).isTrue();
+        // The write has run; now the browser goes away, as a servlet container reports it.
+        var async=(org.springframework.mock.web.MockAsyncContext) started.getRequest().getAsyncContext();
+        for (var listener : List.copyOf(async.getListeners()))
+            listener.onError(new jakarta.servlet.AsyncEvent(async, new java.io.IOException("client disconnected")));
+        disconnected.countDown();
+        // The turn still finishes and is persisted exactly once; nothing is replayed or rolled back.
+        JsonNode stored=null;
+        for (int i=0; i<200; i++) {
+            stored=ok(get("/api/demo/tasks/"+task)).path("task");
+            if (stored.path("version").asLong()>versionBefore) break;
+            Thread.sleep(50);
+        }
+        assertThat(stored.path("version").asLong()).isEqualTo(versionBefore+1);
+        assertThat(stored.path("status").asText()).isEqualTo("COMPLETED");
+        assertThat(purpose()).isEqualTo("private-purpose"); assertThat(count("invoice_operations")).isEqualTo(1);
+        assertThat(verifyOperation(task,operation).path("status").asText()).isEqualTo("VERIFIED");
+        assertThat(steps.get()).isEqualTo(2);
     }
     @Test void falseConfirmationAndModelParameterMismatchNeverWrite() throws Exception {
         setup(new FakeLlmClient(new Call("mismatch","update_invoice",WRITE.replace("private-purpose","model-guessed")),new Finish("模型声称成功")));
@@ -451,7 +640,7 @@ class DemoApiTest {
         // Configuration bean is package-private; obtain through Spring with a deliberately empty environment.
         var context=new org.springframework.context.annotation.AnnotationConfigApplicationContext();
         context.setEnvironment(new MockEnvironment());context.register(DemoConfiguration.class);context.refresh();
-        try { setup(context.getBean(LlmClient.class));select("operator","C001");
+        try { setup(context.getBean(com.taxagent.harness.runtime.ModelProfiles.class).profile("default"));select("operator","C001");
             var result=turn(start(),Map.of("message","查询九月"));
             assertThat(result.path("errorCode").asText()).isEqualTo("MODEL_NOT_CONFIGURED");assertThat(result.at("/turn/result/history")).isEmpty();assertThat(count("invoice_operations")).isZero();
         } finally {context.close();}

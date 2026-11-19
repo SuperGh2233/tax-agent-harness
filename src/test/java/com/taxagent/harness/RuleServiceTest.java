@@ -24,7 +24,8 @@ class RuleServiceTest {
     void sql(String sql) throws Exception {
         try (var c = DriverManager.getConnection("jdbc:sqlite:" + db); var s = c.createStatement()) { s.execute(sql); }
     }
-    PurposeResult check(String enterprise) { return service.checkInvoicePurpose(user, new PurposeCheck(enterprise, "2026-09")); }
+    PurposeResult check(String enterprise) { return check(enterprise, "2026-09"); }
+    PurposeResult check(String enterprise, String month) { return service.checkInvoicePurpose(user, new PurposeCheck(enterprise, month)); }
     RuleDefinition definition(String text, LocalDate date) { return new RuleDefinition("测试规则", date, RuleStatus.启用, text); }
 
     @Test void officialBaselineAndTraceableContent() {
@@ -37,7 +38,27 @@ class RuleServiceTest {
                 .contains(new RuleKey("R002","2.0")).doesNotContain(new RuleKey("R002","1.0"));
         assertThat(service.queryRules(user,"C001",september.minusDays(1))).extracting(RuleService.StoredRule::key)
                 .doesNotContain(new RuleKey("R002","2.0"),new RuleKey("R002","1.0"));
-        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> new PurposeCheck("C001","2026-08"));
+        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> check("C001","2026-08"));
+    }
+    @Test void purposeCheckFollowsRulesInForceForAnyMonth() throws Exception {
+        // August: C001 only has the disabled R002 1.0 (2.0 starts 09-01); C002's R003 1.0 applies from 08-01.
+        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> check("C001","2026-08"));
+        assertThat(check("C002","2026-08").missing()).extracting(InvoiceKey::invoiceId).containsExactly("F016");
+        assertThat(check("C002","2026-08").rules()).containsExactly(new RuleReference(new RuleKey("R003","1.0"), "乙企业发票用途规则"));
+        // A month without invoices still cites the rule in force.
+        assertThat(check("C001","2026-10").missing()).isEmpty();
+        assertThat(check("C001","2026-10").rules()).containsExactly(new RuleReference(new RuleKey("R002","2.0"), "甲企业发票用途规则"));
+    }
+    @Test void versionEffectiveMidMonthAppliesFromItsOwnDate() throws Exception {
+        service.disableVersion(admin, new RuleKey("R002","2.0"));
+        service.importVersion(admin, new RuleKey("R002","3.0"), new RuleDefinition("甲企业发票用途规则", LocalDate.of(2026,10,15),
+                RuleStatus.启用, "单张发票金额大于或等于 1000.00 元时必须填写用途。"), Set.of("C001"));
+        sql("INSERT INTO invoices VALUES ('C001','F101','2026-10-20','销售方','项目',150000,'',''),('C001','F102','2026-10-21','销售方','项目',99999,'','')");
+        assertThat(check("C001","2026-10").missing()).extracting(InvoiceKey::invoiceId).containsExactly("F101");
+        assertThat(check("C001","2026-10").rules()).containsExactly(new RuleReference(new RuleKey("R002","3.0"), "甲企业发票用途规则"));
+        // An invoice dated before any rule applies is refused, never silently skipped.
+        sql("INSERT INTO invoices VALUES ('C001','F100','2026-10-05','销售方','项目',150000,'','')");
+        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> check("C001","2026-10"));
     }
     @Test void thresholdCurrentDataWhitespaceAndRemarks() throws Exception {
         sql("UPDATE invoices SET amount_cents=100000,purpose='   ',remarks='已有备注' WHERE enterprise_id='C002' AND id='F001'");
@@ -131,6 +152,33 @@ class RuleServiceTest {
         assertThat(check("C001").missing()).extracting(InvoiceKey::invoiceId)
                 .containsExactlyInAnyOrder("F002", "F004", "F003", "F006", "F009");
         assertThat(check("C001").rules()).containsExactly(new RuleReference(new RuleKey("R002", "3.1"), "测试规则"));
+    }
+    @Test void purposeRuleIsFoundFromStoredRulesNotFixedEnterpriseIds() throws Exception {
+        sql("INSERT INTO enterprises VALUES ('C003','丙企业','丙')");
+        sql("INSERT INTO permissions VALUES ('U001','C003','可查看并修改')");
+        sql("INSERT INTO invoices VALUES ('C003','F001','2026-09-03','销售方','项目',50000,'',''),"
+                + "('C003','F002','2026-09-04','销售方','项目',50001,'',''),('C003','F003','2026-09-05','销售方','项目',90000,'已填','')");
+        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> check("C003"));
+        service.importVersion(admin, new RuleKey("R107", "1.0"), new RuleDefinition("丙企业发票用途规则", september,
+                RuleStatus.启用, "单张发票金额大于或等于 500.01 元时必须填写用途。"), Set.of("C003"));
+        assertThat(check("C003").missing()).containsExactly(new InvoiceKey("C003", "F002"));
+        assertThat(check("C003").rules()).containsExactly(new RuleReference(new RuleKey("R107", "1.0"), "丙企业发票用途规则"));
+
+        // An enterprise may move its purpose rule to a new id; the old id is no longer applied once disabled.
+        service.disableVersion(admin, new RuleKey("R003", "1.0"));
+        service.importVersion(admin, new RuleKey("R203", "1.0"), definition("每张发票都必须填写用途。", september), Set.of("C002"));
+        assertThat(check("C002").rules()).containsExactly(new RuleReference(new RuleKey("R203", "1.0"), "测试规则"));
+        assertThat(check("C002").missing()).extracting(InvoiceKey::invoiceId)
+                .containsExactlyInAnyOrder("F001", "F002", "F004", "F005", "F006", "F009");
+    }
+    @Test void twoEnabledPurposeRuleIdsAreAmbiguousAndOtherRulesAreNeverPurposeRules() {
+        service.importVersion(admin, new RuleKey("R005", "1.0"), definition("每张发票都必须填写用途。", september), Set.of("C001"));
+        fails(ErrorCode.CONFLICT, () -> check("C001"));
+        assertThat(check("C002").rules()).containsExactly(new RuleReference(new RuleKey("R003", "1.0"), "乙企业发票用途规则"));
+        // R001/R004 mention 用途 or invoices but never state a purpose requirement.
+        service.disableVersion(admin, new RuleKey("R005", "1.0"));
+        service.disableVersion(admin, new RuleKey("R002", "2.0"));
+        fails(ErrorCode.UNSUPPORTED_SCOPE, () -> check("C001"));
     }
     @Test void contradictoryWordingIsRefusedNotGuessed() throws Exception {
         sql("UPDATE rules SET content='每张发票都必须填写用途；单张金额大于或等于 1000.00 元时必须填写用途。' "
