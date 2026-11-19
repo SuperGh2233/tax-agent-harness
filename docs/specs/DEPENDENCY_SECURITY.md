@@ -18,7 +18,7 @@
 - 新增 Apache POI `5.5.1`（poi-ooxml，含 xmlbeans、commons-compress 等传递依赖）与 PDFBox `3.0.8`，运行时依赖由 35 个增至 51 个。
 - 已升级到修复版本：commons-lang3 `3.18.0`（Spring Boot 3.5.16 默认 `3.17.0`，命中 GHSA-j288-q9x7-2f5v，经 commons-compress 传递引入）。
 - 0 个未抑制漏洞；2 个已抑制（同下）。
-- **待复查**：GHSA-j9f9-w8pj-32f8 的抑制理由写的是“未暴露 SSE 端点”，但 T22 已合并 `POST /api/demo/tasks/{id}/turn/stream`（SSE）。理由已不成立，需重新评估是否仍接受该风险；本次未改抑制文件。
+- **已复查（2026-11-19，T37）**：GHSA-j9f9-w8pj-32f8（CVE-2026-47890）原抑制理由“未暴露 SSE 端点”不成立——T22 已合并 `POST /api/demo/tasks/{id}/turn/stream`（SSE）。按公告，受影响的是“SSE **渲染视图片段**时的流损坏”，6.2.x 无修复版本（仅 Spring Framework 7.0.9）。该端点只经 `SseEmitter.event().data(…, APPLICATION_JSON)` 发送带 JSON 数据的命名事件，项目中无 `ModelAndView`、`FragmentsRendering` 或模板引擎，受影响路径不可达；仅 loopback。结论：继续接受风险，抑制理由已据实改写；若引入视图渲染须重新评估，迁移到 Spring Framework 7 时一并升级。
 - 运行方式：scratchpad 中 JDK 21 执行 `mvn dependency:list -DincludeScope=runtime` 后运行 `scripts/osv_scan.py`，退出码 0。
 
 ## 历史结果（2026-11-06）

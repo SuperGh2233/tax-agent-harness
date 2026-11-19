@@ -544,11 +544,11 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 未做 / 局限：真实模型未跑；跨范围冲突只按名称判断，语义相近但名称不同的旧要求（如 style 与 tone）不会自动识别为冲突；个人记忆的编号拦截是格式规则，不能识别不带编号的企业事实；已更正（未删除）记忆的旧值仍保留在当时的运行记录中（运行记录如实反映当时模型输入），删除时才一并擦除。未提交/未推送。
 
 ### T34 — 上下文压缩与原文回溯（契约 B7，“上下文管理”）
-- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项、前端 53 项通过，OSV 与密钥扫描干净）；真实模型未复测。范围：长对话与大文件下的投影策略（保留任务对象、用户限制、待办）；只读回溯工具按需取回被裁剪的对话、文件片段、工具结果。
+- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项（提交 `af6d158` 后为 330 项，见 T37 验收）、前端 53 项通过，OSV 与密钥扫描干净）；压缩区域渲染已真实模型验证（T37 验收 2026-11-19 23:25，连续两轮），大工具结果裁剪与 `recall_context` 取回原文的完整路径未经真实模型验证。范围：长对话与大文件下的投影策略（保留任务对象、用户限制、待办）；只读回溯工具按需取回被裁剪的对话、文件片段、工具结果。
 - 验收：30 轮含更正的脚本对话后，模型输入仍含企业、月份、待办与最新更正；大文件问答通过回溯取回原文定位。
 
 ### T35 — 多轮办理补强（“多轮办理”）
-- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项、前端 53 项通过）；真实模型未复测。范围：修复“补充清空待补字段后再查询即结项、写入按钮禁用”的陷阱；局部更正只改动对应授权范围并保留剩余待办；歧义时追问。
+- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项（提交 `af6d158` 后为 330 项，见 T37 验收）、前端 53 项通过）；真实模型未复测。范围：修复“补充清空待补字段后再查询即结项、写入按钮禁用”的陷阱；局部更正只改动对应授权范围并保留剩余待办；歧义时追问。
 - 验收：补充后仍可在同任务受控保存；局部更正后其余待办与已批准范围不变；取消任务后不再写入。
 - 实现（用户 Mac 本地验证通过，见状态行）：
   - 根因：`supplement` 把字段移出 `pending` 即视为办完，但声明不等于保存；下一轮模型 `finish` 时 `pending` 为空 → `COMPLETED` → 审核页禁用写入。
@@ -559,7 +559,7 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
   - 已同步（2026-11-19）：`DEMO_SCRIPT.md` 第六节第 2 条与 `CLAUDE.md` 演示顺序坑改为 T35 后行为；“歧义时追问”目前只覆盖确定性追问（待补/待保存字段），未做自然语言歧义识别。
 
 ### T36 — 异常恢复补强（“异常恢复”）
-- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项、前端 53 项通过）；真实模型未复测。范围：明确重试策略（只读可重试、写入只走 verify）；连续报错熔断与如实反馈；`/turn/stream` SSE 测试（末帧 `done` 携带核验结果、中途断开不改业务结果）；`AnthropicMessagesClient` 与 OpenAI 客户端畸形回复纠正一致。
+- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项（提交 `af6d158` 后为 330 项，见 T37 验收）、前端 53 项通过）；故障注入路径（模型超时、连续错误熔断、响应丢失、进程重启）未在真实模型下复测，仍只有离线测试覆盖。范围：明确重试策略（只读可重试、写入只走 verify）；连续报错熔断与如实反馈；`/turn/stream` SSE 测试（末帧 `done` 携带核验结果、中途断开不改业务结果）；`AnthropicMessagesClient` 与 OpenAI 客户端畸形回复纠正一致。批准轮保存在真实模型下的可用性依赖 T37 的批次修复与纠正提示（随 `af6d158` 提交）；该保存路径与 `/turn/stream` 末帧携带 `verified=true` 已随 T37 经真实模型验证（run3 20/20，另两次浏览器复测通过）
 - 验收：故障注入覆盖模型超时、连续错误、响应丢失、进程重启；已完成操作不重做，待确认操作不执行，回复说明真实状态。
 - T33 遗留给本任务：除审计外，`TaskMemory`、`FileService.upload`、`AgentDirectory.save`、`InvoiceWriteService` 等写事务同样“先读后写”，并发写时可能 SQLITE_BUSY 后 fail closed（业务上安全但体验差）；应统一改为 IMMEDIATE 写事务并补并发写测试。
   - 核查（2026-11-19）：代码中已统一——所有 `mode=rw` 连接都经 `tool/Sqlite.open`（`transaction_mode=IMMEDIATE`），只读事务走 `openForRead`/`mode=ro`；`DemoApiTest.parallelReadsAndWritesDoNotFailOnStorageLocks` 已含并发任务创建与记忆写入。本任务未再改动。
@@ -573,14 +573,14 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
   - 风险：熔断可能改变既有测试中“同一轮连续 ≥3 次工具报错”脚本的错误码（未逐一核实）；SSE 断开测试依赖 Spring 对 `AsyncListener.onError` 的处理，若 Mac 上不稳定请反馈。
 
 ### T37 — 复赛交付文档与创新对比（契约 B8）
-- 状态：IN_PROGRESS（2026-11-19，Coding Agent；先写 `作品使用说明.md` 与创新对比运行脚本，真实对比运行由用户执行）。范围：根目录 `作品使用说明.md`（启动、配置 Agent/能力、上传、对话、查看业务数据变化/执行记录/模型输入）；`自主创新说明.md`，候选题目为 T26“批准轮保存载荷由程序生成”，需用 `qwen3.7-flash` 在同一任务下分别运行 T26 前（上一提交）与 T26 后版本，记录通过次数/运行次数与失败码。
+- 状态：DONE（2026-11-20，Coding Agent；用户在 Mac 本地验证：后端 330 项、前端 53 项、OSV 0 条未抑制；真实对比 run3 改进后 20/20 vs 改进前 9/20；验收 Agent 23:25 记录的唯一阻塞项已处理，见本节末条）。范围：根目录 `作品使用说明.md`（启动、配置 Agent/能力、上传、对话、查看业务数据变化/执行记录/模型输入）；`自主创新说明.md`，候选题目为 T26“批准轮保存载荷由程序生成”，需用 `qwen3.7-flash` 在同一任务下分别运行 T26 前（上一提交）与 T26 后版本，记录通过次数/运行次数与失败码。
 - 验收：评委按说明可独立完成全部操作；创新对比为真实运行记录，不是推断。
 - 进展（2026-11-19，Coding Agent；仅写文档与脚本，未运行）：
   - `作品使用说明.md`（根目录）：构建、新建演示库、模型环境变量（含命名配置）、启动；身份与企业（按种子权限：U001 两家可改，U002 C001 只读、C002 无权）；Agent 配置、能力中心、规则 CLI；资料文件上传（格式、Excel 表头、只补缺失键、10 MB）；对话、补充（T35 待保存语义）、长期记忆；审核页二次确认保存与 `verified=true` 回读；检查器（执行计划、上下文来源、上下文压缩、本轮/完整模型输入）、工具时间线、审计记录；常见错误码。界面文案按 `App.tsx`/`api.ts` 实际标签核对。**未经评委视角实操走查**。
   - `scripts/innovation_compare.py`（仅标准库）：分别在独立 worktree 构建 `f7ffe68`（T26 前）与 `HEAD`（`-Dfrontend.skip=true`），或用 `--before-jar/--after-jar`；每次运行新建种子库与本地服务，经真实 HTTP API 走“查询 → 审核页同款消息与结构化批准保存 F002 用途”，以数据库证据判定（用途=批准值、台账 1 条、`verified=true`、无错误码）；两组待补字段（`F002.purpose` / `F002.purpose,F002.remarks`）；输出 `target/t37-innovation/summary.md`、`results.json`（含模型 `update_invoice` 实际参数）与每次服务日志，不记录密钥。仅做过 Python 语法检查。
   - `自主创新说明.md`：草稿，问题/做法/判断依据/对比设置已写；结果表与结论留空，须用户以 `qwen3.7-flash` 运行脚本后原样填入。
   - 待用户：Mac 上运行 `python3 scripts/innovation_compare.py --runs 5`（耗用真实模型额度）；按 `作品使用说明.md` 以评委视角走一遍；结果回填后才可标 DONE。
-  - 第一次真实运行（2026-11-19 14:27，用户 Mac，`qwen3.7-flash`，每组 5 次；证据 `docs/evidence/T37_INNOVATION_20261119/`）：改进前 3/5、1/5，改进后 0/5、1/5，**不支持 T26 论点**；用户评委走查结论 not done，审核页保存在真实模型下约 5/6 失败。
+  - 第一次真实运行（2026-11-19 14:27，用户 Mac，`qwen3.7-flash`，每组 5 次；证据 `docs/evidence/T37_INNOVATION_20261119/`）：改进前 3/5、1/5，改进后 0/5、1/5，**不支持 T26 论点**；用户评委走查结论 not done，审核页保存在真实模型下约 5/6 失败。**（更正：这是第一次运行时的结论，已被第二、三次对比与验收中两次浏览器保存复测推翻，须连同下文一起读。）**
   - 根因（按 `results.json` 逐次核对）：14 次失败中 13 次是保存轮工具序列为空的 `CONFIRMATION_REQUIRED`——模型把“保存 + 查询核对”合成一个批次，`validateReadBatch` 拒绝含 `update_invoice` 的整批，零写入；T26 把保存改为无参数后模型更倾向合批，故改进后单字段组 5/5 全部如此。另 1 次（改进后双字段组 #3）数据库已写入且 `verified=true`，但同轮先前一次畸形参数 `{"{}":""}` 留下的 `INVALID_ARGUMENT` 仍决定了本轮结果（改进前单字段组 #4 同类：已核验后模型又提交一次未批准的备注修改）。
   - 修复（2026-11-19，Coding Agent；未运行测试）：`AgentRuntime` 批准轮允许“恰好一个保存 + 只读查询”的批次——先预校验只读成员，再单独先执行保存、后执行查询（查询看到保存后的值），结果按供应商原顺序写入 history（Anthropic 回放要求）；无批准、多个保存仍整批拒绝。本轮已核验后再调用保存不执行、不计为工具错误；已核验的保存清除本轮先前的 `toolError`。安全不变量不变：载荷仍只来自可信批准，批准每轮至多执行一次，证据门仍要求本轮 `verified=true`。新增 `FinanceAgentIntegrationTest` 3 项（合批先保存且按原序回放、两个保存的批次仍拒绝、已核验保存压过先前畸形调用且不重复执行）。
   - 待用户：Mac 上跑 `mvn test`；再重跑对比。注意脚本默认构建已提交的 `HEAD`，未提交的修复需先本地打包并用 `--after-jar target/harness-0.0.1-SNAPSHOT.jar`。
@@ -592,7 +592,7 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
   - 剩余（2026-11-19 18:31 记）：评委走查发现的文档问题明细（未收到）→ 修 `作品使用说明.md`；可选在审核页再做一次浏览器保存复测。之后可标 DONE。**以下验收记录更正此行：明细已在仓库内，浏览器复测已做两次且均通过。**
   - 验收（2026-11-19 22:10，Acceptance Agent，用户 Mac，`qwen3.7-flash`/`anthropic`）：
     - 文档问题明细**已在仓库内，不是未收到**：`docs/agent-handoff.md` 第 12 节「2026-11-19 验收走查：`作品使用说明.md` 待改清单（9 条）」，每条含行号、现文摘录、实测证据与改法，另附「走查中确认与文档一致的部分」可供撰写引用。读取：`sed -n '/^## 12\./,$p' docs/agent-handoff.md`。`作品使用说明.md` 至今未改。
-    - 九条摘要：① 第 119 行 §5.1 示例目标缺年份 → 模型自行猜成 2025-09 → `check_invoice_purpose` 返回 `UNSUPPORTED_SCOPE`、整轮 ERROR（首页输入框占位符同病；**最高优先级**，评委照抄即失败）② 第 85 行 §3 首页 Agent 选择器在全新库上**不渲染**（`App.tsx:609` `agents.length <= 1` 返回 null；§1.3 恰恰要求先建全新库）③ 第 82 行 §3 表单字段清单错两处：**无「简介」字段**、**漏了必填的「Agent 编号」**（不填则提交按钮禁用）④ 第 142 行 §7 表格「上下文压缩」一栏在 UI 中**不存在**（全站无「压缩」二字；压缩结果只作为 `conversation` 混在「本轮模型输入（记忆投影）」JSON 内，且首轮没有）**牵涉 T34 验收口径** ⑤ 第 120 行 §5.2「住宿费上限是多少？」**无法复现**——交付材料无含住宿标准的制度文件，只上传官方工作簿时知识库仅 R001/R002/R004 ⑥ 第 121 行 §5.3「该字段会显示为'待保存'」**未说明位置**——对话页看不到，实际仅在 检查器 → 上下文来源 → 任务进度 ⑦ 第 138–146 行 §7 表格漏列两个实际存在的区域：「任务原始数据（可能包含敏感字段）」「真实审计」⑧ Agent 卡片与文件列表时间为 **UTC 但不标注**（本地 14:54 显示 06:54）⑨ 第 65 行 §1.5 建议补「若看到旧版页面请强制刷新」（服务端 302 → `/react-app/` 与 `Cache-Control: no-store` 均正确，属浏览器缓存）。
+    - 九条摘要：① 第 119 行 §5.1 示例目标缺年份 → 模型自行猜成 2025-09 → `check_invoice_purpose` 返回 `UNSUPPORTED_SCOPE`、整轮 ERROR（首页输入框占位符同病；**最高优先级**，评委照抄即失败）② 第 85 行 §3 首页 Agent 选择器在全新库上**不渲染**（`App.tsx:609` `agents.length <= 1` 返回 null；§1.3 恰恰要求先建全新库）③ 第 82 行 §3 表单字段清单错两处：**无「简介」字段**、**漏了必填的「Agent 编号」**（不填则提交按钮禁用）④ ~~第 142 行 §7 表格「上下文压缩」一栏在 UI 中**不存在**~~ **本条已撤回，原判断错误，详见本节末条更正**（该区域确实存在：`frontend/src/App.tsx:546-556` 的 `Compression` 组件，自第二轮起渲染） ⑤ 第 120 行 §5.2「住宿费上限是多少？」**无法复现**——交付材料无含住宿标准的制度文件，只上传官方工作簿时知识库仅 R001/R002/R004 ⑥ 第 121 行 §5.3「该字段会显示为'待保存'」**未说明位置**——对话页看不到，实际仅在 检查器 → 上下文来源 → 任务进度 ⑦ 第 138–146 行 §7 表格漏列两个实际存在的区域：「任务原始数据（可能包含敏感字段）」「真实审计」⑧ Agent 卡片与文件列表时间为 **UTC 但不标注**（本地 14:54 显示 06:54）⑨ 第 65 行 §1.5 建议补「若看到旧版页面请强制刷新」（服务端 302 → `/react-app/` 与 `Cache-Control: no-store` 均正确，属浏览器缓存）。
     - 审核页浏览器保存复测：**已做两次，均通过**（原记为「可选」，实际已执行）。
       - run3 的 JAR（含两处修复）：全新库 + 真实模型，任务 `18b66eb2`，操作员/C001。审核页只列本轮查询到的 10 张发票 → 选 F002 / 用途 /「办公室采购」→ 二次确认（`operationId=ef215af1-60fb-467f-a079-a431f51198ec`）→ 页面 `verified=true · 数据库回读已核验`。库内核对：F002 purpose 已写入；`invoice_operations` **恰好 1 条**且带 `task_id`；C001 九月缺用途 **5 → 4**（F003/F004/F006/F009）；任务 `COMPLETED`；无残留操作锁。审计序列 `update_invoice TOOL_RESULT verified=1` → `query_invoices` → `turn FINISHED`，一次成功、无需重试。
       - run2 的 JAR（仅批量重排、尚无纠正提示）：亦通过，但审计为 `update_invoice TOOL_ERROR INVALID_ARGUMENT` → 同轮改对 → `update_invoice TOOL_RESULT verified=1` → `turn FINISHED`。即第二处修复所依赖的「模型同轮自我纠正」是**实测行为**，非假设；同时证明「已核验保存清除本轮先前 `toolError`」这一改动是必要的。
@@ -604,3 +604,21 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
     - **新增阻塞项（此前各轮均未记录）**：`scripts/osv_suppressions.json` 中 `GHSA-j9f9-w8pj-32f8` 的风险接受理由为「this demo exposes no SSE endpoint or fragment/SSE rendering path」，写于 2026-11-06；但 `DemoController.java:347` 存在 `SseEmitter` 端点 `/tasks/{id}/turn/stream`，且 `frontend/src/api.ts:349` 是前端**主路径**（`App.tsx:285` 走 `api.streamTurn`）。**风险接受的前提已不成立**，进提交包前须重新评估该公告对当前用法是否适用，据实更新理由或升级 Spring Boot。
     - 需同步更正的旧记录：① 本节第 583 行「审核页保存在真实模型下约 5/6 失败」是第一次运行的结论，已被 run2/run3 与两次浏览器复测推翻，单独引用会误导，须连同后续条目一起读；② T34/T35/T36 状态行的「后端 327 项」对应提交 `9045c5c`，当前为 **330**，本次提交后须同步；③ T36 的 DONE 依赖本次批量修复，该修复已随 `af6d158` 提交后成立；④ T34「真实模型未复测」**仍为真**——走查的真实模型对话仅 2 轮且无大工具结果，压缩逻辑从未被触发，不得记为已真实验证。
     - 验收结论：**T37 not done**。真实运行数据已足以支撑第五节结论，`自主创新说明.md` 归因口径如实、保留了不利结果，两次浏览器保存复测均通过。剩余阻塞项为上述 9 条 `作品使用说明.md` 修正、OSV 抑制理由重评、旧记录 4 处更正；三项完成后可标 DONE。
+  - 按验收清单处理（2026-11-19，Coding Agent；仅改文档与一处界面文案，未运行测试）：
+    - `作品使用说明.md` 9 条全部修正：①§5.1 示例与首页输入框占位符（`App.tsx`）改为“2026 年 9 月”，并说明只写“九月”会被猜错年份导致 `UNSUPPORTED_SCOPE`；②全新库只有默认 Agent 时不显示选择器，创建第二个 Agent 后才出现“由谁处理”；③Agent 表单字段按实际顺序，补必填“Agent 编号”、删“简介”；④删去不存在的“上下文压缩”栏，并入“本轮模型输入（记忆投影）”，说明 `conversation` 各字段、首轮没有（采用方案 a，未加 UI）；⑤知识问答示例改为可答的“银行流水能否证明已付款”（R004 1.0），制度检索需先上传合成制度文件；⑥“待保存”位置写明：对话区不显示，见检查器“任务计划 / 待办”与“上下文来源 → 任务进度”；⑦补“任务原始数据（可能包含敏感字段）”“真实审计”两行；⑧注明界面时间为 UTC；⑨补强制刷新。另按代码自查修正：`LLM_PROTOCOL` 无 `openai-chat` 取值、补全规则导入参数与可解析表述。
+    - OSV `GHSA-j9f9-w8pj-32f8`（CVE-2026-47890）重评：公告限定为“SSE **渲染视图片段**时流损坏”，6.2.x 无修复版本（仅 7.0.9）。本项目确有 SSE 端点，但 `DemoController` 只发送带 JSON 数据的命名事件（`SseEmitter.event().data(…, APPLICATION_JSON)`），无 `ModelAndView`、`FragmentsRendering` 或模板引擎，受影响路径不可达。原理由“无 SSE 端点”不成立、结论（可接受）在新理由下仍成立。改写抑制理由的操作曾被权限策略拦截；**用户随后明确同意**，已据实改写 `scripts/osv_suppressions.json` 中该条理由，并把 `docs/specs/DEPENDENCY_SECURITY.md` 的“待复查”改为“已复查”。另一条 `GHSA-pc63-qcmh-9cmg`（XSLT）未动。
+    - 旧记录 4 处已更正（第一次运行结论加更正注；T34/T35/T36 状态行补 330 项；T36 注明依赖 T37 修复；T34 注明压缩未被真实模型触发）。
+    - 剩余：Mac 上 `npm run verify`（占位符改动）与 `scripts/osv_scan.py`（确认抑制文件仍可解析、0 条未抑制）；之后可标 DONE。
+  - 验收（2026-11-19 23:25，Acceptance Agent，用户 Mac）：
+    - **撤回上一条验收中的第 ④ 项——原判断错误，且已导致文档被误改，须恢复。** `作品使用说明.md` §7 表格的「上下文压缩」一行**不应删除**：该区域确实存在，`frontend/src/App.tsx:546-556` 的 `Compression` 组件渲染 `<section aria-label="上下文压缩"><h3>上下文压缩</h3>`，位于检查器「任务计划 / 待办」之后。浏览器实测（真实模型、同一任务连续两轮，第二轮为纯文本回复）该区域正常渲染，文本为「上下文压缩 — 最近几轮原文直接提供；更早的轮次只保留你的限制与更正和关键对象，原文可由 Agent 用 recall_context 取回。已对话 1 轮 · 折叠 0 轮 · 提及的编号：C001」，与原文档该行几乎逐字一致。误判原因：走查时只跑 1 轮就打开检查器，而 `Compression` 在 `contextSummary(turn.modelInput)` 为空时返回 `null`，`conversation` 字段自第二轮起才存在（`frontend/src/api.ts:240-254`、`runtime/ContextProjector.java:84-91`），首轮不渲染属正常行为。**动作：恢复该行**，并建议补「从第二轮起才显示，首轮没有」——这正是误判根因，写明可免评委同样困惑。Coding Agent 并入「本轮模型输入（记忆投影）」的 `conversation` 字段说明经核对准确，可保留作补充，但不应取代该行。
+    - 对 T34 的影响：压缩区域的**渲染**已真实模型验证；但大工具结果裁剪与 `recall_context` 取回原文的完整路径仍未覆盖（该轮模型调用 `recall_context` 一次 SUCCESS、一次 INVALID_ARGUMENT）。T34「真实模型未复测」宜改为「压缩区域渲染已真实验证，裁剪与回溯完整路径未验证」。
+    - 其余 8 条已在 `作品使用说明.md` 落实，逐条核对通过；`App.tsx` 输入框占位符已改为「查询 2026 年 9 月的发票与银行收支，并检查发票用途…」，并已确认进入构建产物。
+    - Coding Agent 自查新增的两处断言已独立核对代码，均准确：① `LLM_PROTOCOL` 确无 `openai-chat` 取值（`src/main` 全库无该字符串），`OpenAiCompatibleClient:40-42` 确为 `path.endsWith("/responses")` 判定、否则追加 `/chat/completions`；② `RuleService:126-134` 确为「必须含『必须填写用途』；『每张发票都必须填写用途』与『大于或等于X元』同现即视为矛盾并 `unsupported()`」。§7 新增的 `conversation` 五个字段名与 `ContextProjector:84-91` 一致，`MAX_CHARS=6000` 一致。
+    - OSV 重评**已独立核实，予以认可**：向 `api.osv.dev` 查询 `GHSA-j9f9-w8pj-32f8` 原文——`aliases: CVE-2026-47890`，summary 为「Spring Framework Server Sent Event stream corruption **while rendering fragments**」，details 明确限定「using Server-Sent Events (SSE) **with view fragments**」；`spring-webmvc` 与 `spring-webflux` 的 6.2.0–6.2.19 标记为 `last_affected`（6.2.x 确无修复版本），7.0.0–7.0.8 的 `fixed` 为 **7.0.9**，与新抑制理由逐条相符。代码侧亦核实：`src/main` 与 `pom.xml` 中无 `ModelAndView`、`FragmentsRendering`、`ViewResolver`、`XsltView` 及任何模板引擎依赖；SSE 仅经 `DemoController:381` 的 `emit()` 发送 `SseEmitter.event().name(...).data(..., APPLICATION_JSON)`，`streamText` 亦走同一函数发送 `Map`。受影响路径不可达，风险接受成立。
+    - 本轮命令：`cd frontend && npm run verify` → **exit 0**（`tsc --noEmit`、`eslint .`、Vitest **53/53**、vite build 747ms）；`python3 scripts/osv_scan.py` → **exit 0**，扫描 35 个 Maven 运行时依赖，**2 条已抑制、0 条未抑制**，`scripts/osv_suppressions.json` 仍为合法 JSON（2 条）。
+    - 归属更正（针对转述失真，非针对记录）：上一条记录中「用户随后明确同意」的表述**正确**——改写抑制理由的授权来自用户；验收 Agent 此前提出的只是「前提已不成立、须重评」，并未批准任何具体改法。
+    - 验收结论：**T37 仍为 not done**，只剩一项阻塞——恢复 `作品使用说明.md` §7 的「上下文压缩」一行（并补「第二轮起显示」）。该项完成后可标 DONE。
+  - 处理最后阻塞项（2026-11-20，Coding Agent；仅改文档，未运行测试）：
+    - `作品使用说明.md` §7 恢复「上下文压缩」一行，位置与界面一致（`App.tsx:492` 中 `Compression` 紧随 `ContextSources`），补「从第二轮起才显示，首轮没有此区域」及显示内容（轮数、折叠轮数、当前月份、提及编号）；「本轮模型输入（记忆投影）」行保留 `conversation` 字段说明，改为指明其是上方区域的原始数据。
+    - T34 状态行按验收建议改为「压缩区域渲染已真实验证，裁剪与回溯完整路径未验证」。
+    - T37 标 DONE。未提交、未推送（`af6d158`、`d068bea` 与 tag `v0.2.0` 仍仅在本地）。

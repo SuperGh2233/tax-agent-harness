@@ -1,4 +1,4 @@
 {
-  "GHSA-j9f9-w8pj-32f8": "Spring Framework 6.2.19 has no 6.x fixed release; this demo exposes no SSE endpoint or fragment/SSE rendering path. Risk accepted for the local competition demo; upgrade with the next Spring Boot 3.5.x patch.",
+  "GHSA-j9f9-w8pj-32f8": "CVE-2026-47890: SSE stream corruption when rendering view fragments; no fixed 6.2.x release (fix only in Spring Framework 7.0.9). Re-assessed 2026-11-19: the demo exposes one SSE endpoint (POST /api/demo/tasks/{id}/turn/stream) but only sends named events with JSON data via SseEmitter.event().data(..., APPLICATION_JSON); no ModelAndView, FragmentsRendering or template engine, so the fragment-rendering path is not reachable. Loopback-only demo. Risk accepted; re-assess if view rendering is added.",
   "GHSA-pc63-qcmh-9cmg": "Spring Framework 6.2.19 has no 6.x fixed release; this demo uses no XSLT/XsltView bean or XML view resolution. Risk accepted for the local competition demo; upgrade with the next Spring Boot 3.5.x patch."
 }
