@@ -100,7 +100,9 @@ env -u LLM_ENDPOINT -u LLM_API_KEY -u LLM_MODEL TAXAGENT_DATABASE="$T13_DEMO_DB"
 
 JAR 绑定127.0.0.1:18083，HTTP健康200/UP，HTML与JS/CSS可访问；真实浏览器显示本地模拟身份并恢复任务，未配置模型 turn 返回200/MODEL_NOT_CONFIGURED。只读核对新库2企业/2用户/4权限/40发票/48流水/5规则，invoice_operations=0。Ctrl+C停止后curl连接失败（退出7），确认服务停止。未调用真实模型。日志在临时目录 test-escalated.log、package.log、server.log，非提交附件。
 
-**未验证：空缓存首次在线依赖下载、真正全新 Git checkout、其他平台和 Maven最低版本、真实模型、真实视频、最终压缩包。** 为避免不必要下载没有联网重建缓存。T13 因空缓存/全新 checkout 未证实保留 IN_PROGRESS；用户下一步在独立新 checkout（先完成代码整合）执行第2节在线命令，再离线复跑，补确切证据。录屏和提交材料按 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) 人工完成。
+**未验证（截至 2026-10-30）：空缓存首次在线依赖下载、真正全新 Git checkout、其他平台和 Maven最低版本、真实模型、真实视频、最终压缩包。** 为避免不必要下载没有联网重建缓存。录屏和提交材料按 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) 人工完成。
+
+> **更正（2026-11-20，T39）**：上条中的「空缓存首次在线依赖下载」与「真正全新 Git checkout」已在本机验证通过。`scripts/fresh_checkout_check.py` 把提交 `0c98ec4` 克隆到新临时目录（`git clone --no-local`，只含已提交文件，不含 target/.m2/node_modules/dist/data/.env），用该目录下的**空** Maven 仓库在线 `test`（336/0/0/0）与 `-DskipTests package`，再核 JAR 内 `static/react-app/index.html`、初始化新库、loopback `/api/health`=UP 与 `/react-app/` HTTP 200，最后在该缓存上离线 `-o package` 复跑；13 步全部通过，总耗时约 92 秒（含 Node 与依赖下载）。证据见 `docs/evidence/T39_FRESH_CHECKOUT_20261120/`。真实模型已由 T13/T37/T38/T39 各轮验证。仍未验证：其他平台、Maven 最低版本、真实视频、最终压缩包。
 
 ## 2026-10-30 测试配置记录（历史快照）
 以下配置和“真实 E2E 等待凭证”的状态仅代表 2026-10-30 当时的测试准备情况，已被 2026-11-02 的真实 Qwen API 只读跨轮验证及后续延迟适配更新。**不要将此段当作当前测试状态或照搬旧密钥配置。** 当前模型参数、验证结论和本机凭证处理方式以 [DEMO_SCRIPT.md](DEMO_SCRIPT.md) 与 [docs/agent-handoff.md](docs/agent-handoff.md) 为准。所有凭证只在本机安全终端使用，不得写入仓库、日志或聊天。

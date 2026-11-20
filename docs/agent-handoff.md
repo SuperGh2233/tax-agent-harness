@@ -326,9 +326,10 @@ npm run verify
   - **有待补/待保存字段时，模型 `Finish` 的原文保留，后接“任务尚未完成。”与待补提示**（用户 2026-11-20 决定，取代 T16/T35 的整段替换），`task.question` 只存待补提示。
 - 尚未实测：call_id 提示与用途检查说明对真实模型的效果（长对话脚本未在最终代码上重跑）；大工具结果裁剪分页仍只有离线测试。
 
-## 15. 2026-11-20 T39（IN_PROGRESS，随本次提交入库）
+## 15. 2026-11-20 T39（DONE，随本次提交入库）
 
 - 修掉一个真实缺陷：`recall_context` 取回的一页本身可能超过 6000 字符，会被 `AgentRuntime.compactForModel` 二次压缩成 3000 字符预览，模型以为拿到整页。现由 `ContextRecall.MAX_PAGE_CHARS`（5000）逐行装入直到超限，备注写明本页行数与继续用的 `offset`；非行结果截断上限 `MAX_JSON` 由 12000 降到 4500。
-- 已通过：后端 `mvn test` **336 项 0 失败**；`scripts/large_result_check.py`（真实 qwen3.7-flash、全新库、60 张合成发票）**9 项全通过**，证据 `docs/evidence/T39_LARGE_RESULT_20261120/`。**第 14 节末条「大工具结果裁剪分页仍只有离线测试」已被本次实验推翻**，该路径现为真实模型验证；T36 故障注入仍只有离线测试。
-- 仍未跑：`scripts/fresh_checkout_check.py`（只验证已提交内容，须在本提交之后运行），因此 T39 保持 IN_PROGRESS；通过后可标 DONE。
-- 本机 8080 / 18084 无残留监听，`main` 与 `origin/main` 在提交前同为 `81e7963`。
+- 真实模型验证：后端 `mvn test` **336 项 0 失败**；`scripts/large_result_check.py`（qwen3.7-flash、全新库、60 张合成发票）**9 项全通过**，证据 `docs/evidence/T39_LARGE_RESULT_20261120/`。**第 14 节末条「大工具结果裁剪分页仍只有离线测试」已被本次实验推翻**，该路径现为真实模型验证。
+- 全新检出验证：提交 `0c98ec4` 后跑 `scripts/fresh_checkout_check.py`，**13 步全部通过**（约 92 秒）——新临时目录 `clone --no-local`、空 Maven 仓库在线 `test` 336/0/0/0、在线 `package`（实际下载 Node v22.12.0 并 `npm ci`，JAR 内含 `static/react-app/index.html`）、新库初始化、loopback `/api/health`=UP 与 `/react-app/` 200、离线 `-o package` 复跑；证据 `docs/evidence/T39_FRESH_CHECKOUT_20261120/`。`REPRODUCE.md` 中「空缓存首次在线依赖下载、真正全新 Git checkout 未验证」的旧结论已就地加更正。
+- 仍只有离线测试的：T36 故障注入（模型超时、连续错误熔断、响应丢失、进程重启）。仍未验证：其他平台、Maven 最低版本、真实视频、最终压缩包。
+- 本机 8080 / 18084 无残留监听；本次提交前 `main` 已含 `0c98ec4`（T39 代码），本条为其验收记录。
