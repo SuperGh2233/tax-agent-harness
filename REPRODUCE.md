@@ -37,6 +37,8 @@ mvn -o -B -ntp "-Dmaven.repo.local=$T13_REPO" -DskipTests package
 
 离线缺依赖时停止，允许联网后重跑在线命令；不要把 `-o` 当成首次安装方式。JAR 启动不需要 Maven 或网络。可选 `mvn spring-boot:run` 首次在线时用下节命令去掉 `-o`；只验证 package 不代表 run 插件完整离线缓存已就绪。
 
+自动化（T39）：`python3 scripts/fresh_checkout_check.py [--ref <提交>]` 把已提交内容克隆到新临时目录，用空 Maven 仓库执行本节在线命令与离线复跑，并检查 JAR 内 UI、初始化新库、loopback 健康检查与 React 页面；结果写入 `target/t39-fresh-checkout/`。它只覆盖已提交的文件，不含官方复赛材料等未跟踪内容。
+
 ## 3. 初始化全新独立数据库
 
 ```sh

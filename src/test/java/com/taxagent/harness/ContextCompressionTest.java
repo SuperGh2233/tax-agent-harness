@@ -132,6 +132,26 @@ class ContextCompressionTest {
             catch (DomainException e) { throw e; } catch (Exception e) { throw new IllegalStateException(e); } });
     }
 
+    @Test void aLargeRecallPageIsCutToWhatReachesTheModelWholeAndSaysWhereToContinue() throws Exception {
+        // T39: a recalled page over 6000 characters used to be compacted again into a 3000-character preview.
+        var values = new StringJoiner(",");
+        for (int i = 0; i < 60; i++) values.add("('C001','Y%03d','2026-10-%02d','较长的合成销售方名称有限公司','较长的合成票面项目名称用于触发结果压缩第%d张',%d,'办公用品采购','合成数据')"
+                .formatted(i, 1 + i % 28, i, 10000 + i));
+        sql("INSERT INTO invoices VALUES " + values);
+        var model = new Script();
+        model.next.add(r -> new Call("q-big", "query_invoices", "{\"enterprise_id\":\"C001\",\"month\":\"2026-10\"}"));
+        model.next.add(r -> call("recall_context", "{\"source\":\"TOOL_RESULT\",\"call_id\":\"q-big\",\"offset\":20,\"limit\":50}"));
+        var agent = new FinanceAgent(db, operator, "C001", model);
+        var turn = agent.turn(agent.start("十月发票", List.of()).id(), "十月发票");
+        var recall = turn.result().history().get(1);
+        assertThat(recall.modelJson()).isNull(); // Not compacted: the model receives the page whole.
+        var page = JSON.readTree(recall.resultJson()).path("data");
+        int returned = page.path("returned").asInt();
+        assertThat(returned).isBetween(1, 39);
+        assertThat(JSON.readTree(page.path("content").asText()).at("/data/rows")).hasSize(returned);
+        assertThat(page.path("note").asText()).contains("大小上限", "offset=" + (20 + returned));
+    }
+
     @Test void aMadeUpCallIdIsAnsweredWithTheIdsThatExistAndCanBeCorrected() throws Exception {
         // Seen with the real model (T38): it guessed "query_invoices_C001_2026-08" because ids are only shown in compaction notes.
         var model = new Script();

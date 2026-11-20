@@ -16,7 +16,7 @@ Usage (JDK 21 and LLM_* variables set in the shell; nothing secret is written to
     python3 scripts/long_conversation_check.py --jar target/harness-0.0.1-SNAPSHOT.jar
 Output: <out>/results.json, <out>/summary.md and the server log.
 """
-import argparse, json, os, subprocess, sys, tempfile, time, urllib.parse, urllib.request
+import argparse, contextlib, json, os, subprocess, sys, tempfile, time, urllib.parse, urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -171,21 +171,20 @@ def summary(turns, results, meta):
     return "\n".join(lines) + "\n"
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--jar", default=str(ROOT / "target" / "harness-0.0.1-SNAPSHOT.jar"))
-    p.add_argument("--out", default=str(ROOT / "target" / "t38-long-conversation"))
-    a = p.parse_args()
+def require_model():
     for name in ("LLM_ENDPOINT", "LLM_API_KEY", "LLM_MODEL"):
         if not os.environ.get(name): sys.exit(f"{name} is not set; this check needs the real model")
-    jar, out = Path(a.jar).resolve(), Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
-    db = Path(tempfile.mkdtemp(prefix="t38-")) / "demo.db"
+
+
+@contextlib.contextmanager
+def server(jar, out, prefix):
+    """A fresh official-seed database and a loopback server on a free port; yields (base URL, database path)."""
+    db = Path(tempfile.mkdtemp(prefix=prefix)) / "demo.db"
     subprocess.run(["java", "-jar", str(jar), "--initialize-data", f"--database={db}"], check=True, stdout=subprocess.DEVNULL)
     port = free_port()
     log = (out / "server.log").open("w")
-    server = subprocess.Popen(["java", "-jar", str(jar), f"--taxagent.database={db}", "--server.address=127.0.0.1",
-                               f"--server.port={port}"], stdout=log, stderr=subprocess.STDOUT)
+    process = subprocess.Popen(["java", "-jar", str(jar), f"--taxagent.database={db}", "--server.address=127.0.0.1",
+                                f"--server.port={port}"], stdout=log, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
     try:
         for _ in range(120):
@@ -194,17 +193,33 @@ def main():
                     if r.status == 200: break
             except Exception: time.sleep(0.5)
         else: sys.exit("server not ready; see server.log")
-        turns = converse(base)
+        yield base, db
     finally:
-        server.terminate()
-        try: server.wait(timeout=20)
-        except subprocess.TimeoutExpired: server.kill()
+        process.terminate()
+        try: process.wait(timeout=20)
+        except subprocess.TimeoutExpired: process.kill()
         log.close()
+
+
+def model_meta(jar, db):
+    """What was run, without anything secret: the endpoint is reduced to its host."""
+    return {"generatedAt": time.strftime("%Y-%m-%d %H:%M:%S %z"), "model": os.environ["LLM_MODEL"],
+            "protocol": os.environ.get("LLM_PROTOCOL", "(by endpoint)"),
+            "endpointHost": urllib.parse.urlparse(os.environ["LLM_ENDPOINT"]).hostname, "jar": jar.name, "database": str(db)}
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--jar", default=str(ROOT / "target" / "harness-0.0.1-SNAPSHOT.jar"))
+    p.add_argument("--out", default=str(ROOT / "target" / "t38-long-conversation"))
+    a = p.parse_args()
+    require_model()
+    jar, out = Path(a.jar).resolve(), Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    with server(jar, out, "t38-") as (base, db):
+        turns = converse(base)
     results = checks(turns)
-    endpoint = os.environ["LLM_ENDPOINT"]
-    meta = {"generatedAt": time.strftime("%Y-%m-%d %H:%M:%S %z"), "model": os.environ["LLM_MODEL"],
-            "protocol": os.environ.get("LLM_PROTOCOL", "(by endpoint)"), "endpointHost": urllib.parse.urlparse(endpoint).hostname,
-            "jar": jar.name, "database": str(db)}
+    meta = model_meta(jar, db)
     (out / "results.json").write_text(json.dumps({"meta": meta, "checks": [{"check": n, "passed": ok, "detail": d} for n, ok, d in results],
                                                   "turns": turns}, ensure_ascii=False, indent=2), encoding="utf-8")
     (out / "summary.md").write_text(summary(turns, results, meta), encoding="utf-8")

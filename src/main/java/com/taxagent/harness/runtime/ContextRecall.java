@@ -12,7 +12,8 @@ import java.util.*;
  * trusted user and enterprise. It reads only; every lookup rechecks access through TaskMemory or FileService.
  */
 public final class ContextRecall {
-    static final int MAX_TEXT = 4000, MAX_JSON = 12_000, DEFAULT_ROWS = 20, MAX_LISTED_CALLS = 5;
+    // MAX_PAGE_CHARS and MAX_JSON keep a recalled result under AgentRuntime.MAX_MODEL_RESULT_CHARS once wrapped.
+    static final int MAX_TEXT = 4000, MAX_JSON = 4500, MAX_PAGE_CHARS = 5000, DEFAULT_ROWS = 20, MAX_LISTED_CALLS = 5;
     private static final ObjectMapper JSON = new ObjectMapper();
     private final Path database;
     private final TaskMemory memory;
@@ -50,13 +51,23 @@ public final class ContextRecall {
         if (!rows.isArray()) return new RecallResult("TOOL_RESULT", query.callId(), clip(json, MAX_JSON), null, null, null, null);
         int offset = query.offset() == null ? 0 : query.offset();
         int limit = query.limit() == null ? DEFAULT_ROWS : query.limit();
+        int wanted = Math.max(0, Math.min(rows.size(), offset + limit) - offset);
         var page = JSON.createArrayNode();
-        for (int i = offset; i < Math.min(rows.size(), offset + limit); i++) page.add(rows.get(i));
         var copy = (ObjectNode) root.deepCopy();
         ((ObjectNode) copy.get("data")).set("rows", page);
+        // T39: a page the runtime would compact again reaches the model as a 3000-character preview, so it stops
+        // at what fits once escaped into content; the note says where to continue.
+        for (int i = offset; i < offset + wanted; i++) {
+            page.add(rows.get(i));
+            if (page.size() > 1 && JSON.writeValueAsString(JSON.writeValueAsString(copy)).length() > MAX_PAGE_CHARS) {
+                page.remove(page.size() - 1);
+                break;
+            }
+        }
         int next = offset + page.size();
+        var note = page.size() < wanted ? "本页按大小上限只返回 " + page.size() + " 行；" : "";
         return new RecallResult("TOOL_RESULT", query.callId(), JSON.writeValueAsString(copy), rows.size(), offset, page.size(),
-                next < rows.size() ? "还有 " + (rows.size() - next) + " 行，可用 offset=" + next + " 继续取回；合计字段始终是全部行的程序计算结果。" : "已到最后一行。");
+                next < rows.size() ? note + "还有 " + (rows.size() - next) + " 行，可用 offset=" + next + " 继续取回；合计字段始终是全部行的程序计算结果。" : "已到最后一行。");
     }
 
     /** The model never sees call ids unless a result was compacted, so a wrong one gets the ids that exist (T38). */

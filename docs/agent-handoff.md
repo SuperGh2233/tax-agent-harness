@@ -325,3 +325,10 @@ npm run verify
   - 界面时间改为本地时区显示。
   - **有待补/待保存字段时，模型 `Finish` 的原文保留，后接“任务尚未完成。”与待补提示**（用户 2026-11-20 决定，取代 T16/T35 的整段替换），`task.question` 只存待补提示。
 - 尚未实测：call_id 提示与用途检查说明对真实模型的效果（长对话脚本未在最终代码上重跑）；大工具结果裁剪分页仍只有离线测试。
+
+## 15. 2026-11-20 T39（IN_PROGRESS，随本次提交入库）
+
+- 修掉一个真实缺陷：`recall_context` 取回的一页本身可能超过 6000 字符，会被 `AgentRuntime.compactForModel` 二次压缩成 3000 字符预览，模型以为拿到整页。现由 `ContextRecall.MAX_PAGE_CHARS`（5000）逐行装入直到超限，备注写明本页行数与继续用的 `offset`；非行结果截断上限 `MAX_JSON` 由 12000 降到 4500。
+- 已通过：后端 `mvn test` **336 项 0 失败**；`scripts/large_result_check.py`（真实 qwen3.7-flash、全新库、60 张合成发票）**9 项全通过**，证据 `docs/evidence/T39_LARGE_RESULT_20261120/`。**第 14 节末条「大工具结果裁剪分页仍只有离线测试」已被本次实验推翻**，该路径现为真实模型验证；T36 故障注入仍只有离线测试。
+- 仍未跑：`scripts/fresh_checkout_check.py`（只验证已提交内容，须在本提交之后运行），因此 T39 保持 IN_PROGRESS；通过后可标 DONE。
+- 本机 8080 / 18084 无残留监听，`main` 与 `origin/main` 在提交前同为 `81e7963`。
