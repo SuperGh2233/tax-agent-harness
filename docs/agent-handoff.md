@@ -341,10 +341,14 @@ npm run verify
 - 未改业务代码与测试；后端仍 336 项。
 - 仍未验证：其他平台、Maven 最低版本、真实视频、最终压缩包。
 
-## 17. 2026-11-20 T41（IN_PROGRESS，已提交待推送）
+## 17. 2026-11-20 T41（DONE，已推送）
 
 - 缺陷：`mvnw` 在 Git 中是 100644，全新克隆后 `./mvnw` 报 Permission denied。**注意**：本节初稿写「工作树已改为 100755」并不成立——21:06 复核时索引与磁盘都还是 644，那次 chmod 没生效。已用 `chmod +x mvnw && git add mvnw` 落到索引并单独提交 `892e217`（`mode change 100644 => 100755`）。
-- `fresh_checkout_check.py` 新增 `--maven <版本>`（下载并核对 SHA-512）与 `--maven wrapper`。版本识别会跳过 JDK 24+ 的警告行并去掉颜色码；每次运行前清理旧日志。
-- **Maven 3.6.3 + JDK 21 已实测 15/15 通过**，证据 `docs/evidence/T41_MAVEN_363_20261120/`。JDK 25 下也能构建运行（未归档，不作为支持配置）。
-- **Maven Wrapper + JDK 21 已实测 15/15 通过**（`892e217`，1 分 43 秒，Wrapper 自取 Maven 3.9.9），证据 `docs/evidence/T41_WRAPPER_20261120/`。CI 三个 Wrapper 作业走的正是这条路径，本机已先验证。
-- 新增 `.github/workflows/fresh-checkout.yml`（Ubuntu、Windows、macOS 用 Wrapper，Ubuntu 另用 3.6.3），推送后才会运行。其他平台待看结果。
+- `fresh_checkout_check.py` 新增 `--maven <版本>`（下载并核对 SHA-512）与 `--maven wrapper`。版本识别会跳过 JDK 24+ 的警告行并去掉颜色码；每次运行前清理旧日志；Windows 下把临时目录展开成长名（见下）。
+- **Maven 3.6.3 + JDK 21 已实测 15/15 通过**，证据 `docs/evidence/T41_MAVEN_363_20261120/`。
+- **Maven Wrapper + JDK 21 已实测 15/15 通过**（`892e217`），证据 `docs/evidence/T41_WRAPPER_20261120/`。
+- **GitHub Actions 四作业全绿**（run `44748507398`，提交 `9ff7830`）：Ubuntu/Windows/macOS 用 Wrapper、Ubuntu 另用 3.6.3；证据 `docs/evidence/T41_CI_20261120/`。
+- 前两次 CI 只在 Windows 失败，暴露两个真问题，均已修：
+  - `67b7a0e`：`AgentRuntimeTest` 的超时用例断言通过后，被放弃的工具线程仍占着 `runtime.db`，JUnit 删 `@TempDir` 在 Windows 上失败。测试改为等文件可删除再结束。
+  - `9ff7830`：runner 的 `%TEMP%` 是 8.3 短名（`RUNNER~1`），Node 按长名解析，Vite 因此产出绝对 chunk 名、`npm run build` 失败。检查脚本改用 `GetLongPathNameW` 展开的目录克隆。
+- 仍未验证：真实视频、最终压缩包。CI 残留提示：`checkout@v4`、`setup-python@v5`、`upload-artifact@v4` 仍以 Node 20 为目标（被强制跑在 Node 24），不影响结果。

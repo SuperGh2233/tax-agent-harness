@@ -684,7 +684,7 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 收尾：T40 DONE。至此 T36 验收列出的四类故障注入（模型超时、连续错误熔断、响应丢失、进程重启）都已在真实 JAR 进程上复测。说明：这里用的是桩模型，证明的是程序对这些故障的处理，不是某个真实模型会不会触发这些故障。
 
 ### T41 — 文档写明但从未验证的环境：Maven 最低版本、其他平台、Wrapper（2026-11-20）
-- 状态：IN_PROGRESS（2026-11-20，Coding Agent；Maven 3.6.3 与 Maven Wrapper 两条路径均已在 JDK 21 下实测通过，其他平台待推送后看 GitHub Actions）。依据用户指示「还有什么不足之处，继续完善」，针对 REPRODUCE/README/作品使用说明 写着「Maven 3.6.3+」、却一直列为未验证的「Maven 最低版本」与「其他平台」两项。不改业务代码。
+- 状态：DONE（2026-11-20，Coding Agent；Maven 3.6.3、仓库 Wrapper、以及 Ubuntu/Windows/macOS 三平台全部实测通过，GitHub Actions run `44748507398` 四个作业全绿）。依据用户指示「还有什么不足之处，继续完善」，针对 REPRODUCE/README/作品使用说明 写着「Maven 3.6.3+」、却一直列为未验证的「Maven 最低版本」与「其他平台」两项。不改业务代码。
 - 缺陷（核查时发现）：`mvnw` 在 Git 中是 100644。全新克隆后 `./mvnw` 会报 Permission denied，与 REPRODUCE「`./mvnw -v`」的说明不符；Windows 的 `mvnw.cmd` 不受影响。**更正**：本条最初写「已在工作树改为 100755」并不成立——21:06 复核时 `git ls-files -s mvnw` 仍为 100644、磁盘仍 `-rw-r--r--`、`git diff --summary` 为空，那次 chmod 未生效。已用 `chmod +x mvnw && git add mvnw` 落到索引并单独提交 `892e217`，`git show --summary` 显示 `mode change 100644 => 100755 mvnw`；随后 21:13 的 Wrapper 运行在克隆出的树上确认 `mvnw` 可执行。
 - `scripts/fresh_checkout_check.py` 新增：
   - `--maven <版本>`：从 `archive.apache.org` 下载该版本 Maven，按同目录 `.sha512` 核对后解压到临时目录，用它跑全部在线、离线构建。新增步骤 `maven-download`、`maven-version`。
@@ -707,4 +707,9 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
   - 结论：文档写的「JDK 21 + Maven 3.6.3+」最低组合已实测，「Maven 最低版本」不再列为未验证。
   - 摘要里的版本串带 Maven 3.6.3 的颜色码。这次识别正确，只是因为那行恰好是第一行；脚本已改为匹配前先去掉颜色码。
 - 第三轮验证（2026-11-20 21:13–21:15，JDK 21.0.12.1，提交 `892e217`，`--maven wrapper`）：**15 步全部通过**，1 分 43 秒，证据 `docs/evidence/T41_WRAPPER_20261120/`。逐项：克隆出的 `mvnw` 可执行（`mvnw-executable` 通过）→ Wrapper 自行下载并在临时 `MAVEN_USER_HOME` 下使用 **Apache Maven 3.9.9** → 空仓库在线 `test` **336/0/0/0** → 在线 `package`（JAR 56,793,086 字节，含 React 页面）→ 新库初始化 → 健康检查 UP、React 页面 200 → 离线复跑通过。即 Wrapper 路径（CI 三个作业要走的路径）在本机已可用，不再依赖「等 CI 才发现」。
-- 剩余：其他平台。包含本条记录的提交推送后，看 GitHub Actions 的 4 个作业：Ubuntu、Windows、macOS 用 Wrapper，Ubuntu 另用 Maven 3.6.3。结果出来后，T41 才可标 DONE。
+- 第四轮验证（2026-11-20 21:54–22:09，GitHub Actions run `44748507398`，提交 `9ff7830`）：**四个作业全部成功**，证据 `docs/evidence/T41_CI_20261120/`。Ubuntu（Wrapper 3.9.9）15/15、Ubuntu（Maven 3.6.3）15/15、macOS arm64（Wrapper）15/15、Windows AMD64（Wrapper）14/14（无 POSIX 的 `mvnw-executable` 步）。三平台均 336 项测试全过、JAR 内含 React 页面、新库初始化与 loopback 健康检查通过、离线复跑成功。
+- 前两次运行只失败在 Windows，各自暴露一个真问题，均已修：
+  - `67b7a0e`（测试卫生）：`AgentRuntimeTest.lockedToolTimesOutWithoutModelRetryOrEmptySuccess` 的断言本身通过，但超时返回后被放弃的工具线程仍在等 SQLite 放弃锁、占着 `runtime.db`，JUnit 删除 `@TempDir` 时报「The process cannot access the file」。POSIX 允许删除已打开文件、Windows 不允许，故只在 Windows 失败。测试改为等 db 文件可删除（即句柄已释放）再结束（20s 上限、50ms 轮询）。
+  - `9ff7830`（检查脚本）：runner 的 `%TEMP%` 是 8.3 短名 `C:\Users\RUNNER~1\...`，Node 按长名解析同一文件，Vite 计算相对路径时前缀不匹配，产出绝对 chunk 名 → `npm run build` 报 `fileName must be neither absolute nor relative`。`fresh_checkout_check.py` 新增 `long_path()`（Windows 用 `GetLongPathNameW` 展开），克隆目录改用长名；前端构建未改。
+  - 第二轮还确认过一处已修好的：Windows 上 `mvn test` 已达 336/0/0/0，说明上一轮的句柄修复有效。
+- 收尾：T41 DONE。文档承诺的「JDK 21 + Maven 3.6.3+」与「其他平台」不再列为未验证；`mvnw` 可执行、`--maven wrapper` 路径、CI 三平台均有证据。仍未验证：真实视频、最终压缩包。CI 残留提示：`actions/checkout@v4`、`actions/setup-python@v5`、`actions/upload-artifact@v4` 仍以 Node 20 为目标（被强制跑在 Node 24），不影响结果；`setup-java` 已升 v5。

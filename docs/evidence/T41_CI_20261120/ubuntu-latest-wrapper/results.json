@@ -1,0 +1,150 @@
+{
+  "meta": {
+    "generatedAt": "2026-11-20 13:55:00 +0000",
+    "ref": "HEAD",
+    "commit": "9ff7830f7803a17ab467ac7e3c0af8ab5bf2a9ef",
+    "java": "openjdk version \"21.0.13\" 2026-10-20 LTS",
+    "maven": "Apache Maven 3.9.9 (8e8579a9e76f7d015ee5ec7bfcdc97d260186937)",
+    "mavenSource": "仓库 Maven Wrapper",
+    "os": "linux x86_64",
+    "workDir": "/tmp/t39-fresh-gdev0ymn"
+  },
+  "steps": [
+    {
+      "step": "java-21",
+      "passed": true,
+      "detail": "openjdk version \"21.0.13\" 2026-10-20 LTS",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "clone",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 0.2,
+      "log": "02-clone.log",
+      "tail": []
+    },
+    {
+      "step": "checkout",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 0.0,
+      "log": "03-checkout.log",
+      "tail": []
+    },
+    {
+      "step": "mvnw-executable",
+      "passed": true,
+      "detail": "克隆出的 mvnw 可执行",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "maven-version",
+      "passed": true,
+      "detail": "Apache Maven 3.9.9 (8e8579a9e76f7d015ee5ec7bfcdc97d260186937)",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "clean-tree",
+      "passed": true,
+      "detail": "不应存在的目录 —",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "official-seed",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 0.1,
+      "log": "07-official-seed.log",
+      "tail": [
+        "PASS: original hashes and all seed fields verified"
+      ]
+    },
+    {
+      "step": "mvn-test-online",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 42.3,
+      "log": "08-mvn-test-online.log",
+      "tail": [
+        "[INFO] Total time:  40.516 s",
+        "[INFO] Finished at: 2026-11-20T13:55:44Z",
+        "[INFO] ------------------------------------------------------------------------"
+      ]
+    },
+    {
+      "step": "test-counts",
+      "passed": true,
+      "detail": "{\"tests\": 336, \"failures\": 0, \"errors\": 0, \"skipped\": 0}",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "mvn-package-online",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 19.0,
+      "log": "10-mvn-package-online.log",
+      "tail": [
+        "[INFO] Total time:  18.011 s",
+        "[INFO] Finished at: 2026-11-20T13:56:03Z",
+        "[INFO] ------------------------------------------------------------------------"
+      ]
+    },
+    {
+      "step": "jar-contains-ui",
+      "passed": true,
+      "detail": "BOOT-INF/classes/static/react-app/index.html 存在；JAR 56,793,086 字节",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "initialize-data",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 0.7,
+      "log": "12-initialize-data.log",
+      "tail": [
+        "Initialized (existing records preserved): /tmp/t39-fresh-gdev0ymn/demo.db"
+      ]
+    },
+    {
+      "step": "server-health",
+      "passed": true,
+      "detail": "/api/health {'status': 'UP'}",
+      "seconds": 2.9,
+      "log": "13-server.log",
+      "tail": []
+    },
+    {
+      "step": "server-react-page",
+      "passed": true,
+      "detail": "/react-app/ HTTP 200",
+      "seconds": 2.9,
+      "log": "13-server.log",
+      "tail": []
+    },
+    {
+      "step": "mvn-package-offline",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 10.5,
+      "log": "15-mvn-package-offline.log",
+      "tail": [
+        "[INFO] Total time:  9.364 s",
+        "[INFO] Finished at: 2026-11-20T13:56:17Z",
+        "[INFO] ------------------------------------------------------------------------"
+      ]
+    }
+  ]
+}
