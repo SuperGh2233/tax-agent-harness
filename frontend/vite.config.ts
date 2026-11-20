@@ -1,9 +1,14 @@
+import { realpathSync } from 'node:fs'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig(({ mode }) => {
-  const target = loadEnv(mode, '.', 'T15_').T15_BACKEND_ORIGIN || 'http://127.0.0.1:8080'
+  // Windows 8.3 short names (a %TEMP% path looks like C:\Users\RUNNER~1\...) make Node resolve the same file
+  // under its long name; vite then computes the html chunk name outside the root and the build fails with
+  // "fileName ... must be neither absolute nor relative". Pinning root to the long form keeps every id under it.
+  const root = realpathSync(new URL('.', import.meta.url))
+  const target = loadEnv(mode, root, 'T15_').T15_BACKEND_ORIGIN || 'http://127.0.0.1:8080'
   const url = new URL(target)
 
   if (
@@ -19,6 +24,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
+    root,
     base: '/react-app/',
     plugins: [react(), tailwindcss()],
     server: {

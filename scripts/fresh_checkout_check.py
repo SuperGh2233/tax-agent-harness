@@ -107,19 +107,6 @@ def download_maven(version, work):
     return str(home / "bin" / ("mvn.cmd" if os.name == "nt" else "mvn")), expected
 
 
-def long_path(path):
-    """Windows 8.3 names (%TEMP% is C:\\Users\\RUNNER~1\\...) break Vite's relative-path maths: rollup then emits
-    an absolute chunk name and the frontend build fails. The same directory under its long name works, so the clone
-    is placed there. No effect elsewhere."""
-    if os.name != "nt":
-        return path
-    import ctypes
-    buffer = ctypes.create_unicode_buffer(32768)
-    if ctypes.windll.kernel32.GetLongPathNameW(str(path), buffer, len(buffer)):
-        return Path(buffer.value)
-    return path
-
-
 def summary(meta, results):
     lines = ["# T39 全新检出与空缓存构建检查（自动生成，未经人工修改）", "",
              f"- 生成时间：{meta['generatedAt']}；提交：`{meta['commit']}`（{meta['ref']}）",
@@ -142,7 +129,6 @@ def main():
     a = p.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="t39-fresh-"))
-    work = long_path(work)
     source, cache = work / "source", work / "m2"
     steps = Steps(out)
     def version(cmd, marker):

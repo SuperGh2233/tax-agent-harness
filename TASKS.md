@@ -710,6 +710,14 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 第四轮验证（2026-11-20 21:54–22:09，GitHub Actions run `44748507398`，提交 `9ff7830`）：**四个作业全部成功**，证据 `docs/evidence/T41_CI_20261120/`。Ubuntu（Wrapper 3.9.9）15/15、Ubuntu（Maven 3.6.3）15/15、macOS arm64（Wrapper）15/15、Windows AMD64（Wrapper）14/14（无 POSIX 的 `mvnw-executable` 步）。三平台均 336 项测试全过、JAR 内含 React 页面、新库初始化与 loopback 健康检查通过、离线复跑成功。
 - 前两次运行只失败在 Windows，各自暴露一个真问题，均已修：
   - `67b7a0e`（测试卫生）：`AgentRuntimeTest.lockedToolTimesOutWithoutModelRetryOrEmptySuccess` 的断言本身通过，但超时返回后被放弃的工具线程仍在等 SQLite 放弃锁、占着 `runtime.db`，JUnit 删除 `@TempDir` 时报「The process cannot access the file」。POSIX 允许删除已打开文件、Windows 不允许，故只在 Windows 失败。测试改为等 db 文件可删除（即句柄已释放）再结束（20s 上限、50ms 轮询）。
-  - `9ff7830`（检查脚本）：runner 的 `%TEMP%` 是 8.3 短名 `C:\Users\RUNNER~1\...`，Node 按长名解析同一文件，Vite 计算相对路径时前缀不匹配，产出绝对 chunk 名 → `npm run build` 报 `fileName must be neither absolute nor relative`。`fresh_checkout_check.py` 新增 `long_path()`（Windows 用 `GetLongPathNameW` 展开），克隆目录改用长名；前端构建未改。
+  - `9ff7830`（检查脚本，**后被 T42 改为产品侧修复**，脚本已改回普通临时目录）：runner 的 `%TEMP%` 是 8.3 短名 `C:\Users\RUNNER~1\...`，Node 按长名解析同一文件，Vite 计算相对路径时前缀不匹配，产出绝对 chunk 名 → `npm run build` 报 `fileName must be neither absolute nor relative`。`fresh_checkout_check.py` 新增 `long_path()`（Windows 用 `GetLongPathNameW` 展开），克隆目录改用长名；前端构建未改。
   - 第二轮还确认过一处已修好的：Windows 上 `mvn test` 已达 336/0/0/0，说明上一轮的句柄修复有效。
 - 收尾：T41 DONE。文档承诺的「JDK 21 + Maven 3.6.3+」与「其他平台」不再列为未验证；`mvnw` 可执行、`--maven wrapper` 路径、CI 三平台均有证据。仍未验证：真实视频、最终压缩包。CI 残留提示：`actions/checkout@v4`、`actions/setup-python@v5`、`actions/upload-artifact@v4` 仍以 Node 20 为目标（被强制跑在 Node 24），不影响结果；`setup-java` 已升 v5。
+
+### T42 — Windows 8.3 短路径下前端构建失败（产品侧修复，2026-11-20）
+- 状态：IN_PROGRESS（2026-11-20，Coding Agent；本地 `npm run verify` 通过，Windows 结果待推送后由 CI 复验）。
+- 缺陷：T41 的第二处修复只在检查脚本里把克隆目录展开成长名（`9ff7830`），**产品侧没动**。因此把仓库放在含 8.3 短名的路径下（典型是 `%TEMP%`）执行 `npm run build`，仍会因 Vite 产出绝对 chunk 名而失败：`The "fileName" ... must be strings that are neither absolute nor relative`。
+- 原因：runner/用户目录的短名（`C:\Users\RUNNER~1\…`）与 Node 解析出的长名（`C:\Users\runneradmin\…`）指向同一目录但字符串不同，Vite 计算 html chunk 名时按 `path.relative(root, id)` 得到一串 `../`，最终被 rollup 当成绝对路径拒绝。
+- 修复：`frontend/vite.config.ts` 的 `root` 取 `realpathSync(new URL('.', import.meta.url))`（Windows 下返回长名，其他平台无变化），`loadEnv` 同时改为从该 root 读取；新增 devDependency `@types/node@^22` 提供 `node:fs` 类型（已确认 `src/`、`tests/` 不使用 `setTimeout`/`process`，不会引入 DOM 与 Node 类型冲突）。检查脚本的 `long_path` 规避已删除，让 Windows CI 直接验证产品修复。
+- 本地验证：`cd frontend && npm run verify` 通过（typecheck、lint、Vitest 54 项、`vite build` 1.18s，产物 `dist/index.html` 0.43 kB）。
+- 待：推送后看 Windows 作业（应仍 14/14）；通过后标 DONE。
