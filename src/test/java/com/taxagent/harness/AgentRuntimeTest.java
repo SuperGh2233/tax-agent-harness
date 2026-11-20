@@ -223,5 +223,22 @@ class AgentRuntimeTest {
                 assertThat(fake.requests).hasSize(1);
             } finally { s.execute("ROLLBACK"); }
         }
+        awaitTimedOutToolReleasedTheDatabase();
+    }
+
+    /**
+     * The runtime returns on timeout but the abandoned tool thread keeps going until SQLite gives up; on Windows its
+     * open handle makes JUnit's @TempDir cleanup fail ("The process cannot access the file"), which failed CI on
+     * 2026-11-20. Deleting the file only succeeds once that handle is gone, so this is the settle signal.
+     */
+    private void awaitTimedOutToolReleasedTheDatabase() throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (true) {
+            try { Files.deleteIfExists(database); return; }
+            catch (java.io.IOException stillOpen) {
+                if (System.nanoTime() > deadline) throw stillOpen;
+                Thread.sleep(50);
+            }
+        }
     }
 }
