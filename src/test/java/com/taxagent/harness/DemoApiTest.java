@@ -542,7 +542,8 @@ class DemoApiTest {
         assertThat(first.at("/turn/task/status").asText()).isEqualTo("WAITING_USER");
         assertThat(first.at("/turn/task/pending").toString()).contains("F002.purpose");
         assertThat(first.at("/turn/task/question").asText()).contains("F002.purpose","补充");
-        assertThat(first.at("/turn/result/text").asText()).doesNotContain("模型认为任务已完成");
+        assertThat(first.at("/turn/result/text").asText()).startsWith("模型认为任务已完成").contains("任务尚未完成。","F002.purpose");
+        assertThat(first.at("/turn/task/question").asText()).doesNotContain("模型认为任务已完成");
         var supplemented=ok(postJson("/tasks/"+task+"/supplement",Map.of("version",1,
                 "statements",Map.of("F002.purpose",Map.of("value","办公室采购","userRequest","用户明确补充：办公室采购")))));
         assertThat(supplemented.path("status").asText()).isEqualTo("ACTIVE");

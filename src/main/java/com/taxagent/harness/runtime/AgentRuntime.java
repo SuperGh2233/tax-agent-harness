@@ -145,7 +145,8 @@ public final class AgentRuntime {
         if (message == null || message.isBlank()) return error("INVALID_ARGUMENT", history);
         var availableTools = tools(approval != null);
         var traceEmitted = false;
-        String toolError = null;
+        // Unresolved tool errors by tool name, most recent last; any left when the model answers fails the turn.
+        var toolErrors = new LinkedHashMap<String, String>();
         boolean verifiedWrite = false;
         boolean writeDispatched = false;
         boolean writeUnknown = false;
@@ -176,7 +177,7 @@ public final class AgentRuntime {
                 // Some providers express the text protocol as a pseudo tool call named finish/ask.
                 var finalizer = finalizer(calls);
                 if (finalizer != null) {
-                    if (toolError != null) return error(toolError, history, writeDispatched);
+                    if (!toolErrors.isEmpty()) return error(toolErrors.lastEntry().getValue(), history, writeDispatched);
                     if (finalizer instanceof Ask ask) return new Result(Status.NEEDS_INPUT, ask.text(), null, history);
                     if (approval != null && !verifiedWrite)
                         return error(writeDispatched ? "WRITE_NOT_VERIFIED" : "WRITE_NOT_EXECUTED", history, writeDispatched);
@@ -208,17 +209,7 @@ public final class AgentRuntime {
                         if (verifiedWrite && call.name().equals("update_invoice"))
                             throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "本轮批准的保存已执行并核验，不会再次执行");
                         // Strict canonical DTO validation; identity/approval are never decoded here.
-                        Object input = call.name().equals("update_invoice")
-                                ? approvedUpdate(call, approval)
-                                : call.name().equals("check_invoice_purpose")
-                                ? ToolContract.decode(call.arguments(), ToolContract.PurposeCheck.class)
-                                : call.name().equals("query_rules")
-                                ? ToolContract.decode(call.arguments(), ToolContract.RuleQuery.class)
-                                : call.name().equals("search_knowledge")
-                                ? ToolContract.decode(call.arguments(), ToolContract.KnowledgeQuery.class)
-                                : call.name().equals("recall_context")
-                                ? ToolContract.decode(call.arguments(), ToolContract.RecallQuery.class)
-                                : ToolContract.decode(call.arguments(), ToolContract.Query.class);
+                        Object input = call.name().equals("update_invoice") ? approvedUpdate(call, approval) : decodeRead(call);
                         // recall_context has no enterprise argument: it is bound to the current task and enterprise.
                         String requestedEnterprise = input instanceof ToolContract.RecallQuery ? enterprise
                                 : input instanceof ToolContract.Query q ? q.enterpriseId()
@@ -255,14 +246,20 @@ public final class AgentRuntime {
                             verifiedWrite = true;
                             // The read-back proves the approved save; an earlier failed call this turn (for example
                             // malformed save arguments the model then corrected) no longer decides the outcome.
-                            toolError = null;
+                            toolErrors.clear();
                         }
+                        // A read the model got wrong and then ran correctly is self-corrected: the success is this
+                        // tool's evidence. Denials, disabled tools, storage errors and timeouts are never cleared.
+                        var earlier = toolErrors.get(call.name());
+                        if (earlier != null && !call.name().equals("update_invoice") && CORRECTABLE.contains(earlier))
+                            toolErrors.remove(call.name());
                         response = new ToolContract.Response<>(data, null);
                         consecutiveErrors = 0;
                     } catch (DomainException e) {
                         // A repeated save after the verified one was refused before execution: it is not a failure.
                         if (!(verifiedWrite && call.name().equals("update_invoice"))) {
-                            toolError = e.code().name();
+                            toolErrors.remove(call.name());
+                            toolErrors.put(call.name(), e.code().name());
                             consecutiveErrors++;
                         }
                         // STORAGE_ERROR from the writer means the outcome may be unknown: stop before the model can
@@ -277,7 +274,7 @@ public final class AgentRuntime {
                     done[index] = new Exchange(call, full, durationMs, compactForModel(call.id(), full));
                     emit(progressSink, new Progress("tool_result", call.id(), call.name(), durationMs,
                             response.error() == null ? "SUCCESS" : response.error().code().name()));
-                    if (writeUnknown) { settle(done, history); return error(toolError, history, true); }
+                    if (writeUnknown) { settle(done, history); return error("STORAGE_ERROR", history, true); }
                     // T36 circuit breaker: repeated failing calls stop the turn instead of spending every step.
                     if (consecutiveErrors >= MAX_CONSECUTIVE_TOOL_ERRORS) {
                         settle(done, history); return error("TOOL_ERRORS_REPEATED", history, writeDispatched);
@@ -285,7 +282,7 @@ public final class AgentRuntime {
                     }
                     settle(done, history);
                 } else {
-                    if (toolError != null) return error(toolError, history, writeDispatched);
+                    if (!toolErrors.isEmpty()) return error(toolErrors.lastEntry().getValue(), history, writeDispatched);
                     if (decision instanceof Ask ask) return new Result(Status.NEEDS_INPUT, ask.text(), null, history);
                     if (decision instanceof Finish finish) {
                         if (approval != null && !verifiedWrite)
@@ -392,15 +389,7 @@ public final class AgentRuntime {
             if (!DEFINITIONS.containsKey(call.name()) || call.name().equals("update_invoice"))
                 throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Batch must be read-only");
             requireCallable(call.name());
-            Object input = call.name().equals("check_invoice_purpose")
-                    ? ToolContract.decode(call.arguments(), ToolContract.PurposeCheck.class)
-                    : call.name().equals("query_rules")
-                    ? ToolContract.decode(call.arguments(), ToolContract.RuleQuery.class)
-                    : call.name().equals("search_knowledge")
-                    ? ToolContract.decode(call.arguments(), ToolContract.KnowledgeQuery.class)
-                    : call.name().equals("recall_context")
-                    ? ToolContract.decode(call.arguments(), ToolContract.RecallQuery.class)
-                    : ToolContract.decode(call.arguments(), ToolContract.Query.class);
+            Object input = decodeRead(call);
             String requestedEnterprise = input instanceof ToolContract.RecallQuery ? enterprise
                     : input instanceof ToolContract.Query q ? q.enterpriseId()
                     : input instanceof ToolContract.RuleQuery r ? r.enterpriseId()
@@ -409,6 +398,28 @@ public final class AgentRuntime {
             if (enterprise != null && !enterprise.equals(requestedEnterprise))
                 throw new DomainException(ErrorCode.PERMISSION_DENIED, "Batch enterprise mismatch");
         }
+    }
+    /** Errors a model makes in a read's arguments and can correct within the turn. */
+    private static final Set<String> CORRECTABLE = Set.of("INVALID_ARGUMENT", "NOT_FOUND");
+    private static final Map<String, Class<?>> READ_INPUTS = Map.of(
+            "query_invoices", ToolContract.Query.class, "query_bank_entries", ToolContract.Query.class,
+            "check_invoice_purpose", ToolContract.PurposeCheck.class, "query_rules", ToolContract.RuleQuery.class,
+            "search_knowledge", ToolContract.KnowledgeQuery.class, "recall_context", ToolContract.RecallQuery.class);
+    /**
+     * Strict decoding of a read tool's arguments. When the JSON itself does not fit (an extra field, a quoted number,
+     * not an object) the model is told so, with the tool's schema description, instead of a bare "Invalid tool input".
+     */
+    static Object decodeRead(Call call) {
+        try { return ToolContract.decode(call.arguments(), READ_INPUTS.get(call.name())); }
+        catch (DomainException e) {
+            if (e.code() != ErrorCode.INVALID_ARGUMENT || !"Invalid tool input".equals(e.getMessage())) throw e;
+            var usage = ToolContract.schema().at("/$defs/" + DEFINITIONS.get(call.name()) + "/description").asText("");
+            throw new DomainException(ErrorCode.INVALID_ARGUMENT, readArguments(call.name()) + usage, e);
+        }
+    }
+    /** The correction for arguments that are not valid JSON for the tool; the schema description follows it. */
+    public static String readArguments(String tool) {
+        return tool + " 的参数无法解析：可能有多余字段、类型不符（数字不要加引号）或不是 JSON 对象。请严格按该工具 schema 重新调用。";
     }
     private <T> T bounded(ExecutorService worker, Callable<T> action) throws Exception {
         var task = worker.submit(action);
@@ -460,6 +471,8 @@ public final class AgentRuntime {
         if (code.startsWith("MODEL_")) text.append("系统不会自动重发给模型，可稍后重新发送本轮问题。");
         if (code.equals("TOOL_ERRORS_REPEATED"))
             text.append("连续 ").append(MAX_CONSECUTIVE_TOOL_ERRORS).append(" 次工具调用出错，已停止重试；请核对企业、月份或权限后再提问。");
+        if (code.equals("UNSUPPORTED_SCOPE"))
+            text.append("所问范围超出已存规则能判断的范围（例如该企业在该日期没有唯一启用的用途规则），系统不猜测、不套用已停用的版本；可改问有适用规则的月份，或只查询金额、不做用途判断。");
         return text.toString();
     }
 }

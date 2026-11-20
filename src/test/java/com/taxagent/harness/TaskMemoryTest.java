@@ -147,10 +147,11 @@ class TaskMemoryTest {
         var task = memory.start(u1, "C001", "核查 F002 发票用途", List.of("F002.purpose"));
         var first = memory.continueTask(u1, "C001", task.id(), "检查用途", runtime(r -> new Finish("已经全部完成")));
         assertThat(first.result().status()).isEqualTo(AgentRuntime.Status.NEEDS_INPUT);
-        assertThat(first.result().text()).contains("F002.purpose", "补充").doesNotContain("已经全部完成");
+        // T38: the model's answer stays visible, followed by the fixed note that the task is still open.
+        assertThat(first.result().text()).startsWith("已经全部完成\n\n——\n任务尚未完成。").contains("F002.purpose", "补充");
         assertThat(first.task().status()).isEqualTo(Status.WAITING_USER);
         assertThat(first.task().pending()).containsExactly("F002.purpose");
-        assertThat(first.task().question()).isEqualTo(first.result().text());
+        assertThat(first.task().question()).contains("F002.purpose", "补充").doesNotContain("已经全部完成");
         var supplemented = memory.supplement(u1, "C001", task.id(), first.task().version(),
                 Map.of("F002.purpose", explicit("办公室采购")));
         assertThat(supplemented.status()).isEqualTo(Status.ACTIVE);
@@ -162,6 +163,7 @@ class TaskMemoryTest {
             return new Finish("补充后核查完成");
         }));
         assertThat(resumed.result().status()).isEqualTo(AgentRuntime.Status.NEEDS_INPUT);
+        assertThat(resumed.result().text()).startsWith("补充后核查完成").contains("任务尚未完成。", "尚未保存");
         assertThat(resumed.task().status()).isEqualTo(Status.WAITING_USER);
         assertThat(resumed.task().pending()).isEmpty();
         assertThat(resumed.task().awaitingSave()).containsExactly("F002.purpose");

@@ -132,6 +132,25 @@ class ContextCompressionTest {
             catch (DomainException e) { throw e; } catch (Exception e) { throw new IllegalStateException(e); } });
     }
 
+    @Test void aMadeUpCallIdIsAnsweredWithTheIdsThatExistAndCanBeCorrected() throws Exception {
+        // Seen with the real model (T38): it guessed "query_invoices_C001_2026-08" because ids are only shown in compaction notes.
+        var model = new Script();
+        model.next.add(r -> new Call("q-sept", "query_invoices", "{\"enterprise_id\":\"C001\",\"month\":\"2026-09\"}"));
+        model.next.add(r -> new Finish("九月发票已查询"));
+        var agent = new FinanceAgent(db, operator, "C001", model);
+        var task = agent.start("九月发票", List.of("F002.purpose"));
+        agent.turn(task.id(), "查九月发票");
+        model.next.add(r -> call("recall_context", "{\"source\":\"TOOL_RESULT\",\"call_id\":\"query_invoices_C001_2026-09\"}"));
+        model.next.add(r -> call("recall_context", "{\"source\":\"TOOL_RESULT\",\"call_id\":\"q-sept\",\"limit\":5}"));
+        model.next.add(r -> new Finish("已取回九月查询结果"));
+        var turn = agent.turn(task.id(), "把上一轮查到的发票再拿出来看看");
+        var wrong = JSON.readTree(turn.result().history().getFirst().resultJson()).path("error");
+        assertThat(wrong.path("code").asText()).isEqualTo("NOT_FOUND");
+        assertThat(wrong.path("message").asText()).contains("不能自拟", "q-sept（第 1 轮 query_invoices", "2026-09");
+        assertThat(JSON.readTree(turn.result().history().get(1).resultJson()).at("/data/returned").asInt()).isEqualTo(5);
+        assertThat(turn.result().errorCode()).isNull(); // Corrected by the same tool, so the turn does not fail.
+    }
+
     @Test void recallArgumentsAreStrictAndCannotNameAnotherTask() {
         fails(ErrorCode.INVALID_ARGUMENT, () -> ToolContract.decode("{\"source\":\"TURN\",\"seq\":1,\"task_id\":\"x\"}", RecallQuery.class));
         fails(ErrorCode.INVALID_ARGUMENT, () -> new RecallQuery("TURN", null, null, null, null, null, null));

@@ -21,6 +21,7 @@
     },
     "PurposeCheck": {
       "type": "object",
+      "description": "按每张发票日期当日唯一启用的用途规则，列出该企业该月未填用途的发票。只在用户问到用途、缺用途或用途规则的执行情况时调用；只问金额、张数、明细或规则版本时不要附带调用。",
       "properties": {
         "enterprise_id": {
           "type": "string",
@@ -87,6 +88,7 @@
     },
     "RecallQuery": {
       "type": "object",
+      "description": "只读取回当前任务被压缩的原文，没有企业参数。三种用法，字段不可混用：{\"source\":\"TURN\",\"seq\":轮次整数}；{\"source\":\"TOOL_RESULT\",\"call_id\":\"工具调用编号\",\"offset\":起始行,\"limit\":行数≤50}（offset/limit 可省略）；{\"source\":\"FILE\",\"file_id\":\"文件编号\",\"location\":\"与检索结果中的 location 原样一致\",\"limit\":前后段数≤3}（limit 可省略）。",
       "properties": {
         "source": {
           "type": "string",

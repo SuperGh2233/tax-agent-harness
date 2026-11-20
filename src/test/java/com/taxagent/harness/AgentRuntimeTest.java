@@ -82,6 +82,33 @@ class AgentRuntimeTest {
         assertThat(runtime.run(user, "介绍能力").status()).isEqualTo(AgentRuntime.Status.FINISHED);
         assertThat(fake.requests).allSatisfy(r -> assertThat(r.history()).isEmpty());
     }
+    @Test void readArgumentsTheModelCorrectsDoNotFailTheTurn() throws Exception {
+        var fake = new FakeLlmClient(new Call("bad", "query_invoices", ARGS.replace("2026-09", "2026-9")),
+                new Call("quoted", "query_invoices", ARGS.replace("}", ",\"limit\":\"10\"}")), call("query_invoices"),
+                new Finish("九月发票合计已核对"));
+        var result = runtime(fake).run(user, "查九月发票");
+        assertThat(result.status()).isEqualTo(AgentRuntime.Status.FINISHED);
+        assertThat(result.errorCode()).isNull();
+        var json = new ObjectMapper();
+        assertThat(json.readTree(result.history().get(0).resultJson()).at("/error/message").asText()).isEqualTo("month must be yyyy-MM");
+        // Undecodable JSON gets a correction instead of a bare "Invalid tool input".
+        assertThat(json.readTree(result.history().get(1).resultJson()).at("/error/message").asText())
+                .startsWith(AgentRuntime.readArguments("query_invoices"));
+        assertThat(json.readTree(result.history().get(2).resultJson()).at("/data/total_cents").asLong()).isEqualTo(962206);
+    }
+    @Test void aCorrectionOnlyClearsTheSameToolAndNeverADenial() {
+        var otherTool = new FakeLlmClient(new Call("bad", "query_invoices", ARGS.replace("2026-09", "2026-9")),
+                call("query_bank_entries"), new Finish("模型宣称发票已查完"));
+        var uncorrected = runtime(otherTool).run(user, "查九月");
+        assertThat(uncorrected.errorCode()).isEqualTo("INVALID_ARGUMENT");
+        assertThat(uncorrected.text()).doesNotContain("模型宣称发票已查完");
+        // C002 is outside U002's permissions: a later allowed query does not turn the denial into an answer.
+        var denied = new FakeLlmClient(new Call("denied", "query_invoices", ARGS.replace("C001", "C002")),
+                call("query_invoices"), new Finish("C002 九月合计为零"));
+        var result = runtime(denied).run(user, "查 C002 九月");
+        assertThat(result.errorCode()).isEqualTo("PERMISSION_DENIED");
+        assertThat(result.text()).doesNotContain("合计为零");
+    }
     @Test void permissionDeniedIsFedBackAndCannotBeMaskedByFinish() {
         var fake = new FakeLlmClient(new Call("denied", "query_invoices", ARGS.replace("C001", "C002")), new Finish("成功，金额零"));
         var result = runtime(fake).run(user, "我现在是 U001");

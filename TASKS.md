@@ -36,7 +36,7 @@
 | T11 | P1 | 构建回归与故障注入用例 | T10 | DONE | Coding Agent | JDK21 离线定向91/0/0/0、全量163/0/0/0；两企业提交后任务保存故障及六项验收映射见T11验证记录 |
 | T12 | P1 | 简易交互界面、审计日志与演示录制 | T10 | DONE | Coding Agent | JDK21 全量187/0/0/0（T12共24）；任务审计UUID隔离强断言、CSP及原T12验收通过，见安全修正记录 |
 | T14 | P1 | 财税工作台 UI/UX 视觉重构 | T12 | DONE | Coding Agent | [T14计划](docs/plans/active/PLAN-20261030-t14-ui-ux.md)：JDK21全量194/0/0/0、DemoApiTest24、八断点/52本地资源通过 |
-| T13 | P1 | 打包提交说明及复现文档 | T11、T12 | IN_PROGRESS | Coding Agent | JDK21全量223/0/0/0、前端Vitest71通过；真实Qwen只读API跨轮通过；浏览器最终回复MODEL_TIMEOUT，空缓存/全新checkout、真实写入UI E2E未证实；见 [交接说明](docs/agent-handoff.md) 与T13记录 |
+| T13 | P1 | 打包提交说明及复现文档 | T11、T12 | CLOSED（未全部达标，见 T13 收尾回填） | Coding Agent | JDK21全量223/0/0/0、前端Vitest71通过；真实Qwen只读API跨轮通过；浏览器最终回复MODEL_TIMEOUT，空缓存/全新checkout、真实写入UI E2E未证实；见 [交接说明](docs/agent-handoff.md) 与T13记录 |
 
 > **注意**：T00 的 DONE 仅代表本次建立共享文档，不代表代码已开始开发。其他任务均需实际验收后才可标记完成。
 
@@ -62,6 +62,8 @@
 ```
 
 ## 工作记录
+
+> 适用期间注记（2026-11-20）：初赛期条目中的「禁止 Git add/commit/push」「不提交、不推送」是当时各轮的串行约定，仅约束该轮本身。此后的提交与推送（T22、T23、复赛 `9045c5c`/`af6d158`/`d068bea`/`97e4689` 等）均经用户明确指示，不构成违规。默认规则仍以 `AGENTS.md` 为准：未经用户许可不提交、不推送。
 
 ### P0-3 — Anthropic 多工具调用与回放兼容性修复
 - 状态：DONE（离线回归验收）；2026-11-02。真实浏览器单工具 query_invoices 成功，但发票+银行双工具请求出现 MODEL_RESPONSE_INVALID。原适配器只允许一个 tool_use，且 LlmClient/AgentRuntime 不支持单轮批量 Call。
@@ -229,7 +231,7 @@
 
 ### T11 — 回归与故障注入用例（计划阶段）
 - 续做认领：2026-10-30，Coding Agent 沿用 IN_PROGRESS；本轮仅修改测试及本台账，生产缺陷仅保留回归证据、不修生产代码。
-- 状态：计划阶段 IN_PROGRESS（已由下方最终验收记录 supersede）；认领人：Coding Agent；计划日期：2026-10-30。计划见 `docs/plans/active/PLAN-20261030-t11-regression-fault-injection.md`。本记录仅保留最初计划范围；最终实现、测试与 DONE 结论见下方「T11 — 回归与故障注入验证记录」。
+- 状态：SUPERSEDED（初赛收尾回填（2026-11-20，Coding Agent；仅回填台账，未改代码、未重跑测试）：本条是计划记录，结论以下一条「T11 — 回归与故障注入验证记录」的 DONE 为准）。原状态：计划阶段 IN_PROGRESS（已由下方最终验收记录 supersede）；认领人：Coding Agent；计划日期：2026-10-30。计划见 `docs/plans/active/PLAN-20261030-t11-regression-fault-injection.md`。本记录仅保留最初计划范围；最终实现、测试与 DONE 结论见下方「T11 — 回归与故障注入验证记录」。
 - 重点：覆盖权限、跨企业隔离、规则版本、重试/超时、空结果与失败区分；并注入“财务提交成功后 TaskMemory 保存失败”，确认任务不误报完成、发票/台账仅提交一次，之后使用只读 recover 与新鲜查询核对，不盲目重试。
 - 验收：复用临时 SQLite 与 Fake 模型；先跑定向测试，再跑 JDK21 离线 Maven 全量，记录真实测试数。未改官方材料、冻结契约或运行库；不提交/推送。
 
@@ -272,7 +274,7 @@
 - Responses 实现：完整 `/responses` endpoint 显式选择 gpt-6-luna / reasoning.effort=max / store=false / parallel_tool_calls=false，复用原系统指令和工具 schema；Chat Completions 保留，无自动协议回退。LlmClient.Call 内部保存并防御性复制 output items（含 reasoning），现有 history 续接重放后追加精确 call_id 的 function_call_output；JsonIgnore 和安全 toString 防止供应商续接元数据进入可见历史/审计。AgentRuntime、DemoConfiguration、财务工具、写授权、DB schema、UI未改。
 - 本轮精确验证命令：`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home PATH=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home/bin:$PATH mvn -o -B -ntp "-Dmaven.repo.local=$PWD/.m2/repository" -Dtest=OpenAiCompatibleClientTest,OpenAiResponsesClientTest test`。2026-10-30 14:07:33 +08:00，**5 tests / 0 failures / 0 errors / 0 skipped，BUILD SUCCESS**（Responses新增3、Chat原有2），报告 target/surefire-reports。首次编译泛型推断错误已修正；沙箱内测试5/0/3/0因本机监听拒绝，获准沙箱外重跑原命令通过。只跑上述聚焦离线测试，全部HTTP均为127.0.0.1 stub；验证请求配置/schema、调用解析、reasoning/output重放及call_id关联、最终文本、畸形/截断/多调用、缺key及关联错误零网络、重定向拒绝/脱敏错误和隐藏元数据。
 - 文档同步：README、T12 API spec、DEMO_SCRIPT、REPRODUCE、T13计划及本台账；配置示例无凭证值。真实云端E2E范围已获用户授权，待本机凭证安全配置；仅使用官方合成样本+全新临时SQLite+loopback。本轮未操作SQLite、data/harness.db、真实财务数据、官方材料、计划书或冻结契约，未提交推送；未声称真实集成或全量回归通过。
-- 状态：IN_PROGRESS；认领人：Coding Agent；2026-10-30。先检查Git、AGENTS、TASKS、README、DEMO_SCRIPT、冻结契约、T12计划/最终安全证据及官方参赛说明，确认T11/T12 DONE；先保存认领与T13计划再推进。仅单一T13。2026-10-30用户授权扩展为真实模型E2E：只用官方演示种子合成数据与独立临时DB；不碰 data/harness.db、不用真实财务数据、不写入真实密钥、不提交推送。当时初始目标为 gpt-6-luna + OpenAI Responses API + reasoning.effort=max；之后本轮用户改选 DashScope qwen3.8-flash + Anthropic Messages API。执行环境未读取凭证或使用聊天中暴露的密钥；真实云端E2E待用户撤销旧密钥并在本机配置轮换密钥后执行。
+- 状态：CLOSED，未全部达标（初赛收尾回填（2026-11-20，Coding Agent；仅回填台账，未改代码、未重跑测试））。已达成：`REPRODUCE.md`、`RELEASE_CHECKLIST.md` 已交付；真实模型三场景与浏览器受控保存由 T17/T18（`qwen3.7-flash`）完成；视频由 T18 重录。**仍未验证**：空缓存首次在线构建、真正全新 Git checkout、其他平台与 Maven 最低版本——作为已知限制保留在 `REPRODUCE.md` 第 101 行，不得记为已验证；最终压缩包由用户提交。原状态：IN_PROGRESS；认领人：Coding Agent；2026-10-30。先检查Git、AGENTS、TASKS、README、DEMO_SCRIPT、冻结契约、T12计划/最终安全证据及官方参赛说明，确认T11/T12 DONE；先保存认领与T13计划再推进。仅单一T13。2026-10-30用户授权扩展为真实模型E2E：只用官方演示种子合成数据与独立临时DB；不碰 data/harness.db、不用真实财务数据、不写入真实密钥、不提交推送。当时初始目标为 gpt-6-luna + OpenAI Responses API + reasoning.effort=max；之后本轮用户改选 DashScope qwen3.8-flash + Anthropic Messages API。执行环境未读取凭证或使用聊天中暴露的密钥；真实云端E2E待用户撤销旧密钥并在本机配置轮换密钥后执行。
 - 变更：新增REPRODUCE.md、RELEASE_CHECKLIST.md、docs/plans/active/PLAN-20261030-t13-release-reproduction.md；在README/docs/index追加入口；更新本台账；.gitignore仅追加安全模式。T13完整Git变更清单与原有T12区别见RELEASE_CHECKLIST。
 - 副本：git ls-files -co --exclude-standard列出70个当时文件，复制到/tmp/taxagent-t13-oor9i4rc/source，含未提交T12；无data/.env/target/.m2/.git，不复制现有DB。不是全新Git checkout；使用原仓库既有隔离缓存绝对路径，未重新下载依赖。
 - 实际测试命令（副本根）：`JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home mvn -o -B -ntp -Dmaven.repo.local='/Users/a123/Projects/财税 harness/.m2/repository' test`。沙箱内187/0/145/0（系统临时目录/Socket拒绝），获准沙箱外原命令重跑，**2026-10-30 12:22:41 +08:00 BUILD SUCCESS，187 tests / 0 failures / 0 errors / 0 skipped**；Surefire XML求和复核一致，java.version=21.0.12.1。日志/tmp/taxagent-t13-oor9i4rc/test-escalated.log；Maven3.10.0。相同环境加`-DskipTests package`成功，产物副本target/harness-0.0.1-SNAPSHOT.jar（忽略，不交付构建产物）。
@@ -282,7 +284,8 @@
 - 未证实/后续：为避免不必要下载，未做空缓存首次在线构建；真正全新checkout（当前HEAD尚无未提交T12）未验证，故不标DONE。用户在允许联网的独立新checkout先整合完整源码，再按REPRODUCE第2节在线test/package、离线重跑及新库UI复验，补版本/计数/结果后再验收。最低Maven版本和其他平台未实测。真实供应商兼容性及真实云模型三场景未实测；正式2–3页设计短稿、去敏关键记录、≤5分钟手动视频和最终压缩包/提交仍由用户完成。主办方截止/入口/大小待核实，不冒称比赛提交就绪。文档已记录恢复路径，无额外handoff。
 
 ### T13 — DashScope Messages 适配（进行中）
-- 认领人：Coding Agent；IN_PROGRESS。仅独立适配器、loopback 测试和复现文档；保留既有改动。禁止外网和 SQLite 操作。暴露凭证须撤销，替换值仅本机输入。
+- 状态：DONE（初赛收尾回填（2026-11-20，Coding Agent；仅回填台账，未改代码、未重跑测试））：`AnthropicMessagesClient` 已交付并为默认真实模型路径，经 T17、T18 与 T37（三轮对比共 80 次运行）真实 `qwen3.7-flash` 调用验证；多工具批量回放见 P0-3。标题中的「进行中」为当时状态，保留原文。
+- 认领人：Coding Agent；原状态 IN_PROGRESS。仅独立适配器、loopback 测试和复现文档；保留既有改动。禁止外网和 SQLite 操作。暴露凭证须撤销，替换值仅本机输入。
 
 ## DashScope 本轮验证结果（2026-10-30）
 T13 保持 IN_PROGRESS。当前目标 DashScope qwen3.8-flash，旧 Luna/Chat 支持保留。
@@ -312,7 +315,7 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 遗留：T14无阻塞；真实模型、Safari/Firefox/实体手机未验证。T13原有状态与待办不变。
 
 ### T15 — 独立 React + TypeScript 产品前端
-- 状态：IN_PROGRESS；认领人：Coding Agent；开始日期：2026-10-30。
+- 状态：DONE（初赛收尾回填（2026-11-20，Coding Agent；仅回填台账，未改代码、未重跑测试））：React 前端是唯一 UI（T16 删除旧静态页，`mvn package` 打入 JAR 的 `static/react-app/`）；下文“仍需浏览器验收”由 T17 真实 Chromium 受控保存闭环与 T37 两次审核页保存复测补齐；前端 `npm run verify` 现为 53/53。Safari/Firefox/实体手机仍未验证。原状态：IN_PROGRESS；认领人：Coding Agent；开始日期：2026-10-30。
 - 授权范围：仅新增 frontend/**、T15 计划及本台账追加记录；保留 T12/T13/T14 和全部既有文件。禁止 Git add/commit/push。
 - 计划：[T15](docs/plans/active/PLAN-20261030-t15-react-frontend.md)。核对真实 DTO/路由后实现首页、执行工作区、审核结果；隔离数据库验收，不触碰运行库。
 - 2026-10-30 跟进：React/TS 三页、typed API Adapter、对话/工具分组、审批核验和单测源码已完成；隔离合成库 API smoke 报告通过。写入锁安全修复：只有操作号匹配且回读 `verified=true` 才释放锁。用户实测 npm `verify` 四阶段通过：TypeScript、ESLint、Vitest 4/4、Vite 7.3.7 生产构建成功（1636 modules）。
@@ -321,7 +324,7 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 2026-10-31 新建任务 `CONFLICT` 根因修复：截图显示同用户/企业已有 `ACTIVE`/`WAITING_USER` 任务；`task-memory.sql` 的 `one_open_agent_task` UNIQUE INDEX 强制一次只能有一项未结束任务，原前端未提供取消入口。保留这一约束，前端新增未完成任务提示、继续任务、刷新状态、结束旧任务二次确认；已有任务时禁用新建，后端竞争导致的 409 会主动刷新任务列表并显示可操作的指引，不重复创建。为实现显式结束，补充 `POST /api/demo/tasks/{id}/cancel`：必须 CSRF、固定可信身份、确认标志、合法任务版本，TaskMemory.cancel 的作用域与乐观锁持续生效；操作经审计，不删除历史、不回滚任何财务记录；存在待核验财务操作时前端禁止取消。新增 Java 2 项回归测试（重复任务/确认/版本/待补充取消/跨用户隔离），前端 3 项回归测试（未结束任务识别、CSRF 取消、冲突不自动重试）；截至这次修改 **尚未运行最新 Maven / npm 全量测试**，T15 仍为 IN_PROGRESS。此次安全可控地扩大了原 T15 范围至 DemoController/FinanceAgent 与 DemoApiTest；未修改原始数据、未提交或推送。
 
 ### T15 — 提交前两个安全阻断修复
-- 状态：IN_PROGRESS；认领人：Coding Agent；2026-10-31。仅修复跨 HttpSession 的 turn/cancel/supplement 并发与静态首页未知写入锁，同步指定文档和回归；不提交、不推送、不联网、不访问现有数据库。
+- 状态：DONE（初赛收尾回填（2026-11-20，Coding Agent；仅回填台账，未改代码、未重跑测试））：见下一条「两项安全修复最终验收（2026-10-31）」，198/0/0/0 与跨会话并发回归通过；“T15 整体仍 IN_PROGRESS”已随 T15 收尾解除。原状态：IN_PROGRESS；认领人：Coding Agent；2026-10-31。仅修复跨 HttpSession 的 turn/cancel/supplement 并发与静态首页未知写入锁，同步指定文档和回归；不提交、不推送、不联网、不访问现有数据库。
 
 ### 两项安全修复最终验收（2026-10-31）
 - 本轮修复状态：DONE；T15整体仍IN_PROGRESS（原有部署/浏览器等未验证项保留）。64个固定进程内条带按可信userId+enterprise映射，既有DemoController的turn/cancel/supplement共用；保留权限、作用域、CSRF、乐观版本和审计。不是跨JVM锁，不承诺强杀不响应中断的超时worker。
@@ -333,13 +336,13 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 收尾核对：与本轮开始的逐文件内容哈希比较，仅指定的10个源码/测试/文档文件变化，无删除；Git暂存区为空，已跟踪忽略文件检查为空。原有其他未提交变更完整保留。
 
 ### T15 — 损坏操作锁存储 fail-closed 补修（2026-10-31）
-- 状态：IN_PROGRESS；认领人：Coding Agent。仅指定五文件；键不存在才无锁，读取/解析/形状错误使用unknown占位锁，保留原存储，不发送财务请求。静态页回归覆盖损坏JSON、getItem抛错、形状错误与只读刷新；React初始化同样保守，setItem失败阻断本页发送。仅跑npm verify、node --check和diff --check，不跑Maven/应用、不联网、不操作数据库、不提交推送。
+- 状态：DONE（初赛收尾回填（2026-11-20，Coding Agent；仅回填台账，未改代码、未重跑测试））：本条自身验收已写明 DONE，Vitest 36/36；括注“T15 整体仍 IN_PROGRESS”已随 T15 收尾解除。其中静态页 `demo.js` 部分已在 T16 随旧静态页删除，现只剩 React 实现。原状态：IN_PROGRESS；认领人：Coding Agent。仅指定五文件；键不存在才无锁，读取/解析/形状错误使用unknown占位锁，保留原存储，不发送财务请求。静态页回归覆盖损坏JSON、getItem抛错、形状错误与只读刷新；React初始化同样保守，setItem失败阻断本页发送。仅跑npm verify、node --check和diff --check，不跑Maven/应用、不联网、不操作数据库、不提交推送。
 
 - 本次补修验收：DONE（T15整体仍IN_PROGRESS）。静态页和React仅键缺失返回null；读取异常、损坏JSON、无效形状均生成{id:unknown,taskId:unknown,unknown:true}保守占位锁，不改写原存储、不发送财务请求。合法已有对象继续锁定。React同时修复setItem失败时不得继续发送；两页均先建立内存锁再setItem，清锁则先成功removeItem再清内存/渲染，removeItem异常保持锁。
 - 2026-10-31最终npm run verify退出0：typecheck/lint/build通过，Vitest 1文件36/36（原18+本次18）；覆盖静态损坏JSON/getItem异常/无效形状后approve零请求且只读刷新可用、存储不被覆盖清除、setItem和removeItem失败保持锁，以及React纯初始化函数的缺失/异常/合法/无效形状。node --check src/main/resources/static/demo.js、git diff --check均退出0。首次Vitest被系统临时缓存沙箱权限阻断，获准原命令离线重跑通过。未运行Maven或应用、未联网、未操作数据库、未读取密钥、未暂存/提交/推送；仅指定五文件内容变更。
 
 ### T16 — 初赛评审对齐收尾（2026-11-06）
-- 状态：IN_PROGRESS；承接 T15/T13。目标：让任务规划、上下文来源、自然表达、离线构建和提交材料可见、可验收；不改变业务边界。
+- 状态：DONE（初赛收尾回填（2026-11-20，Coding Agent；仅回填台账，未改代码、未重跑测试））：“未完成”四项的去向——官方 Qwen3.8-Max 复测：T20 已撤销该型号口径，不再适用；React 浏览器内受控保存/跨轮：T17 完成；≤5 分钟视频：T18 重录；最终作品 zip：由用户提交，不属开发验收。旧静态页删除已核实（`src/main/resources/static/` 不存在）。原状态：IN_PROGRESS；承接 T15/T13。目标：让任务规划、上下文来源、自然表达、离线构建和提交材料可见、可验收；不改变业务边界。
 - 已完成：
   - React 单一前端：删除旧 `static/index.html`、`demo.js`、`demo.css` 和 vendor；根路径固定跳转 `/react-app/`；`mvn package` 在 `prepare-package` 自动安装 Node/npm、构建并复制到 JAR，`mvn test` 不触发前端。
   - 检查器新增“执行计划”（由后端任务状态/工具历史推导，不是模型自述）和“上下文来源”四栏：任务进度、长期偏好、规则（仅 `query_rules` 工具结果）、企业上下文。
@@ -544,7 +547,7 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 未做 / 局限：真实模型未跑；跨范围冲突只按名称判断，语义相近但名称不同的旧要求（如 style 与 tone）不会自动识别为冲突；个人记忆的编号拦截是格式规则，不能识别不带编号的企业事实；已更正（未删除）记忆的旧值仍保留在当时的运行记录中（运行记录如实反映当时模型输入），删除时才一并擦除。未提交/未推送。
 
 ### T34 — 上下文压缩与原文回溯（契约 B7，“上下文管理”）
-- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项（提交 `af6d158` 后为 330 项，见 T37 验收）、前端 53 项通过，OSV 与密钥扫描干净）；压缩区域渲染已真实模型验证（T37 验收 2026-11-19 23:25，连续两轮），大工具结果裁剪与 `recall_context` 取回原文的完整路径未经真实模型验证。范围：长对话与大文件下的投影策略（保留任务对象、用户限制、待办）；只读回溯工具按需取回被裁剪的对话、文件片段、工具结果。
+- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项（提交 `af6d158` 后为 330 项，见 T37 验收）、前端 53 项通过，OSV 与密钥扫描干净）；压缩区域渲染已真实模型验证（T37 验收 2026-11-19 23:25，连续两轮），大工具结果裁剪与 `recall_context` 取回原文的完整路径未经真实模型验证（T38 2026-11-20 真实模型 30 轮长对话两轮：压缩、限制与更正保留、`recall_context` 按轮次取回原文已通过；大工具结果裁剪分页仍只有离线测试）。范围：长对话与大文件下的投影策略（保留任务对象、用户限制、待办）；只读回溯工具按需取回被裁剪的对话、文件片段、工具结果。
 - 验收：30 轮含更正的脚本对话后，模型输入仍含企业、月份、待办与最新更正；大文件问答通过回溯取回原文定位。
 
 ### T35 — 多轮办理补强（“多轮办理”）
@@ -622,3 +625,27 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
     - `作品使用说明.md` §7 恢复「上下文压缩」一行，位置与界面一致（`App.tsx:492` 中 `Compression` 紧随 `ContextSources`），补「从第二轮起才显示，首轮没有此区域」及显示内容（轮数、折叠轮数、当前月份、提及编号）；「本轮模型输入（记忆投影）」行保留 `conversation` 字段说明，改为指明其是上方区域的原始数据。
     - T34 状态行按验收建议改为「压缩区域渲染已真实验证，裁剪与回溯完整路径未验证」。
     - T37 标 DONE。未提交、未推送（`af6d158`、`d068bea` 与 tag `v0.2.0` 仍仅在本地）。
+
+### T38 — 交付后补强：只读参数自我纠正、本地时间显示、真实模型长对话检查（2026-11-20）
+- 状态：DONE（2026-11-20，Coding Agent；用户在 Mac 三轮验证：第三轮 `mvn test` 335 项 0 失败 0 错误，`npm run verify` 通过；真实模型长对话两轮程序行为项全部通过。未提交/未推送）。依据用户指示「还有什么不足之处，继续完善」。不改契约范围、不改业务边界与写入规则。
+- 问题 1（稳健性，与 T37 同类）：`AgentRuntime` 中任何只读工具一次出错就把 `toolError` 永久置位，模型改正参数后再调用成功、正常结束，整轮仍判失败。T37 只为保存路径解除了它；真实走查中 `recall_context` 一次 INVALID_ARGUMENT 正是这一形态。修复：未解决错误按工具名记录；只读工具的 `INVALID_ARGUMENT`/`NOT_FOUND` 在**同一工具**随后成功时视为自我纠正而解除；`PERMISSION_DENIED`、`CAPABILITY_*`、`STORAGE_ERROR`、超时从不解除（`FaultRecoveryTest.aSuccessBetweenErrorsResetsTheBreaker` 与 `TaskMemoryTest` 伪造 user_id 用例的语义不变）；换一个工具成功不解除；已核验保存仍清除全部。
+- 问题 2（纠正信息）：只读参数 JSON 无法解析时模型只收到 “Invalid tool input”。改为 `AgentRuntime.readArguments(tool)` + 该工具 schema 的 `description`；`RecallQuery` schema 新增 `description`，写明 TURN / TOOL_RESULT / FILE 三种精确用法。顺带把单次调用与 `validateReadBatch` 中重复的解码分支合并为 `decodeRead`。
+- 问题 3（界面）：Agent、能力、技能、资料文件、审计记录、运行记录的时间直接截取 UTC 字符串显示（本地 14:54 显示 06:54）。新增 `api.ts` `localTime`，按浏览器本地时区显示；审计 CSV 导出仍为 UTC 原值。`作品使用说明.md` 的 UTC 说明随之改写。
+- 新增 `scripts/long_conversation_check.py`：真实模型、全新库、一次 30 轮对话（第 3 轮持续限制、第 5 轮月份更正、第 25 轮要求调取第 2 轮原文、一条个人长期记忆），只按程序证据判定：压缩是否生效、模型输入 ≤6000、限制与更正折叠后是否保留、latest_month、记忆是否每轮注入；以及标注为 [模型行为] 的四项（更正后查询月份、不再查流水、recall_context 成功、记忆习惯被执行）。不覆盖大工具结果裁剪（种子数据量不足以触发）。复用 `innovation_compare.py` 的 HTTP 客户端；仅用合成种子、临时库、loopback，不记录密钥。合成数据干跑过判定逻辑，未连真实模型。
+- 测试：`AgentRuntimeTest` +2（同工具纠正后成功结束且错误信息为纠正提示；换工具不解除、权限拒绝不被后续成功掩盖）；`ToolSchemaTest` +1（recall 描述含三种用法、无企业参数）；前端 `api.test.ts` +1（`localTime` 与时区无关的断言）。
+- 发现后经用户决定**已改**（原属已 DONE 任务 T16/T35 的有意设计；2026-11-20 用户选择「保留原文并追加提示」，处理见下方第二轮条目）：任务仍有待补/待保存字段时，模型 `Finish` 的回复被 `TaskMemory` 整段替换为待补提示（`TaskMemory.java` 约 404 行），模型的真实查询结论不显示；`NEEDS_INPUT` 则保留模型原文再追加提示。初衷是不展示“已完成”的错误结论，代价是有待补字段的任务里每轮答案都被吞掉。
+- 另修：`CLAUDE.md` 中“其他先读后写事务尚未统一”已过时（T36 核查已统一），改为现状；补 T38 运行时规则。
+- 待用户（Mac）：`mvn test`、`cd frontend && npm run verify`；打包后 `python3 scripts/long_conversation_check.py --jar target/harness-0.0.1-SNAPSHOT.jar`（约 30 次真实模型调用，耗额度）。通过后才可标 DONE。
+- 第一轮验证（2026-11-20，用户 Mac）：`mvn test` 333 个测试 0 失败 0 错误（surefire 报告，含本任务新增 3 个后端测试）；长对话首跑结果存于 `docs/evidence/T38_LONG_CONVERSATION_20261120/`（qwen3.7-flash，11:45）。程序行为 5 项全部通过（压缩、≤6000 字符且最大 1517、第 3/5 轮折叠后保留、latest_month、记忆每轮注入）；[模型行为] 更正后用八月、不再查流水、第 25 轮 recall_context 成功取回第 2 轮均通过。两项未通过均因**脚本场景设计错误**，不是程序缺陷：C001 在 2026-09 之前没有启用的用途规则（R002 1.0 已停用），按复赛契约 A2，八月用途检查必须返回 `UNSUPPORTED_SCOPE`；而记忆习惯设成了“每次都做用途检查”，所以 14 轮以 `UNSUPPORTED_SCOPE` 结束，属于程序正确拒绝。模型在后续 7 轮不再调用必然失败的检查，于是“记忆被使用”一项也未通过。
+- 首跑后修正：(1) 脚本：记忆习惯改为任何月份都能执行的“查询该月适用的规则并注明依据”（判定改为查发票的轮次都调用 `query_rules`）；第 9 轮保留八月用途问题，单列为契约预期拒绝的检查（实际做了八月用途检查，且本轮以 `UNSUPPORTED_SCOPE` 结束）；第 21/22/26 轮换成与用途无关的八月问题；“无错误码”改为“除契约预期的 C001 九月前用途检查拒绝外无错误码”；逐轮记录回复前 300 字。合成数据正反两例干跑通过。(2) 程序：首跑中以 `UNSUPPORTED_SCOPE` 结束的轮次只显示“本次请求未成功完成：UNSUPPORTED_SCOPE”，没有说明原因和下一步。`AgentRuntime.honest` 对该码追加固定说明：没有唯一启用的用途规则、不猜测、不套用停用版本，可改问有适用规则的月份或只查金额。整轮失败的语义不变（`RetryPolicyTest` +1 断言）。
+- 第二轮待用户（Mac）：`mvn test`（预期 333，`RetryPolicyTest.honestReplyNamesTheRealWriteState` 多一条断言）、`cd frontend && npm run verify`（首轮结果未见报告，请一并确认）；重新打包后再跑一次长对话脚本（约 30 次真实模型调用），把 `target/t38-long-conversation/` 的结果覆盖到证据目录。
+- 第二轮验证（2026-11-20 12:13，用户 Mac，结果已覆盖到证据目录）：程序行为 5 项全部通过（最大输入 1617 字符）；[模型行为] 第 9 轮如实以 `UNSUPPORTED_SCOPE` 结束、不再查流水、第 25 轮 recall 成功均通过；失败回复已带新的原因说明。三项未通过，逐条分析：
+  - 第 21 轮 `NOT_FOUND`（**程序可改进**）：模型给 `recall_context` 自拟了 `call_id`（`query_invoices_C001_2026-08`）。原因是模型只在结果被压缩时的提示里见到真实 `call_id`，而错误信息“No such tool call in this task”不给任何可用值，模型无从改正，本轮按 T38 规则失败。修复：`ContextRecall` 对未知 `call_id` 返回本任务最近 5 个可取回的调用（编号、轮次、工具、参数；`TaskMemory.recentToolCalls`，经同一访问校验，不列 recall 自身），并说明不能自拟、本轮已返回的结果无需取回。模型改用正确编号成功后，按 T38 同工具纠正规则本轮不再失败（`ContextCompressionTest` +1）。
+  - 第 5、15 轮 `UNSUPPORTED_SCOPE`（**程序可改进**）：用户只要求按八月重查发票或只是说“好的，记下了”，模型却顺手调用了用途检查，八月超出规则范围，整轮失败，用户拿不到发票结论。整轮失败语义不改（契约 A2）；在 `PurposeCheck` schema 增加 `description`，写明只在用户问到用途、缺用途或用途规则执行情况时调用，只问金额、张数、明细、规则版本时不要附带调用（会随 `input_schema` 发给模型；`ToolSchemaTest` +1）。描述**不**提“会使本轮失败”，以免模型为避免失败而在真正被问到用途时跳过检查、编造结论。
+  - 第 19 轮又查了一次九月（[模型行为]）：用户只说“继续。”，而任务目标是建任务时写的“核对 C001 2026 年九月的发票”，与对话中更正后的 latest_month=八月冲突，模型两边都查。任务目标只由用户在建任务时设定，程序不从对话改写它，因此不改。
+  - 记忆习惯 24 轮中 8 轮未执行（[模型行为]）：qwen3.7-flash 对每轮附带规则查询执行不稳定；记忆每轮都已注入（程序项通过）。
+  - 另有实证：第 19、25 轮模型正常作答（第 25 轮已成功取回第 2 轮原文），但因任务有待补字段，回复被整段替换为待补提示，用户看不到答案。这是前述待用户决定的 `TaskMemory` 问题的真实例证。
+- 待补字段时的回复（用户决定后实施）：`TaskMemory` 在有待补/待保存字段时仍把模型 `Finish` 转为 `NEEDS_INPUT`、任务保持 `WAITING_USER`，但回复改为“模型原文 + `——` + 任务尚未完成。 + 待补提示”（模型原文为空时只有提示），`task.question` 只存待补提示（前端恢复任务时显示为“历史追问”，不混入旧答案；投影里的 question 也不会因答案过长被截掉提示）。任务状态、证据门、`awaitingSave`、写入通道均不变；`ask` 路径原本就是原文 + 提示，不变。旧行为的两条断言随之改写为新行为：`TaskMemoryTest.modelFinishCannotCompleteWhileRequiredFieldsRemainAndCanResumeAfterSupplement`（回复以模型原文开头、后接“任务尚未完成。”，question 不含模型原文）与 `DemoApiTest.modelFinishCannotCloseTaskWithPendingFieldsAtHttpBoundary`（同上，经 HTTP）。代价：模型若说了“已完成”之类的话，用户会看到，但紧随其后的固定提示和任务状态说明真实情况。
+- 第三轮待用户（Mac）：`mvn test`（预期 335，含改写的 2 条：`ContextCompressionTest` +1、`ToolSchemaTest` +1）、`cd frontend && npm run verify`（前两轮均未见报告）。长对话脚本可选再跑一次，看第 5/15/21 轮类问题是否减少；模型行为项不作为 T38 DONE 的门槛，程序行为项两轮均已通过。
+- 第三轮验证（2026-11-20 14:44–14:45，用户 Mac）：`mvn test` 335 项 0 失败 0 错误 0 跳过（surefire 报告；`ContextCompressionTest.aMadeUpCallIdIsAnsweredWithTheIdsThatExistAndCanBeCorrected`、`ToolSchemaTest.purposeCheckSaysWhenToCallIt` 在内，改写的 `TaskMemoryTest`/`DemoApiTest` 两条通过）。`npm run verify`（typecheck → lint → Vitest → build 串行）通过：`frontend/dist` 与 Vitest 缓存于 14:45 重新生成，build 只在前三步通过后才会执行。长对话脚本本轮未重跑：call_id 提示与用途检查说明对真实模型的效果尚未实测，证据目录仍为第二轮（12:13）结果。
+- 收尾：T38 DONE。仍未覆盖：大工具结果（>6000 字符）裁剪后经 `recall_context` 分页取回只有离线测试；T36 故障注入只有离线测试；全新检出、空缓存构建未验证。

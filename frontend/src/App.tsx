@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from 'react'
 import { ArrowUp, ArrowUpRight, Bot, Check, ChevronRight, CircleDashed, FileCheck2, FileUp, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
-import { AGENT_TOOLS, agentProblem, ApiError, contextSummary, memoryProblem, SCOPE_LABEL, impactMessage, skillProblem, canVerifyOperation, citedKnowledge, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, describeUpload, findOpenTask, friendlyError, isTerminalTaskStatus, issueLocation, issueReason, parseTool, provenNotExecuted, queriedInvoices, UPLOAD_ACCEPT, uploadProblem, usableAgents, verifiedWriteResult, verifyPendingOperation } from './api'
+import { AGENT_TOOLS, agentProblem, localTime, ApiError, contextSummary, memoryProblem, SCOPE_LABEL, impactMessage, skillProblem, canVerifyOperation, citedKnowledge, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, describeUpload, findOpenTask, friendlyError, isTerminalTaskStatus, issueLocation, issueReason, parseTool, provenNotExecuted, queriedInvoices, UPLOAD_ACCEPT, uploadProblem, usableAgents, verifiedWriteResult, verifyPendingOperation } from './api'
 import type { Memory, MemoryScope, AgentDef, AgentSpec, AgentsView, Capabilities, Skill, SkillInfo, SkillSpec, ToolInfo, Approval, AuditEvent, Exchange, FileDetail, Invoice, PlanStep, RowIssue, SavedTrace, Session, Statement, StoredFile, Task, ToolProgress, TurnView, UploadResult } from './api'
 import { Button, Modal } from './ui'
 
@@ -490,7 +490,7 @@ export default function App() {
     </Modal>
     <Modal open={inspector} onOpenChange={setInspector} title="任务检查器" description="计划、实际执行与审计，按需展开。" drawer>
       {task && <><h3>任务计划 / 待办</h3><p>{task.goal}</p>{task.pending.length ? <ul>{task.pending.map(p => <li key={p}>{p}</li>)}</ul> : <p className="muted">没有结构化待办。当前 API 未提供实时计划事件。</p>}{task.awaitingSave?.length ? <><p>已声明、尚未保存（需在审核页逐项确认）：</p><ul>{task.awaitingSave.map(field => <li key={field}><code>{field}</code>{task.supplied[field] ? ` = ${task.supplied[field].value}` : ''}</li>)}</ul></> : null}<p className="muted">状态：{statusLabel[task.status]} · 版本 {task.version}</p><ExecutionPlan task={task} history={history} verification={verification}/><ContextSources task={task} history={history} preferences={preferences} enterprise={session?.enterprise ?? ''} role={session?.profile ?? ''}/><Compression modelInput={turn?.modelInput}/><details><summary>历史工具摘要（不是当前执行证据）</summary><pre>{pretty(task.recentTools)}</pre></details><details><summary>本轮模型输入（记忆投影）</summary><pre>{turn?.modelInput ?? '无'}</pre></details><details><summary>完整模型输入（系统提示 + 用户消息 + 工具 schema）</summary>{turn?.promptTrace ? <pre>{pretty(turn.promptTrace)}</pre>
-          : savedTrace ? <><p className="hint">已持久化的本轮运行记录（{savedTrace.time}）；工具只保存名称，schema 原文不落库。</p><pre>{pretty({systemPrompt: savedTrace.systemPrompt, userMessage: savedTrace.userMessage, tools: savedTrace.toolNames, historySize: savedTrace.historySize, memorySource: savedTrace.memorySource, outcome: savedTrace.outcome})}</pre></>
+          : savedTrace ? <><p className="hint">已持久化的本轮运行记录（{localTime(savedTrace.time, true)}）；工具只保存名称，schema 原文不落库。</p><pre>{pretty({systemPrompt: savedTrace.systemPrompt, userMessage: savedTrace.userMessage, tools: savedTrace.toolNames, historySize: savedTrace.historySize, memorySource: savedTrace.memorySource, outcome: savedTrace.outcome})}</pre></>
           : <pre>无</pre>}</details><ToolGroup history={history}/><details><summary>任务原始数据（可能包含敏感字段）</summary><pre>{pretty(task)}</pre></details></>}
       <details onToggle={e => { if (e.currentTarget.open && audit === null && selected && !busy) void showAudit() }}><summary>真实审计</summary><Button disabled={!selected || busy} onClick={() => void showAudit()}>刷新审计</Button><Audit events={audit}/></details>
     </Modal>
@@ -667,7 +667,7 @@ function AgentsPage({heading, selected, canEdit, enterprise, busy, view, skills,
       {!canEdit && <p className="hint">只读成员可以查看 Agent，不能修改。</p>}
       {editing && <AgentForm key={editing.id ?? 'new'} initial={editing.spec} editingId={editing.id} profiles={view.profiles} skills={skills} enterprise={enterprise} busy={busy} onSave={onSave} onCancel={() => setEditing(null)}/>}
       <div className="agent-list">{view.agents.map(agent => <article key={agent.id} className={`agent-card ${agent.enabled ? '' : 'disabled'}`}>
-        <header><div><h2>{agent.spec.name}</h2><small><code>{agent.id}</code> · v{agent.version} · {agent.enabled ? '启用' : '已停用'} · {agent.changedBy} {agent.changedAt.replace('T',' ').slice(0,16)}</small></div>
+        <header><div><h2>{agent.spec.name}</h2><small><code>{agent.id}</code> · v{agent.version} · {agent.enabled ? '启用' : '已停用'} · {agent.changedBy} {localTime(agent.changedAt)}</small></div>
           {canEdit && <div className="open-task-actions"><Button variant="ghost" disabled={busy} onClick={() => setEditing({id:agent.id, spec:agent.spec})}>编辑</Button>
             <Button variant="ghost" disabled={busy} onClick={() => onToggle(agent)}>{agent.enabled ? '停用' : '启用'}</Button></div>}</header>
         <p>{agent.spec.responsibility}</p>
@@ -680,7 +680,7 @@ function AgentsPage({heading, selected, canEdit, enterprise, busy, view, skills,
           <dt>模型</dt><dd>{agent.spec.modelProfile}{agent.spec.model ? ` · ${agent.spec.model}` : ''}{view.profiles.find(p => p.name === agent.spec.modelProfile)?.configured === false && <small className="muted">（未配置）</small>}</dd>
           {agent.spec.instructions && <><dt>提示词</dt><dd className="prompt">{agent.spec.instructions}</dd></>}</dl>
         <Button variant="ghost" disabled={busy} onClick={() => void onHistory(agent.id).then(versions => setHistory({id:agent.id, versions}), () => {})}>版本历史</Button>
-        {history?.id === agent.id && <ol className="agent-history">{history.versions.map(v => <li key={v.version}>v{v.version} · {v.enabled ? '启用' : '停用'} · {v.changedBy} · {v.changedAt.replace('T',' ').slice(0,19)} · {v.spec.tools.length} 项能力</li>)}</ol>}
+        {history?.id === agent.id && <ol className="agent-history">{history.versions.map(v => <li key={v.version}>v{v.version} · {v.enabled ? '启用' : '停用'} · {v.changedBy} · {localTime(v.changedAt, true)} · {v.spec.tools.length} 项能力</li>)}</ol>}
       </article>)}</div>
     </>}
   </section>
@@ -724,14 +724,14 @@ function CapabilitiesPage({heading, selected, canEdit, busy, view, onRefresh, on
       <section className="file-list" aria-label="工具"><h2>工具</h2>
         <table><thead><tr><th>工具</th><th>版本</th><th>状态</th><th>使用它的 Agent</th><th></th></tr></thead>
           <tbody>{view.tools.map(t => <tr key={t.name}><td>{toolLabel[t.name] ?? t.name}<small><code>{t.name}</code> · {t.description}</small></td><td>{t.version}</td>
-            <td><span className={`knowledge-state ${t.enabled ? 'on' : 'off'}`}>{t.enabled ? '启用' : '已停用'}</span>{t.changedBy && <small>{t.changedBy} {t.changedAt?.replace('T',' ').slice(0,16)}</small>}</td>
+            <td><span className={`knowledge-state ${t.enabled ? 'on' : 'off'}`}>{t.enabled ? '启用' : '已停用'}</span>{t.changedBy && <small>{t.changedBy} {localTime(t.changedAt)}</small>}</td>
             <td>{t.usedBy.length ? t.usedBy.join('、') : <span className="muted">无</span>}</td>
             <td>{canEdit && <Button variant="ghost" disabled={busy} onClick={() => switchTool(t)}>{t.enabled ? '停用' : '启用'}</Button>}</td></tr>)}</tbody></table>
       </section>
       <section aria-label="技能" className="skills-section"><div className="section-heading"><h2>技能</h2>{canEdit && <Button variant="primary" disabled={busy} onClick={() => setEditing({id:null, spec:emptySkill})}>新建技能</Button>}</div>
         {editing && <SkillForm key={editing.id ?? 'new'} initial={editing.spec} editingId={editing.id} busy={busy} onSave={onSave} onCancel={() => setEditing(null)}/>}
         <div className="agent-list">{view.skills.map(({skill, usedBy}) => <article key={skill.id} className={`agent-card ${skill.enabled ? '' : 'disabled'}`}>
-          <header><div><h2>{skill.spec.name}</h2><small><code>{skill.id}</code> · v{skill.version} · {skill.enabled ? '启用' : '已停用'} · {skill.changedBy} {skill.changedAt.replace('T',' ').slice(0,16)}</small></div>
+          <header><div><h2>{skill.spec.name}</h2><small><code>{skill.id}</code> · v{skill.version} · {skill.enabled ? '启用' : '已停用'} · {skill.changedBy} {localTime(skill.changedAt)}</small></div>
             {canEdit && <div className="open-task-actions"><Button variant="ghost" disabled={busy} onClick={() => setEditing({id:skill.id, spec:skill.spec})}>编辑</Button>
               <Button variant="ghost" disabled={busy} onClick={() => onSwitch({kind:'技能', name:skill.id, usedBy, enabling:!skill.enabled})}>{skill.enabled ? '停用' : '启用'}</Button></div>}</header>
           {skill.spec.description && <p>{skill.spec.description}</p>}
@@ -739,7 +739,7 @@ function CapabilitiesPage({heading, selected, canEdit, busy, view, onRefresh, on
             <dt>使用者</dt><dd>{usedBy.length ? usedBy.join('、') : <span className="muted">尚无 Agent 使用</span>}</dd>
             <dt>说明</dt><dd className="prompt">{skill.spec.instructions}</dd></dl>
           <Button variant="ghost" disabled={busy} onClick={() => void onHistory(skill.id).then(versions => setHistory({id:skill.id, versions}), () => {})}>版本历史</Button>
-          {history?.id === skill.id && <ol className="agent-history">{history.versions.map(v => <li key={v.version}>v{v.version} · {v.enabled ? '启用' : '停用'} · {v.changedBy} · {v.changedAt.replace('T',' ').slice(0,19)} · {v.spec.tools.join('、')}</li>)}</ol>}
+          {history?.id === skill.id && <ol className="agent-history">{history.versions.map(v => <li key={v.version}>v{v.version} · {v.enabled ? '启用' : '停用'} · {v.changedBy} · {localTime(v.changedAt, true)} · {v.spec.tools.join('、')}</li>)}</ol>}
         </article>)}</div>
       </section>
       <section aria-label="知识" className="skills-section"><h2>知识</h2>
@@ -797,7 +797,7 @@ function FilesPage({heading, selected, canUpload, enterprise, busy, files, uploa
         {files === null ? <p className="muted">正在加载…</p> : files.length === 0 ? <p className="empty">还没有上传文件。</p> :
           <table><thead><tr><th>文件</th><th>版本</th><th>类型</th><th>大小</th><th>上传</th><th>作为知识</th><th></th></tr></thead>
             <tbody>{files.map(f => <tr key={f.id}><td>{f.name}</td><td>v{f.version}{!f.latest && <small>已被新版本取代</small>}</td><td>{kindLabel[f.kind]}</td><td>{size(f.sizeBytes)}</td>
-              <td>{f.uploadedBy}<small>{f.uploadedAt.replace('T', ' ').slice(0, 19)}</small></td>
+              <td>{f.uploadedBy}<small>{localTime(f.uploadedAt, true)}</small></td>
               <td><span className={`knowledge-state ${f.latest && f.knowledgeEnabled ? 'on' : 'off'}`}>{!f.latest ? '不检索（旧版本）' : f.knowledgeEnabled ? '检索中' : '已停用'}</span>
                 {f.latest && canUpload && <Button variant="ghost" disabled={busy} onClick={() => onToggle(f)}>{f.knowledgeEnabled ? '停用' : '启用'}</Button>}</td>
               <td><Button variant="ghost" disabled={busy} onClick={() => onOpen(f.id)}>查看内容</Button></td></tr>)}</tbody></table>}
@@ -813,7 +813,7 @@ function FilesPage({heading, selected, canUpload, enterprise, busy, files, uploa
   </section>
 }
 function Audit({events}: {events:AuditEvent[]|null}) {
-  return <div className="audit-list">{events === null ? <p className="muted">展开后按需加载；未选择身份时无法读取。</p> : events.length ? events.map(e => <details key={e.id}><summary><span>{e.tool ?? '请求'} · {e.outcome}</span><small>{e.time}</small>{e.verified && <Check size={15}/>}</summary><dl>{Object.entries(e).filter(([key,value]) => value !== null && !['id','tool','outcome','time'].includes(key)).map(([key,value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl></details>) : <p className="empty">暂无审计事件。</p>}</div>
+  return <div className="audit-list">{events === null ? <p className="muted">展开后按需加载；未选择身份时无法读取。</p> : events.length ? events.map(e => <details key={e.id}><summary><span>{e.tool ?? '请求'} · {e.outcome}</span><small>{localTime(e.time, true)}</small>{e.verified && <Check size={15}/>}</summary><dl>{Object.entries(e).filter(([key,value]) => value !== null && !['id','tool','outcome','time'].includes(key)).map(([key,value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl></details>) : <p className="empty">暂无审计事件。</p>}</div>
 }
 
 export function Review({invoices,enterprise,disabled,onApprove}: {invoices:Invoice[]; enterprise:string; disabled:boolean; onApprove:(a:Approval)=>void}) {

@@ -68,5 +68,7 @@ class RetryPolicyTest {
         assertThat(AgentRuntime.honest("STORAGE_ERROR", List.of(unknown), true)).contains("结果未知", "不要重复保存", "核验");
         assertThat(AgentRuntime.honest("TOOL_TIMEOUT", List.of(), true)).contains("结果未知");
         assertThat(AgentRuntime.honest("MODEL_RATE_LIMITED", List.of(), false)).contains("没有修改任何发票", "不会自动重发");
+        assertThat(AgentRuntime.honest("UNSUPPORTED_SCOPE", List.of(rows), false))
+                .startsWith("本次请求未成功完成：UNSUPPORTED_SCOPE。").contains("没有唯一启用的用途规则", "不猜测", "1 次只读查询");
     }
 }

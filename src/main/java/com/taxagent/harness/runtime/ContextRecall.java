@@ -12,7 +12,7 @@ import java.util.*;
  * trusted user and enterprise. It reads only; every lookup rechecks access through TaskMemory or FileService.
  */
 public final class ContextRecall {
-    static final int MAX_TEXT = 4000, MAX_JSON = 12_000, DEFAULT_ROWS = 20;
+    static final int MAX_TEXT = 4000, MAX_JSON = 12_000, DEFAULT_ROWS = 20, MAX_LISTED_CALLS = 5;
     private static final ObjectMapper JSON = new ObjectMapper();
     private final Path database;
     private final TaskMemory memory;
@@ -44,7 +44,7 @@ public final class ContextRecall {
         for (int i = currentTurn.size() - 1; i >= 0 && json == null; i--)
             if (currentTurn.get(i).call().id().equals(query.callId())) json = currentTurn.get(i).resultJson();
         if (json == null) json = memory.toolResult(session, enterprise, taskId, query.callId()).map(TaskMemory.StoredToolResult::resultJson)
-                .orElseThrow(() -> new DomainException(ErrorCode.NOT_FOUND, "No such tool call in this task"));
+                .orElseThrow(() -> new DomainException(ErrorCode.NOT_FOUND, unknownCall()));
         var root = JSON.readTree(json);
         var rows = root.path("data").path("rows");
         if (!rows.isArray()) return new RecallResult("TOOL_RESULT", query.callId(), clip(json, MAX_JSON), null, null, null, null);
@@ -57,6 +57,18 @@ public final class ContextRecall {
         int next = offset + page.size();
         return new RecallResult("TOOL_RESULT", query.callId(), JSON.writeValueAsString(copy), rows.size(), offset, page.size(),
                 next < rows.size() ? "还有 " + (rows.size() - next) + " 行，可用 offset=" + next + " 继续取回；合计字段始终是全部行的程序计算结果。" : "已到最后一行。");
+    }
+
+    /** The model never sees call ids unless a result was compacted, so a wrong one gets the ids that exist (T38). */
+    private String unknownCall() {
+        var text = new StringBuilder("本任务没有这个 call_id 的工具结果。call_id 不能自拟，只能原样使用结果压缩提示或下列清单中的值；本轮已返回的结果已在上下文中，无需取回。");
+        var known = memory.recentToolCalls(session, enterprise, taskId, MAX_LISTED_CALLS);
+        if (known.isEmpty()) return text.append("本任务此前没有可取回的工具结果。").toString();
+        text.append("最近可取回的结果：");
+        for (var call : known)
+            text.append(call.callId()).append("（第 ").append(call.turnSeq()).append(" 轮 ").append(call.tool()).append(' ')
+                    .append(clip(call.arguments(), 120)).append("）；");
+        return text.toString();
     }
 
     private RecallResult file(RecallQuery query) {

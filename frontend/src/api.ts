@@ -254,6 +254,16 @@ export function contextSummary(modelInput: string | null | undefined): ContextSu
   } catch { return null }
 }
 
+/** Server timestamps are UTC instants (Java `Instant.toString()`); show them in the viewer's local time. */
+export function localTime(iso: string | null | undefined, seconds = false): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const text = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return seconds ? `${text}:${pad(date.getSeconds())}` : text
+}
+
 export function friendlyError(code: string) {
   const messages: Record<string, string> = {
     MODEL_NOT_CONFIGURED: '真实模型未配置。请在服务端设置 LLM_ENDPOINT、LLM_API_KEY 和 LLM_MODEL；当前没有模拟回复。',

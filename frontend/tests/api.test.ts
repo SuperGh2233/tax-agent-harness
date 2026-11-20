@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { agentProblem, ApiError, contextSummary, memoryProblem, impactMessage, skillProblem, canVerifyOperation, usableAgents, citedKnowledge, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, describeUpload, findOpenTask, friendlyError, isTerminalTaskStatus, issueLocation, issueReason, MAX_UPLOAD_BYTES, provenNotExecuted, queriedInvoices, uploadProblem, verifiedWriteResult, verifyPendingOperation } from '../src/api'
+import { agentProblem, ApiError, contextSummary, localTime, memoryProblem, impactMessage, skillProblem, canVerifyOperation, usableAgents, citedKnowledge, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, describeUpload, findOpenTask, friendlyError, isTerminalTaskStatus, issueLocation, issueReason, MAX_UPLOAD_BYTES, provenNotExecuted, queriedInvoices, uploadProblem, verifiedWriteResult, verifyPendingOperation } from '../src/api'
 import type { AgentDef, AgentSpec, Exchange, Task, TurnView, UploadResult } from '../src/api'
 import { initialOperation } from '../src/App'
 
@@ -385,4 +385,14 @@ test('compression summary reads only what the server sent to the model', () => {
   expect(contextSummary(JSON.stringify({task:{}}))).toBeNull()
   expect(contextSummary('not json')).toBeNull()
   expect(contextSummary(null)).toBeNull()
+})
+
+test('server UTC instants are shown in the viewer local time, never as the raw UTC clock', () => {
+  // Built from a local wall-clock time, so the assertion holds in any time zone.
+  const iso = new Date(2026, 10, 19, 14, 54, 7).toISOString()
+  expect(iso.endsWith('Z')).toBe(true)
+  expect(localTime(iso, true)).toBe('2026-11-19 14:54:07')
+  expect(localTime(iso)).toBe('2026-11-19 14:54')
+  expect(localTime(null)).toBe('')
+  expect(localTime('not a time')).toBe('not a time')
 })

@@ -184,6 +184,21 @@ public final class TaskMemory {
             }
         });
     }
+    /** Newest stored calls of this task without their results, so recall_context can name the ids that exist (T38). */
+    public List<StoredToolResult> recentToolCalls(Session session, String enterprise, String taskId, int limit) {
+        return access(session, enterprise, c -> {
+            get(c, session, enterprise, taskId);
+            var out = new ArrayList<StoredToolResult>();
+            try (var st = c.prepareStatement("SELECT turn_seq,call_id,tool,arguments FROM task_tool_results WHERE user_id=? AND enterprise_id=? "
+                    + "AND task_id=? AND tool<>'recall_context' ORDER BY turn_seq DESC, rowid DESC LIMIT ?")) {
+                scope(st, session, enterprise); st.setString(3, taskId); st.setInt(4, limit);
+                try (var r = st.executeQuery()) {
+                    while (r.next()) out.add(new StoredToolResult(r.getInt(1), r.getString(2), r.getString(3), r.getString(4), null));
+                }
+            }
+            return List.copyOf(out);
+        });
+    }
 
     // ---- T33 long-term memory lifecycle (FINAL_ROUND_CONTRACT B6) ----
 
@@ -398,11 +413,15 @@ public final class TaskMemory {
                 if (value.isBlank()) supplied.remove(field); else supplied.put(field, new Input(value, message));
             });
             var effective = result;
+            String question = null;
             boolean unfinished = !pending.isEmpty() || !awaiting.isEmpty();
             if (unfinished && result.status() == AgentRuntime.Status.FINISHED) {
                 // A model Finish is not task completion while explicit required inputs or unsaved statements remain.
+                // T38 (user decision 2026-11-20): the answer stays visible; the fixed note after it says the task is
+                // still open, and the stored question is that note alone.
+                question = pendingQuestion(pending, awaiting, supplied);
                 effective = new AgentRuntime.Result(AgentRuntime.Status.NEEDS_INPUT,
-                        pendingQuestion(pending, awaiting, supplied), null, result.history());
+                        afterAnswer(result.text(), question), null, result.history());
             } else if (unfinished && result.status() == AgentRuntime.Status.NEEDS_INPUT) {
                 effective = new AgentRuntime.Result(AgentRuntime.Status.NEEDS_INPUT,
                         withPendingQuestion(result.text(), pending, awaiting, supplied), result.errorCode(), result.history());
@@ -414,7 +433,8 @@ public final class TaskMemory {
             };
             var plan = TaskPlan.derive(status, pending, awaiting, summaries, result.history());
             var next = new Task(id, status, old.version() + 1, old.goal(), pending, supplied,
-                    effective.status() == AgentRuntime.Status.NEEDS_INPUT ? effective.text() : null, summaries, plan, awaiting);
+                    effective.status() == AgentRuntime.Status.NEEDS_INPUT ? (question != null ? question : effective.text()) : null,
+                    summaries, plan, awaiting);
             save(c, session, enterprise, old, next);
             // T34: the original behind the compressed view; same transaction and version check as the task itself.
             int seq = history.size() + 1;
@@ -477,6 +497,10 @@ public final class TaskMemory {
                                               Map<String, Input> supplied) {
         var required = pendingQuestion(pending, awaiting, supplied);
         return modelQuestion == null || modelQuestion.isBlank() ? required : modelQuestion + "\n\n" + required;
+    }
+    static final String STILL_OPEN = "\n\n——\n任务尚未完成。";
+    private static String afterAnswer(String answer, String required) {
+        return answer == null || answer.isBlank() ? required : answer + STILL_OPEN + required;
     }
     /** What the model receives: one value per name from its winning scope, with the scope visible in the key. */
     private Map<String, Input> preferences(Connection c, Session session, String enterprise) throws Exception {

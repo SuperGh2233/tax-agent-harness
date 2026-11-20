@@ -36,6 +36,18 @@ class ToolSchemaTest {
         assertThat(ToolContract.schema().has("$defs")).isTrue();
     }
 
+    @Test void recallDescriptionShowsEveryValidShape() throws Exception {
+        // AgentRuntime sends this description back when recall_context arguments cannot be decoded.
+        var description = root.at("/$defs/RecallQuery/description").asText();
+        for (var source : List.of("TURN", "TOOL_RESULT", "FILE")) assertThat(description).contains("\"source\":\"" + source + "\"");
+        assertThat(description).contains("\"seq\"", "\"call_id\"", "\"file_id\"", "\"location\"").doesNotContain("enterprise_id");
+    }
+
+    @Test void purposeCheckSaysWhenToCallIt() {
+        // T38 real-model run: the purpose check was added to plain invoice queries and, out of rule scope, failed them.
+        assertThat(root.at("/$defs/PurposeCheck/description").asText()).contains("只在用户问到用途", "不要附带调用");
+    }
+
     @ParameterizedTest
     @CsvSource(delimiter = '|', value = {
             "Query|{\"enterprise_id\":\"C001\",\"month\":\"2026-09\"}|true",
