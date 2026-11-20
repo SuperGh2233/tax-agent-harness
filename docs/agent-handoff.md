@@ -1,8 +1,21 @@
 # Tax Agent Harness — 开发交接说明
 
-> 更新时间：2026-11-19（新增第 12 节：`作品使用说明.md` 评委视角走查待改清单）  
-> 上次全面更新：2026-11-02  
+> 更新时间：2026-11-21（新增第 0 节当前状态与第 20 节收尾；第 1–11 节为 2026-11-02 起的历史快照，其中模型协议、测试数、「浏览器流程未通过」等表述已过时，以第 0 节为准）
+> 上次全面更新：2026-11-02
 > 用途：交给下一位队友继续开发。本文记录当前工作树、已完成能力、真实验证边界和推荐接手顺序。**不是比赛最终交付证明，也不代表当前 Git 工作区已提交。**
+
+## 0. 当前状态（2026-11-21，暂停收尾时）
+
+- Git：`main` 与 `origin/main` 同为 `64e4a63`，工作区除本次文档同步外无改动；未跟踪的官方复赛材料（目录与 zip）和 `审计docs/` 刻意不入库。
+- 范围：复赛契约 `docs/FINAL_ROUND_CONTRACT.md` 的 T28–T35 已实现，T36–T43 为稳健性、真实验证与环境验证补强，全部 DONE 并推送。
+- 测试：JDK 21 `mvn test` 336/0/0/0；`cd frontend && npm run verify` 通过（Vitest 54）。
+- 进程级证据（`docs/evidence/`）：
+  - 全新检出 + 空缓存构建：macOS 本机（T39），GitHub Actions Ubuntu / Windows / macOS（Wrapper 3.9.9）与 Ubuntu（Maven 3.6.3）四作业全绿（T41、T43）；
+  - 故障注入：真实 JAR + 桩模型 8 场景 40 项（T40）；
+  - 真实模型 `qwen3.7-flash`：受控保存对比 20/20 vs 9/20（T37）、30 轮长对话（T38）、大结果分页取回（T39），程序行为项全部通过。
+- 模型：统一 `qwen3.7-flash`，DashScope Anthropic 兼容入口（`LLM_PROTOCOL=anthropic`）；配置只走环境变量，见 `CLAUDE.md`「模型配置」。
+- **仍未完成**：≤5 分钟演示视频、最终作品压缩包（按 `RELEASE_CHECKLIST.md` 白名单人工整理与逐项审阅）。可选后续：写一个检查最终 zip 的脚本（解到空目录、核对禁止项、按 REPRODUCE 构建启动）。
+- 接手顺序：`AGENTS.md` → 本节 → `TASKS.md` 末尾 T38–T44 → `CLAUDE.md`（命令与架构）→ `REPRODUCE.md` / `作品使用说明.md`。
 
 ## 1. 一句话结论
 
@@ -362,9 +375,15 @@ npm run verify
 - 证据 `docs/evidence/T42_VITE_SHORT_PATH_20261120/`（Windows 14/14 摘要 + 那行 root 日志）。
 
 
-## 19. 2026-11-20 T43 收尾清理（DONE，已推送，`220b26c`）
+## 19. 2026-11-20 T43 收尾清理（DONE，已推送，`220b26c`／`64e4a63`）
 
 - 本文第 16、17 节的过时说法已更正（T40 实际已推送；「其他平台/Maven 最低版本」已由 T41 关闭；检查脚本的长名规避已被 T42 删除）。
 - `frontend/vite.config.ts`：`[vite] root … (cwd …)` 只在展开后的 root 与 cwd 字符串不同时打印。正常本地构建、`npm run dev`、Vitest 不再输出；Windows 短名路径（以及 macOS `/var` → `/private/var` 这类符号链接）下照常输出，CI 诊断能力不变。
 - `.github/workflows/fresh-checkout.yml`：`actions/checkout@v4→v5`、`actions/setup-python@v5→v6`、`actions/upload-artifact@v4→v6`，均已核对各自 `action.yml` 为 `using: node24`（`upload-artifact@v5` 仍是 node20，故直接取 v6）。输入参数未变。
 - 已验证：本地 `npm run verify` 通过（54 项测试），构建不再打印 `[vite] root`；CI run `44767147980` 四作业全绿，注释区只剩 macOS 容量提示（Node 20 弃用提示已消失），Windows 日志仍有 `[vite] root C:\Users\runneradmin\… (cwd …RUNNER~1…)`。证据 `docs/evidence/T43_CI_20261120/`。
+
+## 20. 2026-11-21 暂停收尾：说明文档同步（T44）
+
+- 按用户指示「暂时先收尾，并更新说明文档」，只改文档，不改代码。
+- 同步到当前状态的文档：`README.md`（环境验证说明、测试与验证表、进程级检查脚本、项目结构、当前状态与限制）、`作品使用说明.md`（平台验证说明）、`REPRODUCE.md`（新增 T41–T43 更正：其他平台已验证，未验证只剩视频与压缩包）、`RELEASE_CHECKLIST.md`（顶部当前状态；白名单补入 `作品使用说明.md`、`自主创新说明.md`、`CLAUDE.md`、`.github/workflows/**` 与五个检查脚本）、`docs/SUBMISSION_NOTES.md`（第 6 节标为初赛快照）、`docs/index.md`（补 T37–T43 证据条目，2026-11-11 测试报告改为 archived）、本文第 0 节。
+- 历史快照段落（2026-10-30、11-02、11-11）原文保留，只在其附近加注「已过时、以当前状态为准」。

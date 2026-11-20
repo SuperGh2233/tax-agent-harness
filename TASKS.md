@@ -732,3 +732,9 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 本地验证（2026-11-20 22:57，用户 Mac）：`cd frontend && npm run verify` 通过（typecheck、lint、Vitest 54/54、`vite build` 920ms），输出中 `[vite] root` 出现 **0 次**。条件分支另测：从仓库根用 `--config frontend/vite.config.ts` 构建（cwd≠root），日志照常打印 `[vite] root … (cwd …)`，说明收紧条件没有牺牲 CI 诊断能力。
 - CI 复跑（2026-11-20 23:49–23:57，提交 `220b26c`，run `44767147980`）：**四作业全绿**（windows/macos/ubuntu wrapper + ubuntu 3.6.3），注释区**只剩一条 macOS arm64 容量提示，Node 20 弃用提示已消失**。Windows 作业 14/14，日志中仍有 `[vite] root C:\Users\runneradmin\… (cwd C:\Users\RUNNER~1\…)`，`mvn-package-online` 102.1s、JAR 内含 React 页面。证据 `docs/evidence/T43_CI_20261120/`。
 - 收尾：T43 DONE。T42 记录里「每次构建一行」的说法自此作废（原文未改，按用户要求由本条注明）。
+
+### T44 — 暂停收尾：说明文档同步到当前状态（2026-11-21）
+- 状态：DONE（2026-11-21，Coding Agent；仅文档改动，无代码与测试变化，待用户审阅后提交）。依据用户指示「暂时先收尾，并更新说明文档」。不改契约、官方材料、计划书与已 DONE 任务的范围。
+- 原因：README「测试与验证」仍是 2026-11-02 的 223 项 / Vitest 71 项，「当前状态与限制」仍写 252/37 项与「T15 浏览器流程仍在进行」，环境说明仍写「其他操作系统尚未完成完整复现验证」；`作品使用说明.md`、`RELEASE_CHECKLIST.md`、`docs/SUBMISSION_NOTES.md`、`docs/index.md`、交接说明头部同样停留在初赛时点；交付白名单缺复赛新增的 `作品使用说明.md`、`自主创新说明.md` 与检查脚本。
+- 改动：上述文件改为当前状态（336 项后端、54 项前端、三平台全新检出构建、故障注入 40 项、真实模型三项检查），历史快照原文保留并加注过时；白名单补入复赛新增说明、`CLAUDE.md`、`.github/workflows/**` 与 `scripts/` 下五个检查脚本；`docs/index.md` 补 T37–T43 证据条目；交接说明新增第 0 节（当前状态与接手顺序）与第 20 节。
+- 仍未完成（不属本任务）：≤5 分钟演示视频、最终作品压缩包。

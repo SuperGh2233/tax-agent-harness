@@ -77,6 +77,8 @@ java -Djava.io.tmpdir=$demoDir -Dorg.sqlite.tmpdir=$demoDir -jar target\harness-
 
 ## 6. 当前状态（2026-11-11 更新）
 
+> 2026-11-21 补记：本节为初赛时点快照，已过时。当前状态（336 项后端测试、54 项前端测试、三平台全新检出构建、故障注入与真实模型检查）见 [RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md) 顶部与 [开发交接说明](agent-handoff.md) 第 0 节；仍未完成的只有演示视频与最终 zip。
+
 - 已完成：React 单一前端、执行计划/上下四栏、自然错误提示、完整 prompt trace、审计保留策略、OSV 扫描、离线构建脚本、TASKS 记录、规则变更即时生效、`agent_trace` 持久化与 `/traces` 回读。
 - 已验证：`qwen3.7-flash` 三场景真实 E2E（查询 → 待补追问 → 跨轮续接 → 受控保存 → 回读 → 审计）、React 浏览器保存与跨轮、252/37 测试、clean package、OSV 0 未抑制。
 - 未完成：≤5 分钟演示视频、最终 zip、设计说明 docx 按最新结论校对。

@@ -101,7 +101,7 @@ flowchart LR
 - Node.js 22.12+（仅运行 React 前端时需要）
 - npm
 
-首次构建需要下载 Maven 依赖；前端首次安装需要访问 npm registry。项目已在 macOS 环境进行验证，其他操作系统尚未完成完整复现验证。
+首次构建需要下载 Maven 依赖；前端首次安装需要访问 npm registry。全新检出、空 Maven 缓存的在线构建与离线复跑已在 macOS 本机和 GitHub Actions 的 Ubuntu / Windows / macOS 上通过；最低组合 JDK 21 + Maven 3.6.3 与仓库 Maven Wrapper 均已实测（T41，见 [REPRODUCE.md](REPRODUCE.md)）。
 
 ### 1. 获取代码并运行后端
 
@@ -232,18 +232,17 @@ Vite 开发服务器只监听本机回环地址，并将同源 `/api` 请求代�
 
 ## 测试与验证
 
-最近一次本地验证结果（2026-11-02；以当前工作树为准，尚未提交）：
+最近一次验证结果（2026-11-20，提交 `220b26c`／`64e4a63`；逐项证据见 [TASKS.md](TASKS.md) T38–T43 与 `docs/evidence/`）：
 
 | 验证项 | 结果 |
 | --- | ---: |
-| Java 21 Maven 全量测试 | 223 passed，0 failures，0 errors，0 skipped |
-| Maven JAR 打包 | BUILD SUCCESS；JAR 34,131,390 bytes |
-| 前端 Vitest | 71 passed |
-| TypeScript 类型检查 | 通过 |
-| ESLint | 通过 |
-| Vite 生产构建 | 通过 |
-| Maven 前端构建（Node/npm + Vite） | 通过（prepare-package） |
-| Git diff whitespace 检查 | 通过 |
+| Java 21 Maven 全量测试 | 336 passed，0 failures，0 errors，0 skipped |
+| 前端 `npm run verify`（TypeScript、ESLint、Vitest、Vite build） | 通过；Vitest 54 passed |
+| 全新检出 + 空 Maven 缓存：在线 test/package、JAR 内含 React 页面、新库初始化、loopback 健康检查、离线复跑 | macOS 本机通过；GitHub Actions Ubuntu / Windows / macOS（Maven Wrapper 3.9.9）与 Ubuntu（Maven 3.6.3）四作业全绿 |
+| 故障注入（真实 JAR + 本机桩模型：超时、429、畸形回复、工具错误熔断、保存后进程被杀、流式中途断开） | 8 个场景 40 项通过 |
+| 真实模型 `qwen3.7-flash`：受控保存对比、30 轮长对话、大工具结果分页取回 | 程序行为项全部通过（模型行为项单列，见 T37–T39） |
+
+更早的快照（2026-11-02 的 223 项、2026-11-11 的 252 项等）保留在 TASKS.md 与 REPRODUCE.md 的时间线里，不代表当前状态。
 
 常用命令：
 
@@ -259,6 +258,15 @@ npm run lint
 npm test
 npm run build
 npm run verify
+```
+
+进程级检查脚本（`scripts/`，均使用合成数据、独立临时库、仅 loopback）：
+
+```bash
+python3 scripts/fresh_checkout_check.py [--maven 3.6.3|wrapper]   # 全新检出、空缓存构建（只覆盖已提交内容，需联网）
+python3 scripts/fault_injection_check.py --jar target/harness-0.0.1-SNAPSHOT.jar   # 桩模型，无需密钥
+python3 scripts/long_conversation_check.py --jar target/harness-0.0.1-SNAPSHOT.jar  # 真实模型，消耗额度
+python3 scripts/large_result_check.py --jar target/harness-0.0.1-SNAPSHOT.jar       # 真实模型，消耗额度
 ```
 
 自动化测试使用合成样例数据和隔离测试数据库。真实 `qwen3.7-flash`（DashScope Anthropic 兼容入口）的 API 三场景（查询+R004、受控保存、跨轮补充保存）与真实 Chrome/React 查询、受控保存、跨轮补充、`verified=true` 回读、脱敏审计均已通过。≤5 分钟视频与最终 zip 仍未完成。不要把 API 验证写成浏览器 UI 验证。
@@ -277,7 +285,8 @@ npm run verify
 ├── docs/
 │   ├── plans/                 # 阶段计划与验收记录
 │   └── specs/                 # API、工具和任务存储契约
-├── scripts/                   # 官方样例数据核对脚本
+├── scripts/                   # 种子核对、安全扫描与进程级检查脚本
+├── .github/workflows/         # 全新检出构建 CI（三平台 + Maven 3.6.3）
 ├── DEMO_SCRIPT.md             # 演示步骤
 ├── REPRODUCE.md               # 独立复现指南
 ├── RELEASE_CHECKLIST.md       # 交付检查清单
@@ -302,9 +311,9 @@ npm run verify
 ## 当前状态与限制
 
 - 后端核心流程、任务记忆、受控写入、演示 API 与本地 UI 已实现。
-- React 是唯一 UI；T15 的真实浏览器受控保存/跨轮及最终录屏仍在进行。
-- 独立复现和交付材料核验仍在进行；队友接手请先阅读 [开发交接说明](docs/agent-handoff.md)，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
-- 最新 JDK21 全量 252 项、前端 Vitest 37 项自动化测试通过；`qwen3.7-flash` 真实 API 三场景与 React 查询、受控保存、跨轮补充均已通过；仅 ≤5 分钟视频与最终 zip 未完成。模型型号由配置决定，本项目统一 `qwen3.7-flash`。
+- React 是唯一 UI；真实浏览器内的查询、受控保存、跨轮补充与 `verified=true` 回读已通过。
+- 复赛范围（`docs/FINAL_ROUND_CONTRACT.md`）的 T28–T43 均已完成并推送；JDK 21 全量 336 项、前端 Vitest 54 项通过，三平台全新检出构建与故障注入均有证据（见上表）。队友接手请先阅读 [开发交接说明](docs/agent-handoff.md)，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
+- **仍未完成：** ≤5 分钟演示视频、最终作品压缩包（需人工按 RELEASE_CHECKLIST 白名单整理并逐项审阅）。模型型号由配置决定，本项目统一 `qwen3.7-flash`。
 - 当前系统用于比赛演示与技术验证，不应视为具备生产环境所需的认证、部署、审计防篡改和运维能力。
 
 ---

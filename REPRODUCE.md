@@ -106,6 +106,8 @@ JAR 绑定127.0.0.1:18083，HTTP健康200/UP，HTML与JS/CSS可访问；真实�
 
 > **更正（2026-11-20，T41）**：「Maven 最低版本」已验证。`scripts/fresh_checkout_check.py --maven 3.6.3` 在 JDK 21.0.12.1、macOS arm64 上，从空仓库以 Maven 3.6.3 完成在线 test（336/0/0/0）、package、启动检查与离线复跑，15 步全部通过；证据见 `docs/evidence/T41_MAVEN_363_20261120/`。其他平台由 `.github/workflows/fresh-checkout.yml` 在 GitHub Actions 上验证，结果见 `TASKS.md` T41。
 
+> **更正（2026-11-20，T41–T43）**：「其他平台」已验证。GitHub Actions（`.github/workflows/fresh-checkout.yml`）在 Ubuntu、Windows、macOS 上用仓库 Maven Wrapper（3.9.9）、在 Ubuntu 上另用 Maven 3.6.3 执行同一全新检出检查，四作业全绿（336 项测试、JAR 内含 React 页面、新库初始化、loopback 健康检查、离线复跑），证据 `docs/evidence/T41_CI_20261120/`、`T43_CI_20261120/`。其间修复两处只在 Windows 出现的问题：一个超时测试在临时目录清理前未释放 SQLite 文件句柄（`67b7a0e`）；仓库位于 8.3 短名路径（如 `C:\Users\RUNNER~1\…`）时 `npm run build` 失败，已在 `frontend/vite.config.ts` 用 `realpathSync.native` 固定 root（T42，`0051750`）。截至 2026-11-21，本节「未验证」中只剩：**真实视频、最终压缩包**。
+
 ## 2026-10-30 测试配置记录（历史快照）
 以下配置和“真实 E2E 等待凭证”的状态仅代表 2026-10-30 当时的测试准备情况，已被 2026-11-02 的真实 Qwen API 只读跨轮验证及后续延迟适配更新。**不要将此段当作当前测试状态或照搬旧密钥配置。** 当前模型参数、验证结论和本机凭证处理方式以 [DEMO_SCRIPT.md](DEMO_SCRIPT.md) 与 [docs/agent-handoff.md](docs/agent-handoff.md) 为准。所有凭证只在本机安全终端使用，不得写入仓库、日志或聊天。
 
