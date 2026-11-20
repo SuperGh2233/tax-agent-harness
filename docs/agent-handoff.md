@@ -352,3 +352,12 @@ npm run verify
   - `67b7a0e`：`AgentRuntimeTest` 的超时用例断言通过后，被放弃的工具线程仍占着 `runtime.db`，JUnit 删 `@TempDir` 在 Windows 上失败。测试改为等文件可删除再结束。
   - `9ff7830`：runner 的 `%TEMP%` 是 8.3 短名（`RUNNER~1`），Node 按长名解析，Vite 因此产出绝对 chunk 名、`npm run build` 失败。检查脚本改用 `GetLongPathNameW` 展开的目录克隆。
 - 仍未验证：真实视频、最终压缩包。CI 残留提示：`checkout@v4`、`setup-python@v5`、`upload-artifact@v4` 仍以 Node 20 为目标（被强制跑在 Node 24），不影响结果。
+
+## 18. 2026-11-20 T42（DONE，已推送）
+
+- 产品侧修掉 T41 只在检查脚本里规避的 Windows 短路径问题：`frontend/vite.config.ts` 的 `root` 取 `realpathSync.native(new URL('.', import.meta.url))`。**必须用 `.native`**——`fs.realpathSync` 是 JS 实现，在 Windows 上不展开 8.3 短名；第一版修复因此无效（`b4b9bd6`），改用 native 后 CI run `44755130890` 四作业全绿。
+- 新增 devDependency `@types/node@^22`（`node:fs` 类型）；`package.json` 仅加一行，lock 仅加 `@types/node`、`undici-types` 两条。
+- `scripts/fresh_checkout_check.py` 的 `long_path` 规避已删除，Windows CI 现在直接跑产品配置（克隆到短名 `%TEMP%` 路径）。
+- 构建时会打印一行 `[vite] root … (cwd …)`，用于在 CI 日志里区分短名与展开后的长名，长期保留作诊断线索。
+- 证据 `docs/evidence/T42_VITE_SHORT_PATH_20261120/`（Windows 14/14 摘要 + 那行 root 日志）。
+

@@ -1,0 +1,1 @@
+[INFO] [vite] root C:\Users\runneradmin\AppData\Local\Temp\t39-fresh-m8h6s0b4\source\frontend (cwd C:\Users\RUNNER~1\AppData\Local\Temp\t39-fresh-m8h6s0b4\source\frontend)

@@ -715,9 +715,11 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 收尾：T41 DONE。文档承诺的「JDK 21 + Maven 3.6.3+」与「其他平台」不再列为未验证；`mvnw` 可执行、`--maven wrapper` 路径、CI 三平台均有证据。仍未验证：真实视频、最终压缩包。CI 残留提示：`actions/checkout@v4`、`actions/setup-python@v5`、`actions/upload-artifact@v4` 仍以 Node 20 为目标（被强制跑在 Node 24），不影响结果；`setup-java` 已升 v5。
 
 ### T42 — Windows 8.3 短路径下前端构建失败（产品侧修复，2026-11-20）
-- 状态：IN_PROGRESS（2026-11-20，Coding Agent；本地 `npm run verify` 通过，Windows 结果待推送后由 CI 复验）。
+- 状态：DONE（2026-11-20，Coding Agent；Windows 作业 14/14 通过，GitHub Actions run `44755130890`）。
 - 缺陷：T41 的第二处修复只在检查脚本里把克隆目录展开成长名（`9ff7830`），**产品侧没动**。因此把仓库放在含 8.3 短名的路径下（典型是 `%TEMP%`）执行 `npm run build`，仍会因 Vite 产出绝对 chunk 名而失败：`The "fileName" ... must be strings that are neither absolute nor relative`。
 - 原因：runner/用户目录的短名（`C:\Users\RUNNER~1\…`）与 Node 解析出的长名（`C:\Users\runneradmin\…`）指向同一目录但字符串不同，Vite 计算 html chunk 名时按 `path.relative(root, id)` 得到一串 `../`，最终被 rollup 当成绝对路径拒绝。
 - 修复：`frontend/vite.config.ts` 的 `root` 取 `realpathSync(new URL('.', import.meta.url))`（Windows 下返回长名，其他平台无变化），`loadEnv` 同时改为从该 root 读取；新增 devDependency `@types/node@^22` 提供 `node:fs` 类型（已确认 `src/`、`tests/` 不使用 `setTimeout`/`process`，不会引入 DOM 与 Node 类型冲突）。检查脚本的 `long_path` 规避已删除，让 Windows CI 直接验证产品修复。
 - 本地验证：`cd frontend && npm run verify` 通过（typecheck、lint、Vitest 54 项、`vite build` 1.18s，产物 `dist/index.html` 0.43 kB）。
-- 待：推送后看 Windows 作业（应仍 14/14）；通过后标 DONE。
+- **第一版修复无效（`b4b9bd6`）**：`fs.realpathSync` 是纯 JS 实现，**在 Windows 上不展开 8.3 短名**；只有 `fs.realpathSync.native`（经 libuv 调 `GetFinalPathNameByHandleW`）才会把 `C:\Users\RUNNER~1\…` 变成 `C:\Users\runneradmin\…`。CI run `44752827615` 仍报同一个 `fileName` 错误，日志里的相对路径尾部是 `runneradmin/…`，反证 `root` 仍是短名。
+- 第二版（`0051750`）：改用 `realpathSync.native(new URL('.', import.meta.url))`，并在构建时打印一行 `[vite] root … (cwd …)` 便于在 CI 日志核对。CI run `44755130890` **四作业全绿**，Windows 14/14；日志实证：`root C:\Users\runneradmin\…\frontend (cwd C:\Users\RUNNER~1\…\frontend)`，两者指向同一目录、字符串不同，正是问题根源。证据 `docs/evidence/T42_VITE_SHORT_PATH_20261120/`。
+- 收尾：T42 DONE。产品侧不再依赖检查脚本的长名规避；`scripts/fresh_checkout_check.py` 的 `long_path` 已在 `b4b9bd6` 中删除，Windows CI 直接验证产品配置。保留那行 `[vite] root` 日志作长期诊断线索（每次构建一行，含 cwd 与展开后的 root）。
