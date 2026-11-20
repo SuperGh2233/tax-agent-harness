@@ -725,10 +725,10 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 收尾：T42 DONE。产品侧不再依赖检查脚本的长名规避；`scripts/fresh_checkout_check.py` 的 `long_path` 已在 `b4b9bd6` 中删除，Windows CI 直接验证产品配置。保留那行 `[vite] root` 日志作长期诊断线索（每次构建一行，含 cwd 与展开后的 root）。
 
 ### T43 — T40–T42 收尾清理：过时交接说明、构建日志、CI action 版本（2026-11-20）
-- 状态：IN_PROGRESS（2026-11-20，Coding Agent；代码已改，待用户 Mac 验证与 CI 复跑）。依据用户指示「把这三条都处理掉」。不改业务代码、契约范围与写入规则。
+- 状态：DONE（2026-11-20，Coding Agent；本地 `npm run verify` 通过且不再打印 `[vite] root`，CI run `44767147980` 四作业全绿、Node 20 提示消失）。依据用户指示「把这三条都处理掉」。不改业务代码、契约范围与写入规则。
 - `docs/agent-handoff.md` 过时说法更正：第 16 节标题由「未提交/未推送」改为已随 `cf30578` 推送；第 16 节末条注明「其他平台、Maven 最低版本」已由 T41 关闭；第 17 节注明检查脚本的长名规避已被 T42 删除、Node 20 提示已由本任务处理。新增第 19 节。
 - `frontend/vite.config.ts`：T42 保留的 `[vite] root … (cwd …)` 改为仅在 `root !== process.cwd()` 时打印。正常构建、开发服务器、Vitest 不再每次输出；8.3 短名或符号链接导致两者不同的情形（正是 T42 要诊断的情形）照常输出。T42 收尾所写「每次构建一行」自此不再成立。
 - `.github/workflows/fresh-checkout.yml`：`actions/checkout@v4→v5`、`actions/setup-python@v5→v6`、`actions/upload-artifact@v4→v6`。已逐个核对上游 `action.yml`：三者新版本均为 `using: node24`；`upload-artifact@v5` 仍是 `node20`，所以跳到 v6。所用输入（`fetch-depth`、`python-version`、`name`、`path`）在新版本中未变。
-- 待用户：
-  - `cd frontend && npm run verify`（确认 typecheck/lint/Vitest/build 通过，且本地构建不再打印 `[vite] root`）。
-  - 授权提交并推送后，看 GitHub Actions 四作业仍全绿、无 Node 20 弃用注释；Windows 作业日志中应仍能看到 `[vite] root C:\Users\runneradmin\… (cwd C:\Users\RUNNER~1\…)`。
+- 本地验证（2026-11-20 22:57，用户 Mac）：`cd frontend && npm run verify` 通过（typecheck、lint、Vitest 54/54、`vite build` 920ms），输出中 `[vite] root` 出现 **0 次**。条件分支另测：从仓库根用 `--config frontend/vite.config.ts` 构建（cwd≠root），日志照常打印 `[vite] root … (cwd …)`，说明收紧条件没有牺牲 CI 诊断能力。
+- CI 复跑（2026-11-20 23:49–23:57，提交 `220b26c`，run `44767147980`）：**四作业全绿**（windows/macos/ubuntu wrapper + ubuntu 3.6.3），注释区**只剩一条 macOS arm64 容量提示，Node 20 弃用提示已消失**。Windows 作业 14/14，日志中仍有 `[vite] root C:\Users\runneradmin\… (cwd C:\Users\RUNNER~1\…)`，`mvn-package-online` 102.1s、JAR 内含 React 页面。证据 `docs/evidence/T43_CI_20261120/`。
+- 收尾：T43 DONE。T42 记录里「每次构建一行」的说法自此作废（原文未改，按用户要求由本条注明）。

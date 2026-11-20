@@ -362,9 +362,9 @@ npm run verify
 - 证据 `docs/evidence/T42_VITE_SHORT_PATH_20261120/`（Windows 14/14 摘要 + 那行 root 日志）。
 
 
-## 19. 2026-11-20 T43 收尾清理（IN_PROGRESS，未提交）
+## 19. 2026-11-20 T43 收尾清理（DONE，已推送，`220b26c`）
 
 - 本文第 16、17 节的过时说法已更正（T40 实际已推送；「其他平台/Maven 最低版本」已由 T41 关闭；检查脚本的长名规避已被 T42 删除）。
 - `frontend/vite.config.ts`：`[vite] root … (cwd …)` 只在展开后的 root 与 cwd 字符串不同时打印。正常本地构建、`npm run dev`、Vitest 不再输出；Windows 短名路径（以及 macOS `/var` → `/private/var` 这类符号链接）下照常输出，CI 诊断能力不变。
 - `.github/workflows/fresh-checkout.yml`：`actions/checkout@v4→v5`、`actions/setup-python@v5→v6`、`actions/upload-artifact@v4→v6`，均已核对各自 `action.yml` 为 `using: node24`（`upload-artifact@v5` 仍是 node20，故直接取 v6）。输入参数未变。
-- 待用户：`cd frontend && npm run verify`；推送后看 GitHub Actions 四作业是否仍全绿且无 Node 20 弃用提示，Windows 作业日志里应仍有 `[vite] root` 那一行。
+- 已验证：本地 `npm run verify` 通过（54 项测试），构建不再打印 `[vite] root`；CI run `44767147980` 四作业全绿，注释区只剩 macOS 容量提示（Node 20 弃用提示已消失），Windows 日志仍有 `[vite] root C:\Users\runneradmin\… (cwd …RUNNER~1…)`。证据 `docs/evidence/T43_CI_20261120/`。
