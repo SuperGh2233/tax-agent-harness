@@ -121,6 +121,7 @@ java -jar target/harness-0.0.1-SNAPSHOT.jar --taxagent.database="$DEMO_DB" \
 - `DemoApiTest` 用 standalone MockMvc + `DemoSecurity` 覆盖会话、CSRF、权限、并发与负例。
 - 前端：Vitest，测试在 `frontend/tests/`。
 - 真实模型/浏览器验证只能使用合成数据、独立临时 SQLite、loopback，并且要与自动化测试分开记录；API 通过不等于 UI 验证通过。
+- 真实进程级检查脚本在 `scripts/`：`long_conversation_check.py`、`large_result_check.py`（真实模型）、`fault_injection_check.py`（本机桩模型，无需密钥，T40）、`fresh_checkout_check.py`（全新检出、空缓存构建，只覆盖已提交内容）。
 
 ## 容易踩的坑
 

@@ -562,7 +562,7 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
   - 已同步（2026-11-19）：`DEMO_SCRIPT.md` 第六节第 2 条与 `CLAUDE.md` 演示顺序坑改为 T35 后行为；“歧义时追问”目前只覆盖确定性追问（待补/待保存字段），未做自然语言歧义识别。
 
 ### T36 — 异常恢复补强（“异常恢复”）
-- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项（提交 `af6d158` 后为 330 项，见 T37 验收）、前端 53 项通过）；故障注入路径（模型超时、连续错误熔断、响应丢失、进程重启）未在真实模型下复测，仍只有离线测试覆盖。范围：明确重试策略（只读可重试、写入只走 verify）；连续报错熔断与如实反馈；`/turn/stream` SSE 测试（末帧 `done` 携带核验结果、中途断开不改业务结果）；`AnthropicMessagesClient` 与 OpenAI 客户端畸形回复纠正一致。批准轮保存在真实模型下的可用性依赖 T37 的批次修复与纠正提示（随 `af6d158` 提交）；该保存路径与 `/turn/stream` 末帧携带 `verified=true` 已随 T37 经真实模型验证（run3 20/20，另两次浏览器复测通过）
+- 状态：DONE（2026-11-19，Coding Agent；用户在 Mac 本地验证，提交 9045c5c：后端 327 项（提交 `af6d158` 后为 330 项，见 T37 验收）、前端 53 项通过）；故障注入路径（模型超时、连续错误熔断、响应丢失、进程重启）未在真实模型下复测，仍只有离线测试覆盖。（2026-11-20 补记：已由 T40 在真实 JAR 进程上用桩模型复测通过。）范围：明确重试策略（只读可重试、写入只走 verify）；连续报错熔断与如实反馈；`/turn/stream` SSE 测试（末帧 `done` 携带核验结果、中途断开不改业务结果）；`AnthropicMessagesClient` 与 OpenAI 客户端畸形回复纠正一致。批准轮保存在真实模型下的可用性依赖 T37 的批次修复与纠正提示（随 `af6d158` 提交）；该保存路径与 `/turn/stream` 末帧携带 `verified=true` 已随 T37 经真实模型验证（run3 20/20，另两次浏览器复测通过）
 - 验收：故障注入覆盖模型超时、连续错误、响应丢失、进程重启；已完成操作不重做，待确认操作不执行，回复说明真实状态。
 - T33 遗留给本任务：除审计外，`TaskMemory`、`FileService.upload`、`AgentDirectory.save`、`InvoiceWriteService` 等写事务同样“先读后写”，并发写时可能 SQLITE_BUSY 后 fail closed（业务上安全但体验差）；应统一改为 IMMEDIATE 写事务并补并发写测试。
   - 核查（2026-11-19）：代码中已统一——所有 `mode=rw` 连接都经 `tool/Sqlite.open`（`transaction_mode=IMMEDIATE`），只读事务走 `openForRead`/`mode=ro`；`DemoApiTest.parallelReadsAndWritesDoNotFailOnStorageLocks` 已含并发任务创建与记忆写入。本任务未再改动。
@@ -661,3 +661,24 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 剩余：`scripts/fresh_checkout_check.py` 只验证已提交内容，须在本任务提交后运行（在线 test/package + 离线复跑 + JAR 内 UI + 新库初始化 + loopback 健康检查）；通过后 T39 可标 DONE。
 - 第二轮验证（2026-11-20 17:10–17:11，本机，提交 `0c98ec4`）：`python3 scripts/fresh_checkout_check.py` **13 步全部通过**，总耗时 92 秒（`mvn test` 在线 49.7s、`package` 在线 30.1s、离线复跑 7.4s）。逐步：java-21（openjdk 21.0.12.1，非系统默认 25）→ `clone --no-local`（0.6s）→ checkout `0c98ec4` → clean-tree（无 target/.m2/node_modules/dist/data/.env）→ `official_seed.py --check`（原件哈希与全部种子字段 PASS）→ 空 Maven 仓库在线 `test` **336 项 0 失败 0 错误 0 跳过** → 在线 `package`（前端 `frontend-maven-plugin` 实际下载 Node v22.12.0/npm 10.9.0 并 `npm ci`，JAR 56,789,931 字节含 `BOOT-INF/classes/static/react-app/index.html`）→ `--initialize-data` 新库 → loopback `/api/health` `{"status":"UP"}`、`/react-app/` HTTP 200 → 离线 `-o package` 复用在线填好的缓存 BUILD SUCCESS。临时目录跑完自动删除；证据随本次提交归档到 `docs/evidence/T39_FRESH_CHECKOUT_20261120/`。
 - 收尾：T39 DONE。至此 T38 收尾列出的「大工具结果裁剪分页」与「全新检出、空缓存构建」两项缺口都已由真实运行覆盖。仍只有离线测试的：T36 故障注入路径（模型超时、连续错误熔断、响应丢失、进程重启）。
+
+### T40 — T36 故障注入在真实 JAR 上复测（桩模型，2026-11-20）
+- 状态：DONE（2026-11-20，Coding Agent；用户 Mac 运行 `scripts/fault_injection_check.py`，8 个场景 40 项全部通过）。依据用户指示「继续完善」，针对 T36/T39 收尾仍只有离线测试的故障注入路径（模型超时、连续错误熔断、响应丢失、进程重启）。不改业务代码、契约范围与写入规则。
+- 做法：新增 `scripts/fault_injection_check.py`。真实 JAR、官方种子全新临时库、loopback；模型换成脚本内的本机桩服务（Anthropic Messages 协议，`LLM_ENDPOINT=http://127.0.0.1:<port>`），按脚本给出每种故障，因此结果确定、可重复，不调用真实模型、不需要密钥（服务进程看不到 shell 中的 `LLM_*`）。判定只看程序证据：错误码、桩模型收到的请求（次数、是否带纠正说明、回给模型的工具结果）、数据库（F002 用途与 `invoice_operations` 台账）、重启后的 `/verify`。
+- 8 个场景：
+  - `timeout`：模型 70 秒才回复 → `MODEL_TIMEOUT`、约 60 秒结束、只请求 1 次、回复含“没有修改任何发票”“不会自动重发”、任务 ACTIVE、库未改。
+  - `rate-limit`：HTTP 429 → `MODEL_RATE_LIMITED`、只请求 1 次。
+  - `malformed-twice` / `malformed-once`：畸形回复两次 → `MODEL_RESPONSE_INVALID`、共 2 次请求且只有第 2 次带 `LlmClient.CORRECTION`；畸形一次后正常 → 无错误码。
+  - `breaker`：模型反复查 C002（U001 无权限）→ 第 3 次工具错误后 `TOOL_ERRORS_REPEATED`、模型只被请求 3 次。
+  - `lost-response`：批准保存 F002 已提交、模型第 2 次请求被挂起时 SIGKILL 服务，客户端收不到回复；随后给临时库加 `BEFORE UPDATE ON invoices` 触发器（任何第二次写入都会失败）再重启：任务仍 ACTIVE、`/verify` 为 VERIFIED、重发同一 operationId 的批准复用台账（verified=true、台账仍 1 条）、任务因 F004 待补转 WAITING_USER。
+  - `never-ran`：批准轮在第一次模型请求处被 SIGKILL（尚未写入）；重启后 `/verify` 为 NOT_FOUND，无批准的“继续刚才的保存”被拒为 `CONFIRMATION_REQUIRED`，发票未改、台账 0 条。
+  - `stream-disconnect`：`/turn/stream` 批准保存时客户端收到 started 即断开（socket shutdown）；本轮照常完成，`/verify` 为 VERIFIED、任务 COMPLETED。
+- 已做：桩服务各应答（tool_use、finish、429、畸形、挂起与释放）用本地请求冒烟通过；未连真实 JAR 运行过。`--skip timeout` 可跳过约 60 秒的超时场景。
+- 待用户（Mac，已有 JAR 即可，无需重新打包）：`python3 scripts/fault_injection_check.py --jar target/harness-0.0.1-SNAPSHOT.jar`（约 2 分钟），把 `target/t40-fault-injection/summary.md` 结果告诉我。
+- 验证（2026-11-20 18:02–18:04，用户 Mac，JDK 21.0.12.1，JAR 含 T39）：**40 项全部通过**，脚本一次跑通、未改预期；证据归档 `docs/evidence/T40_FAULT_INJECTION_20261120/`。关键数据：
+  - 模型故障：超时 60.1 秒得到 `MODEL_TIMEOUT`；429 立即得到 `MODEL_RATE_LIMITED`；两种情况都只请求模型 1 次。畸形回复两次得到 `MODEL_RESPONSE_INVALID`，纠正标记为 [False, True]；畸形一次后正常完成。熔断在 3 次 `PERMISSION_DENIED` 后返回 `TOOL_ERRORS_REPEATED`，模型只被请求 3 次。各失败回复都如实写明“本轮没有修改任何发票”，任务保持 ACTIVE，台账 0 条。
+  - 响应丢失 + 重启：模型第 2 次请求被挂起时，台账已有 1 条，回给模型的工具结果含 verified=true。SIGKILL 后客户端得到 `RemoteDisconnected`。重启后任务仍为 ACTIVE，`/verify` 为 VERIFIED。在 UPDATE 触发器存在的情况下重发同一批准，得到 verified=true、无错误码，台账仍 1 条；任务因 F004 待补转为 WAITING_USER。
+  - 未执行的批准：中断时台账 0 条；重启后 `/verify` 为 NOT_FOUND，“继续刚才的保存”被拒为 `CONFIRMATION_REQUIRED`，发票未改。
+  - 流式断开：客户端收到 `{"phase":"started"}` 后断开，本轮照常完成，`/verify` 为 VERIFIED，任务 COMPLETED。
+  - 日志：`server-01-timeout.log` 有一条 Tomcat 请求头解析错误。原因是本机其他进程在 18:02:57 向该临时端口发送了 TLS 握手字节，脚本只发明文 HTTP，与检查无关；其余日志无异常。
+- 收尾：T40 DONE。至此 T36 验收列出的四类故障注入（模型超时、连续错误熔断、响应丢失、进程重启）都已在真实 JAR 进程上复测。说明：这里用的是桩模型，证明的是程序对这些故障的处理，不是某个真实模型会不会触发这些故障。

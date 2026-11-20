@@ -1,0 +1,250 @@
+{
+  "meta": {
+    "generatedAt": "2026-11-20 18:02:33 +0800",
+    "jar": "harness-0.0.1-SNAPSHOT.jar",
+    "java": "openjdk version \"21.0.12.1\" 2026-08-18 LTS",
+    "skipped": []
+  },
+  "checks": [
+    {
+      "scenario": "timeout",
+      "check": "错误码为 MODEL_TIMEOUT",
+      "passed": true,
+      "detail": "实际 MODEL_TIMEOUT；耗时 60.1s"
+    },
+    {
+      "scenario": "timeout",
+      "check": "模型共被请求 1 次（不自动重发）",
+      "passed": true,
+      "detail": "实际 1 次；纠正标记 [False]"
+    },
+    {
+      "scenario": "timeout",
+      "check": "在约 60 秒超时处结束",
+      "passed": true,
+      "detail": "耗时 60.1s"
+    },
+    {
+      "scenario": "timeout",
+      "check": "失败回复说明真实状态",
+      "passed": true,
+      "detail": "应含 ['没有修改任何发票', '不会自动重发']；回复前 120 字：本次请求未成功完成：MODEL_TIMEOUT。本轮没有修改任何发票；银行流水始终只读。系统不会自动重发给模型，可稍后重新发送本轮问题。"
+    },
+    {
+      "scenario": "timeout",
+      "check": "任务保持开放",
+      "passed": true,
+      "detail": "状态 ACTIVE"
+    },
+    {
+      "scenario": "timeout",
+      "check": "数据库未被修改",
+      "passed": true,
+      "detail": "F002 用途 ''；台账 0 条"
+    },
+    {
+      "scenario": "rate-limit",
+      "check": "错误码为 MODEL_RATE_LIMITED",
+      "passed": true,
+      "detail": "实际 MODEL_RATE_LIMITED；耗时 0.1s"
+    },
+    {
+      "scenario": "rate-limit",
+      "check": "模型共被请求 1 次（不自动重发）",
+      "passed": true,
+      "detail": "实际 1 次；纠正标记 [False]"
+    },
+    {
+      "scenario": "rate-limit",
+      "check": "失败回复说明真实状态",
+      "passed": true,
+      "detail": "应含 ['没有修改任何发票', '不会自动重发']；回复前 120 字：本次请求未成功完成：MODEL_RATE_LIMITED。本轮没有修改任何发票；银行流水始终只读。系统不会自动重发给模型，可稍后重新发送本轮问题。"
+    },
+    {
+      "scenario": "rate-limit",
+      "check": "任务保持开放",
+      "passed": true,
+      "detail": "状态 ACTIVE"
+    },
+    {
+      "scenario": "rate-limit",
+      "check": "数据库未被修改",
+      "passed": true,
+      "detail": "F002 用途 ''；台账 0 条"
+    },
+    {
+      "scenario": "malformed-twice",
+      "check": "错误码为 MODEL_RESPONSE_INVALID",
+      "passed": true,
+      "detail": "实际 MODEL_RESPONSE_INVALID；耗时 0.1s"
+    },
+    {
+      "scenario": "malformed-twice",
+      "check": "模型共被请求 2 次（不自动重发）",
+      "passed": true,
+      "detail": "实际 2 次；纠正标记 [False, True]"
+    },
+    {
+      "scenario": "malformed-twice",
+      "check": "只有重发的那次请求带纠正说明",
+      "passed": true,
+      "detail": "纠正标记 [False, True]"
+    },
+    {
+      "scenario": "malformed-twice",
+      "check": "失败回复说明真实状态",
+      "passed": true,
+      "detail": "应含 ['没有修改任何发票', '不会自动重发']；回复前 120 字：本次请求未成功完成：MODEL_RESPONSE_INVALID。本轮没有修改任何发票；银行流水始终只读。系统不会自动重发给模型，可稍后重新发送本轮问题。"
+    },
+    {
+      "scenario": "malformed-twice",
+      "check": "任务保持开放",
+      "passed": true,
+      "detail": "状态 ACTIVE"
+    },
+    {
+      "scenario": "malformed-twice",
+      "check": "数据库未被修改",
+      "passed": true,
+      "detail": "F002 用途 ''；台账 0 条"
+    },
+    {
+      "scenario": "malformed-once",
+      "check": "错误码为 无",
+      "passed": true,
+      "detail": "实际 None；耗时 0.1s"
+    },
+    {
+      "scenario": "malformed-once",
+      "check": "模型共被请求 2 次（不自动重发）",
+      "passed": true,
+      "detail": "实际 2 次；纠正标记 [False, True]"
+    },
+    {
+      "scenario": "malformed-once",
+      "check": "只有重发的那次请求带纠正说明",
+      "passed": true,
+      "detail": "纠正标记 [False, True]"
+    },
+    {
+      "scenario": "malformed-once",
+      "check": "数据库未被修改",
+      "passed": true,
+      "detail": "F002 用途 ''；台账 0 条"
+    },
+    {
+      "scenario": "breaker",
+      "check": "错误码为 TOOL_ERRORS_REPEATED",
+      "passed": true,
+      "detail": "实际 TOOL_ERRORS_REPEATED；耗时 0.1s"
+    },
+    {
+      "scenario": "breaker",
+      "check": "模型共被请求 3 次（不自动重发）",
+      "passed": true,
+      "detail": "实际 3 次；纠正标记 [False, False, False]"
+    },
+    {
+      "scenario": "breaker",
+      "check": "失败回复说明真实状态",
+      "passed": true,
+      "detail": "应含 ['没有修改任何发票', '连续 3 次']；回复前 120 字：本次请求未成功完成：TOOL_ERRORS_REPEATED。本轮没有修改任何发票；银行流水始终只读。已执行 3 次只读查询，其结果不能作为本轮结论。连续 3 次工具调用出错，已停止重试；请核对企业、月份或权限后再提问。"
+    },
+    {
+      "scenario": "breaker",
+      "check": "任务保持开放",
+      "passed": true,
+      "detail": "状态 ACTIVE"
+    },
+    {
+      "scenario": "breaker",
+      "check": "第 3 次工具错误后即停止",
+      "passed": true,
+      "detail": "工具结果错误码 ['PERMISSION_DENIED', 'PERMISSION_DENIED', 'PERMISSION_DENIED']"
+    },
+    {
+      "scenario": "breaker",
+      "check": "数据库未被修改",
+      "passed": true,
+      "detail": "F002 用途 ''；台账 0 条"
+    },
+    {
+      "scenario": "lost-response",
+      "check": "保存已提交、模型正等待回复时",
+      "passed": true,
+      "detail": "桩模型收到第 2 次请求 True；F002 用途 '办公室采购'；台账 1 条；回给模型的工具结果含 verified=true True"
+    },
+    {
+      "scenario": "lost-response",
+      "check": "客户端没有收到回复（进程被 SIGKILL）",
+      "passed": true,
+      "detail": "客户端结果 lost RemoteDisconnected"
+    },
+    {
+      "scenario": "lost-response",
+      "check": "重启后任务仍开放（那一轮没有保存）",
+      "passed": true,
+      "detail": "状态 ACTIVE"
+    },
+    {
+      "scenario": "lost-response",
+      "check": "重启后按 operationId 只读核验为 VERIFIED",
+      "passed": true,
+      "detail": "HTTP 200；VERIFIED"
+    },
+    {
+      "scenario": "lost-response",
+      "check": "重发同一批准：复用台账、不再写入",
+      "passed": true,
+      "detail": "HTTP 200；错误码 None；verified True；台账 1 条；第二次 UPDATE 会被触发器拒绝"
+    },
+    {
+      "scenario": "lost-response",
+      "check": "任务等待 F004 补充",
+      "passed": true,
+      "detail": "状态 WAITING_USER"
+    },
+    {
+      "scenario": "never-ran",
+      "check": "批准轮在第一次模型请求处中断，尚未写入",
+      "passed": true,
+      "detail": "台账 0 条；F002 用途 ''"
+    },
+    {
+      "scenario": "never-ran",
+      "check": "客户端没有收到回复（进程被 SIGKILL）",
+      "passed": true,
+      "detail": "客户端结果 ('lost', 'RemoteDisconnected')"
+    },
+    {
+      "scenario": "never-ran",
+      "check": "重启后核验为 NOT_FOUND",
+      "passed": true,
+      "detail": "HTTP 200；NOT_FOUND"
+    },
+    {
+      "scenario": "never-ran",
+      "check": "无批准的继续请求被拒绝，发票未改",
+      "passed": true,
+      "detail": "错误码 CONFIRMATION_REQUIRED；台账 0 条；F002 用途 ''；回复前 80 字：本次请求未成功完成：CONFIRMATION_REQUIRED。本轮没有修改任何发票；银行流水始终只读。"
+    },
+    {
+      "scenario": "stream-disconnect",
+      "check": "收到 started 后客户端断开",
+      "passed": true,
+      "detail": "断开前收到 'event:status\\ndata:{\"phase\":\"started\"}'"
+    },
+    {
+      "scenario": "stream-disconnect",
+      "check": "断开后本轮照常完成并核验",
+      "passed": true,
+      "detail": "核验 VERIFIED；台账 1 条；F002 用途 '办公室采购'；模型请求 2 次"
+    },
+    {
+      "scenario": "stream-disconnect",
+      "check": "本轮结果已保存，任务结项",
+      "passed": true,
+      "detail": "状态 COMPLETED"
+    }
+  ]
+}

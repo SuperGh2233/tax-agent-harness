@@ -333,3 +333,10 @@ npm run verify
 - 全新检出验证：提交 `0c98ec4` 后跑 `scripts/fresh_checkout_check.py`，**13 步全部通过**（约 92 秒）——新临时目录 `clone --no-local`、空 Maven 仓库在线 `test` 336/0/0/0、在线 `package`（实际下载 Node v22.12.0 并 `npm ci`，JAR 内含 `static/react-app/index.html`）、新库初始化、loopback `/api/health`=UP 与 `/react-app/` 200、离线 `-o package` 复跑；证据 `docs/evidence/T39_FRESH_CHECKOUT_20261120/`。`REPRODUCE.md` 中「空缓存首次在线依赖下载、真正全新 Git checkout 未验证」的旧结论已就地加更正。
 - 仍只有离线测试的：T36 故障注入（模型超时、连续错误熔断、响应丢失、进程重启）。仍未验证：其他平台、Maven 最低版本、真实视频、最终压缩包。
 - 本机 8080 / 18084 无残留监听；本次提交前 `main` 已含 `0c98ec4`（T39 代码），本条为其验收记录。
+
+## 16. 2026-11-20 T40（DONE，未提交/未推送）
+
+- 新增 `scripts/fault_injection_check.py`：真实 JAR、全新库、loopback，模型换成本机桩服务（Anthropic Messages 协议），不需要密钥。8 个场景：超时、429、畸形回复两次/一次、工具错误熔断、保存提交后 SIGKILL（响应丢失）、批准轮写入前 SIGKILL、流式中途断开。
+- 用户 Mac 运行一次 **40 项全通过**，证据 `docs/evidence/T40_FAULT_INJECTION_20261120/`。**第 15 节末条「仍只有离线测试的：T36 故障注入」已被本次运行推翻**；用的是桩模型，证明的是程序处理，不是真实模型行为。
+- 未改业务代码与测试；后端仍 336 项。
+- 仍未验证：其他平台、Maven 最低版本、真实视频、最终压缩包。
