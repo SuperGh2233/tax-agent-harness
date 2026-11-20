@@ -1,0 +1,46 @@
+# T41: the fresh-checkout check (scripts/fresh_checkout_check.py) on the platforms the author's Mac cannot cover,
+# plus the documented minimum Maven. No secrets and no model: tests, package, a loopback server, offline rebuild.
+name: fresh-checkout
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-checkout:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        maven: [wrapper]
+        include:
+          - os: ubuntu-latest
+            maven: "3.6.3"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fresh clone, empty Maven cache, test, package, serve, offline rebuild
+        run: python scripts/fresh_checkout_check.py --maven ${{ matrix.maven }}
+      - name: Keep the step logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fresh-checkout-${{ matrix.os }}-maven-${{ matrix.maven }}
+          path: target/t39-fresh-checkout/

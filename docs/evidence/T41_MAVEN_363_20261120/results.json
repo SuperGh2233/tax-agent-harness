@@ -1,0 +1,150 @@
+{
+  "meta": {
+    "generatedAt": "2026-11-20 20:55:56 +0800",
+    "ref": "HEAD",
+    "commit": "cf30578ac5483049f3de3e88404f24a5435f8413",
+    "java": "openjdk version \"21.0.12.1\" 2026-08-18 LTS",
+    "maven": "\u001b[1mApache Maven 3.6.3 (cecedd343002696d0abb50b32b541b8a6ba2883f)\u001b[m",
+    "mavenSource": "下载 3.6.3",
+    "os": "darwin arm64",
+    "workDir": "/var/folders/w8/c6k2t5ds0777z1hf4hrn4lbr0000gn/T/t39-fresh-jz21jhj2"
+  },
+  "steps": [
+    {
+      "step": "java-21",
+      "passed": true,
+      "detail": "openjdk version \"21.0.12.1\" 2026-08-18 LTS",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "clone",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 0.5,
+      "log": "02-clone.log",
+      "tail": []
+    },
+    {
+      "step": "checkout",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 0.0,
+      "log": "03-checkout.log",
+      "tail": []
+    },
+    {
+      "step": "maven-download",
+      "passed": true,
+      "detail": "Apache archive，SHA-512 c35a1803a6e70a12… 一致",
+      "seconds": 20.3,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "maven-version",
+      "passed": true,
+      "detail": "\u001b[1mApache Maven 3.6.3 (cecedd343002696d0abb50b32b541b8a6ba2883f)\u001b[m",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "clean-tree",
+      "passed": true,
+      "detail": "不应存在的目录 —",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "official-seed",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 0.1,
+      "log": "07-official-seed.log",
+      "tail": [
+        "PASS: original hashes and all seed fields verified"
+      ]
+    },
+    {
+      "step": "mvn-test-online",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 79.4,
+      "log": "08-mvn-test-online.log",
+      "tail": [
+        "[INFO] Total time:  01:19 min",
+        "[INFO] Finished at: 2026-11-20T20:57:37+08:00",
+        "[INFO] ------------------------------------------------------------------------"
+      ]
+    },
+    {
+      "step": "test-counts",
+      "passed": true,
+      "detail": "{\"tests\": 336, \"failures\": 0, \"errors\": 0, \"skipped\": 0}",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "mvn-package-online",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 42.8,
+      "log": "10-mvn-package-online.log",
+      "tail": [
+        "[INFO] Total time:  42.417 s",
+        "[INFO] Finished at: 2026-11-20T20:58:20+08:00",
+        "[INFO] ------------------------------------------------------------------------"
+      ]
+    },
+    {
+      "step": "jar-contains-ui",
+      "passed": true,
+      "detail": "BOOT-INF/classes/static/react-app/index.html 存在；JAR 56,793,086 字节",
+      "seconds": null,
+      "log": null,
+      "tail": []
+    },
+    {
+      "step": "initialize-data",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 0.5,
+      "log": "12-initialize-data.log",
+      "tail": [
+        "Initialized (existing records preserved): /var/folders/w8/c6k2t5ds0777z1hf4hrn4lbr0000gn/T/t39-fresh-jz21jhj2/demo.db"
+      ]
+    },
+    {
+      "step": "server-health",
+      "passed": true,
+      "detail": "/api/health {'status': 'UP'}",
+      "seconds": 1.1,
+      "log": "13-server.log",
+      "tail": []
+    },
+    {
+      "step": "server-react-page",
+      "passed": true,
+      "detail": "/react-app/ HTTP 200",
+      "seconds": 1.1,
+      "log": "13-server.log",
+      "tail": []
+    },
+    {
+      "step": "mvn-package-offline",
+      "passed": true,
+      "detail": "exit 0",
+      "seconds": 6.8,
+      "log": "15-mvn-package-offline.log",
+      "tail": [
+        "[INFO] Total time:  6.426 s",
+        "[INFO] Finished at: 2026-11-20T20:58:28+08:00",
+        "[INFO] ------------------------------------------------------------------------"
+      ]
+    }
+  ]
+}

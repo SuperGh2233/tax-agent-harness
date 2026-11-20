@@ -8,11 +8,13 @@ from the cache the online build filled. No model is called and nothing is writte
 and --out.
 
 Usage (JDK 21 selected in the shell, network access for the first build; several hundred MB are downloaded):
-    python3 scripts/fresh_checkout_check.py                 # HEAD
+    python3 scripts/fresh_checkout_check.py                 # HEAD, the mvn on PATH
     python3 scripts/fresh_checkout_check.py --ref v0.2.0 --keep
+    python3 scripts/fresh_checkout_check.py --maven 3.6.3   # T41: the documented minimum, downloaded and checksummed
+    python3 scripts/fresh_checkout_check.py --maven wrapper # the clone's own mvnw / mvnw.cmd (Maven 3.9.9)
 Output: <out>/results.json, <out>/summary.md and one log per step.
 """
-import argparse, json, platform, re, shutil, subprocess, sys, tempfile, time, urllib.request, zipfile
+import argparse, hashlib, json, os, platform, re, shutil, subprocess, sys, tarfile, tempfile, time, urllib.request, zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -32,7 +34,8 @@ class Steps:
         started = time.time()
         log = self.out / f"{len(self.results) + 1:02d}-{name}.log"
         try:
-            done = subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout)
+            # errors="replace": Maven on Windows writes in the console code page, not UTF-8.
+            done = subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", timeout=timeout)
             output, exit_code = done.stdout, done.returncode
         except subprocess.TimeoutExpired as e:
             output = e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
@@ -89,10 +92,25 @@ def serve(steps, jar, work):
     steps.record("server-react-page", page[0] == 200 and 'id="root"' in page[1], f"/react-app/ HTTP {page[0]}", started, log)
 
 
+def download_maven(version, work):
+    """T41: an exact Maven release from the Apache archive, checked against its published SHA-512."""
+    base = f"https://archive.apache.org/dist/maven/maven-3/{version}/binaries/apache-maven-{version}-bin.tar.gz"
+    archive = work / f"apache-maven-{version}-bin.tar.gz"
+    with urllib.request.urlopen(base, timeout=120) as r: archive.write_bytes(r.read())
+    with urllib.request.urlopen(base + ".sha512", timeout=60) as r: expected = r.read().decode().split()[0].lower()
+    actual = hashlib.sha512(archive.read_bytes()).hexdigest()
+    if actual != expected: raise RuntimeError(f"SHA-512 mismatch for Maven {version}")
+    with tarfile.open(archive) as t:
+        try: t.extractall(work / "maven-dist", filter="data")
+        except TypeError: t.extractall(work / "maven-dist")  # Python without extraction filters (e.g. macOS 3.9.6)
+    home = work / "maven-dist" / f"apache-maven-{version}"
+    return str(home / "bin" / ("mvn.cmd" if os.name == "nt" else "mvn")), expected
+
+
 def summary(meta, results):
     lines = ["# T39 全新检出与空缓存构建检查（自动生成，未经人工修改）", "",
              f"- 生成时间：{meta['generatedAt']}；提交：`{meta['commit']}`（{meta['ref']}）",
-             f"- 环境：{meta['java']}；{meta['maven']}；{meta['os']}",
+             f"- 环境：{meta['java']}；{meta['maven']}（{meta['mavenSource']}）；{meta['os']}",
              "- 做法：从本仓库克隆该提交到新临时目录（只含已提交文件），Maven 仓库为该目录下的空目录，首次在线构建后再离线复跑。", "",
              "| 步骤 | 结果 | 明细 | 耗时（秒） |", "|---|---|---|---|"]
     lines += [f"| {r['step']} | {'通过' if r['passed'] else '未通过'} | {r['detail']} | {r['seconds'] if r['seconds'] is not None else '—'} |"
@@ -104,7 +122,8 @@ def summary(meta, results):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--ref", default="HEAD")
-    p.add_argument("--mvn", default="mvn")
+    p.add_argument("--mvn", default="mvn", help="Maven executable on PATH (ignored with --maven)")
+    p.add_argument("--maven", help="an exact version to download (e.g. 3.6.3), or 'wrapper' for the clone's mvnw")
     p.add_argument("--out", default=str(ROOT / "target" / "t39-fresh-checkout"))
     p.add_argument("--keep", action="store_true", help="keep the temporary clone and Maven cache")
     a = p.parse_args()
@@ -112,21 +131,45 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="t39-fresh-"))
     source, cache = work / "source", work / "m2"
     steps = Steps(out)
-    version = lambda cmd: (subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout.strip().splitlines() or ["?"])[0]
-    java, maven = version(["java", "-version"]), version([a.mvn, "-v"])
+    def version(cmd, marker):
+        """The line naming the version: JDK 24+ prints native-access warnings first when Maven loads jansi."""
+        output = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace").stdout
+        lines = re.sub(r"\x1b\[[0-9;]*m", "", output).strip().splitlines()  # Maven 3.6 colours -v even when piped
+        return next((line for line in lines if re.search(marker, line)), lines[0] if lines else "?")
+    for stale in out.glob("[0-9][0-9]-*.log"): stale.unlink()  # step numbers shift between options; keep only this run
+    java = version(["java", "-version"], r'version "')
     commit = subprocess.run(["git", "-C", str(ROOT), "rev-parse", a.ref], stdout=subprocess.PIPE, text=True, check=True).stdout.strip()
-    meta = {"generatedAt": time.strftime("%Y-%m-%d %H:%M:%S %z"), "ref": a.ref, "commit": commit, "java": java, "maven": maven,
-            "os": f"{sys.platform} {platform.machine()}", "workDir": str(work)}
+    meta = {"generatedAt": time.strftime("%Y-%m-%d %H:%M:%S %z"), "ref": a.ref, "commit": commit, "java": java, "maven": "?",
+            "mavenSource": "PATH", "os": f"{sys.platform} {platform.machine()}", "workDir": str(work)}
     try:
-        steps.record("java-21", '"21' in java, java)
+        steps.record("java-21", '"21' in java, java + ("" if '"21' in java else "；请先切换到 JDK 21（macOS：export JAVA_HOME=$(/usr/libexec/java_home -v 21)）"))
         ok, _ = steps.run("clone", ["git", "clone", "--quiet", "--no-local", str(ROOT), str(source)], work, timeout=600)
         if ok: ok, _ = steps.run("checkout", ["git", "-C", str(source), "checkout", "--quiet", "--detach", commit], work)
         if not ok: return
+        # Windows resolves mvn.cmd only through which(); a downloaded or wrapper Maven is used by absolute path.
+        mvn = shutil.which(a.mvn) or a.mvn
+        if a.maven == "wrapper":
+            mvn, meta["mavenSource"] = str(source / ("mvnw.cmd" if os.name == "nt" else "mvnw")), "仓库 Maven Wrapper"
+            os.environ["MAVEN_USER_HOME"] = str(work / "wrapper-home")  # the wrapper's Maven download stays in the temp dir
+            if os.name != "nt" and not steps.record("mvnw-executable", os.access(mvn, os.X_OK),
+                                                    "克隆出的 mvnw 可执行" if os.access(mvn, os.X_OK) else "克隆出的 mvnw 没有执行权限（Git 文件模式应为 100755）")[0]:
+                return
+        elif a.maven:
+            started = time.time()
+            try:
+                mvn, digest = download_maven(a.maven, work)
+                steps.record("maven-download", True, f"Apache archive，SHA-512 {digest[:16]}… 一致", started)
+                meta["mavenSource"] = f"下载 {a.maven}"
+            except Exception as e:
+                steps.record("maven-download", False, f"{type(e).__name__}: {e}", started)
+                return
+        meta["maven"] = version([mvn, "-v"], r"^Apache Maven ")
+        steps.record("maven-version", a.maven in (None, "wrapper") or a.maven in meta["maven"], meta["maven"])
         leftovers = [n for n in ("target", ".m2", "frontend/node_modules", "frontend/dist", "frontend/node", "data", ".env") if (source / n).exists()]
         steps.record("clean-tree", not leftovers, f"不应存在的目录 {leftovers or '—'}")
         steps.run("official-seed", [sys.executable, "-B", "scripts/official_seed.py", "--check"], source,
                   expect=r"PASS: original hashes and all seed fields verified", timeout=300)
-        maven_args = [a.mvn, "-B", "-ntp", f"-Dmaven.repo.local={cache}"]
+        maven_args = [mvn, "-B", "-ntp", f"-Dmaven.repo.local={cache}"]
         ok, _ = steps.run("mvn-test-online", maven_args + ["test"], source, expect=r"BUILD SUCCESS")
         totals = surefire(source)
         steps.record("test-counts", ok and totals["tests"] > 0 and totals["failures"] == totals["errors"] == 0, json.dumps(totals))
@@ -136,7 +179,7 @@ def main():
             with zipfile.ZipFile(jar) as z: names = set(z.namelist())
             steps.record("jar-contains-ui", UI in names, f"{UI} {'存在' if UI in names else '缺失'}；JAR {jar.stat().st_size:,} 字节")
             serve(steps, jar, work)
-        steps.run("mvn-package-offline", [a.mvn, "-o", "-B", "-ntp", f"-Dmaven.repo.local={cache}", "-DskipTests", "package"], source,
+        steps.run("mvn-package-offline", [mvn, "-o", "-B", "-ntp", f"-Dmaven.repo.local={cache}", "-DskipTests", "package"], source,
                   expect=r"BUILD SUCCESS")
     finally:
         results = steps.results

@@ -682,3 +682,29 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
   - 流式断开：客户端收到 `{"phase":"started"}` 后断开，本轮照常完成，`/verify` 为 VERIFIED，任务 COMPLETED。
   - 日志：`server-01-timeout.log` 有一条 Tomcat 请求头解析错误。原因是本机其他进程在 18:02:57 向该临时端口发送了 TLS 握手字节，脚本只发明文 HTTP，与检查无关；其余日志无异常。
 - 收尾：T40 DONE。至此 T36 验收列出的四类故障注入（模型超时、连续错误熔断、响应丢失、进程重启）都已在真实 JAR 进程上复测。说明：这里用的是桩模型，证明的是程序对这些故障的处理，不是某个真实模型会不会触发这些故障。
+
+### T41 — 文档写明但从未验证的环境：Maven 最低版本、其他平台、Wrapper（2026-11-20）
+- 状态：IN_PROGRESS（2026-11-20，Coding Agent；Maven 3.6.3 与 Maven Wrapper 两条路径均已在 JDK 21 下实测通过，其他平台待推送后看 GitHub Actions）。依据用户指示「还有什么不足之处，继续完善」，针对 REPRODUCE/README/作品使用说明 写着「Maven 3.6.3+」、却一直列为未验证的「Maven 最低版本」与「其他平台」两项。不改业务代码。
+- 缺陷（核查时发现）：`mvnw` 在 Git 中是 100644。全新克隆后 `./mvnw` 会报 Permission denied，与 REPRODUCE「`./mvnw -v`」的说明不符；Windows 的 `mvnw.cmd` 不受影响。**更正**：本条最初写「已在工作树改为 100755」并不成立——21:06 复核时 `git ls-files -s mvnw` 仍为 100644、磁盘仍 `-rw-r--r--`、`git diff --summary` 为空，那次 chmod 未生效。已用 `chmod +x mvnw && git add mvnw` 落到索引并单独提交 `892e217`，`git show --summary` 显示 `mode change 100644 => 100755 mvnw`；随后 21:13 的 Wrapper 运行在克隆出的树上确认 `mvnw` 可执行。
+- `scripts/fresh_checkout_check.py` 新增：
+  - `--maven <版本>`：从 `archive.apache.org` 下载该版本 Maven，按同目录 `.sha512` 核对后解压到临时目录，用它跑全部在线、离线构建。新增步骤 `maven-download`、`maven-version`。
+  - `--maven wrapper`：用克隆出的 `mvnw`（Windows 为 `mvnw.cmd`），`MAVEN_USER_HOME` 指向临时目录，Wrapper 下载的 Maven 3.9.9 不写入 `~/.m2`。POSIX 上先检查 `mvnw` 可执行（步骤 `mvnw-executable`）。
+  - 其他：`mvn` 经 `shutil.which` 解析，Windows 能找到 `mvn.cmd`；子进程输出按 `errors="replace"` 解码（Windows 控制台代码页）。
+  - 不带新参数时行为不变。
+  - 已在沙箱实际下载 Maven 3.6.3：SHA-512 一致，解压后 `bin/mvn` 可执行。沙箱没有 JDK，未在这里跑构建。
+- 新增 `.github/workflows/fresh-checkout.yml`：push 到 main、PR、手动触发时，在 `ubuntu-latest`、`windows-latest`、`macos-latest` 上以 `--maven wrapper` 运行全新检出检查，并在 Ubuntu 上额外以 `--maven 3.6.3` 运行。权限只读，不用任何密钥、不调用模型。各作业上传步骤日志作为 artifact。推送后才会运行，会消耗该 GitHub 仓库的 Actions 额度。
+- 待用户：
+  - Mac 上 `python3 scripts/fresh_checkout_check.py --maven 3.6.3`，可选再跑 `--maven wrapper`。注意它只检查已提交内容，`mvnw` 模式修正要先提交，wrapper 模式才会通过。
+  - 或者授权提交并推送后，在 GitHub Actions 页看 4 个作业的结果。
+- 第一轮验证（2026-11-20 20:34–20:37，用户 Mac，提交 `cf30578`，`--maven 3.6.3`）：13 项通过，2 项未通过，两项都不是项目缺陷。
+  - **用 Maven 3.6.3 构建成功。** 日志中加载的是临时目录里 `apache-maven-3.6.3/lib/jansi-1.17.1.jar`。结果：空仓库在线 `test` 336/0/0/0（94.3s）；在线 `package` 49.1s，JAR 内含 React 页面；新库初始化、loopback 健康检查与 React 页面正常；离线复跑通过。
+  - `java-21` 未通过：shell 当前是 JDK 25.0.4.1，未切换到 21。顺带观察到 JDK 25 + `release 21` 编译、测试、运行均通过，但这不是文档承诺的配置，不据此修改要求。
+  - `maven-version` 未通过：脚本取 `mvn -v` 的第一行作为版本，JDK 24+ 下 Maven 3.6.3 的 jansi 会先打印 native-access 警告，脚本因此误判，属于脚本缺陷。已修复：Java 取含 `version "` 的行，Maven 取以 `Apache Maven ` 开头的行。
+  - 另修两处：每次运行前清理输出目录里上次的编号日志（这次目录里混有 18:10 那次的旧日志）；`java-21` 未通过时给出切换 JDK 的提示。
+  - 待复跑：在 JDK 21 下再跑一次 `--maven 3.6.3`，确认文档承诺的组合（JDK 21 + Maven 3.6.3）。CI 的 Ubuntu 3.6.3 作业也覆盖这一组合。
+- 第二轮验证（2026-11-20 20:55，用户 Mac，JDK 21.0.12.1，提交 `cf30578`，`--maven 3.6.3`）：**15 步全部通过**，证据归档 `docs/evidence/T41_MAVEN_363_20261120/`。
+  - 经过：下载 Maven 3.6.3，SHA-512 一致 → 版本识别正确 → 空仓库在线 `test` 336/0/0/0（79.4s）→ 在线 `package` 42.8s，JAR 含 React 页面 → 新库初始化 → 健康检查 UP，React 页面 200 → 离线复跑 6.8s。
+  - 结论：文档写的「JDK 21 + Maven 3.6.3+」最低组合已实测，「Maven 最低版本」不再列为未验证。
+  - 摘要里的版本串带 Maven 3.6.3 的颜色码。这次识别正确，只是因为那行恰好是第一行；脚本已改为匹配前先去掉颜色码。
+- 第三轮验证（2026-11-20 21:13–21:15，JDK 21.0.12.1，提交 `892e217`，`--maven wrapper`）：**15 步全部通过**，1 分 43 秒，证据 `docs/evidence/T41_WRAPPER_20261120/`。逐项：克隆出的 `mvnw` 可执行（`mvnw-executable` 通过）→ Wrapper 自行下载并在临时 `MAVEN_USER_HOME` 下使用 **Apache Maven 3.9.9** → 空仓库在线 `test` **336/0/0/0** → 在线 `package`（JAR 56,793,086 字节，含 React 页面）→ 新库初始化 → 健康检查 UP、React 页面 200 → 离线复跑通过。即 Wrapper 路径（CI 三个作业要走的路径）在本机已可用，不再依赖「等 CI 才发现」。
+- 剩余：其他平台。包含本条记录的提交推送后，看 GitHub Actions 的 4 个作业：Ubuntu、Windows、macOS 用 Wrapper，Ubuntu 另用 Maven 3.6.3。结果出来后，T41 才可标 DONE。

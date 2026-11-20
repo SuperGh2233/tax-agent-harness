@@ -37,7 +37,7 @@ mvn -o -B -ntp "-Dmaven.repo.local=$T13_REPO" -DskipTests package
 
 离线缺依赖时停止，允许联网后重跑在线命令；不要把 `-o` 当成首次安装方式。JAR 启动不需要 Maven 或网络。可选 `mvn spring-boot:run` 首次在线时用下节命令去掉 `-o`；只验证 package 不代表 run 插件完整离线缓存已就绪。
 
-自动化（T39）：`python3 scripts/fresh_checkout_check.py [--ref <提交>]` 把已提交内容克隆到新临时目录，用空 Maven 仓库执行本节在线命令与离线复跑，并检查 JAR 内 UI、初始化新库、loopback 健康检查与 React 页面；结果写入 `target/t39-fresh-checkout/`。它只覆盖已提交的文件，不含官方复赛材料等未跟踪内容。
+自动化（T39）：`python3 scripts/fresh_checkout_check.py [--ref <提交>]` 把已提交内容克隆到新临时目录，用空 Maven 仓库执行本节在线命令与离线复跑，并检查 JAR 内 UI、初始化新库、loopback 健康检查与 React 页面；结果写入 `target/t39-fresh-checkout/`。它只覆盖已提交的文件，不含官方复赛材料等未跟踪内容。`--maven 3.6.3` 会从 Apache 归档下载该版本 Maven 并核对 SHA-512 后用它构建，用于验证文档写的最低版本；`--maven wrapper` 改用克隆出的 `mvnw`。`.github/workflows/fresh-checkout.yml` 在 GitHub Actions 的 Ubuntu、Windows、macOS 上以 Wrapper 运行同一检查，并在 Ubuntu 上额外以 Maven 3.6.3 运行一次（T41）。
 
 ## 3. 初始化全新独立数据库
 
@@ -104,6 +104,8 @@ JAR 绑定127.0.0.1:18083，HTTP健康200/UP，HTML与JS/CSS可访问；真实�
 
 > **更正（2026-11-20，T39）**：上条中的「空缓存首次在线依赖下载」与「真正全新 Git checkout」已在本机验证通过。`scripts/fresh_checkout_check.py` 把提交 `0c98ec4` 克隆到新临时目录（`git clone --no-local`，只含已提交文件，不含 target/.m2/node_modules/dist/data/.env），用该目录下的**空** Maven 仓库在线 `test`（336/0/0/0）与 `-DskipTests package`，再核 JAR 内 `static/react-app/index.html`、初始化新库、loopback `/api/health`=UP 与 `/react-app/` HTTP 200，最后在该缓存上离线 `-o package` 复跑；13 步全部通过，总耗时约 92 秒（含 Node 与依赖下载）。证据见 `docs/evidence/T39_FRESH_CHECKOUT_20261120/`。真实模型已由 T13/T37/T38/T39 各轮验证。仍未验证：其他平台、Maven 最低版本、真实视频、最终压缩包。
 
+> **更正（2026-11-20，T41）**：「Maven 最低版本」已验证。`scripts/fresh_checkout_check.py --maven 3.6.3` 在 JDK 21.0.12.1、macOS arm64 上，从空仓库以 Maven 3.6.3 完成在线 test（336/0/0/0）、package、启动检查与离线复跑，15 步全部通过；证据见 `docs/evidence/T41_MAVEN_363_20261120/`。其他平台由 `.github/workflows/fresh-checkout.yml` 在 GitHub Actions 上验证，结果见 `TASKS.md` T41。
+
 ## 2026-10-30 测试配置记录（历史快照）
 以下配置和“真实 E2E 等待凭证”的状态仅代表 2026-10-30 当时的测试准备情况，已被 2026-11-02 的真实 Qwen API 只读跨轮验证及后续延迟适配更新。**不要将此段当作当前测试状态或照搬旧密钥配置。** 当前模型参数、验证结论和本机凭证处理方式以 [DEMO_SCRIPT.md](DEMO_SCRIPT.md) 与 [docs/agent-handoff.md](docs/agent-handoff.md) 为准。所有凭证只在本机安全终端使用，不得写入仓库、日志或聊天。
 
@@ -125,6 +127,7 @@ Qwen 单次 HTTP 请求与 AgentRuntime 等待上限为 60 秒，其他模型默
 ## Windows / 本地管理 CLI（2026-11-05 补充）
 
 - 仓库已包含 Maven Wrapper：`mvnw.cmd -v` / `./mvnw -v`；首次运行会下载 Maven 3.9.9。
+  - 更正（2026-11-20，T41）：此前 `mvnw` 在 Git 中的文件模式是 100644，全新克隆后 `./mvnw` 会报 Permission denied（只能用 `sh mvnw`）；T41 已改为 100755。
 - 受限沙箱或 Windows 下若 SQLite JDBC 报 `no sqlitejdbc in java.library.path`，给 JVM 指定可写临时目录：
   `-Djava.io.tmpdir=<可写目录> -Dorg.sqlite.tmpdir=<可写目录>`。测试目录同理。
 - 规则管理 CLI（不启动 Web；命令执行后退出）：
