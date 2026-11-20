@@ -9,7 +9,9 @@ export default defineConfig(({ mode }) => {
   // "fileName ... must be neither absolute nor relative". Pinning root to the long form keeps every id under it.
   // .native, not the JS fallback: only the native call expands Windows 8.3 short names (RUNNER~1) to their long form.
   const root = realpathSync.native(new URL('.', import.meta.url))
-  console.error('[vite] root %s (cwd %s)', root, process.cwd())
+  // Only when the expansion actually changed something (short name or symlink), so normal builds stay quiet
+  // while a CI log still shows both forms in the case this fix exists for.
+  if (root !== process.cwd()) console.error('[vite] root %s (cwd %s)', root, process.cwd())
   const target = loadEnv(mode, root, 'T15_').T15_BACKEND_ORIGIN || 'http://127.0.0.1:8080'
   const url = new URL(target)
 

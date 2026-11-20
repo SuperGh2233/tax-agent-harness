@@ -334,30 +334,37 @@ npm run verify
 - 仍只有离线测试的：T36 故障注入（模型超时、连续错误熔断、响应丢失、进程重启）。仍未验证：其他平台、Maven 最低版本、真实视频、最终压缩包。
 - 本机 8080 / 18084 无残留监听；本次提交前 `main` 已含 `0c98ec4`（T39 代码），本条为其验收记录。
 
-## 16. 2026-11-20 T40（DONE，未提交/未推送）
+## 16. 2026-11-20 T40（DONE，已随 `cf30578` 推送）
 
 - 新增 `scripts/fault_injection_check.py`：真实 JAR、全新库、loopback，模型换成本机桩服务（Anthropic Messages 协议），不需要密钥。8 个场景：超时、429、畸形回复两次/一次、工具错误熔断、保存提交后 SIGKILL（响应丢失）、批准轮写入前 SIGKILL、流式中途断开。
 - 用户 Mac 运行一次 **40 项全通过**，证据 `docs/evidence/T40_FAULT_INJECTION_20261120/`。**第 15 节末条「仍只有离线测试的：T36 故障注入」已被本次运行推翻**；用的是桩模型，证明的是程序处理，不是真实模型行为。
 - 未改业务代码与测试；后端仍 336 项。
-- 仍未验证：其他平台、Maven 最低版本、真实视频、最终压缩包。
+- 仍未验证（写于 T40 时）：其他平台、Maven 最低版本、真实视频、最终压缩包。**其中「其他平台」「Maven 最低版本」已由 T41 实测关闭，见第 17 节**；剩真实视频、最终压缩包。
 
 ## 17. 2026-11-20 T41（DONE，已推送）
 
 - 缺陷：`mvnw` 在 Git 中是 100644，全新克隆后 `./mvnw` 报 Permission denied。**注意**：本节初稿写「工作树已改为 100755」并不成立——21:06 复核时索引与磁盘都还是 644，那次 chmod 没生效。已用 `chmod +x mvnw && git add mvnw` 落到索引并单独提交 `892e217`（`mode change 100644 => 100755`）。
-- `fresh_checkout_check.py` 新增 `--maven <版本>`（下载并核对 SHA-512）与 `--maven wrapper`。版本识别会跳过 JDK 24+ 的警告行并去掉颜色码；每次运行前清理旧日志；Windows 下把临时目录展开成长名（见下）。
+- `fresh_checkout_check.py` 新增 `--maven <版本>`（下载并核对 SHA-512）与 `--maven wrapper`。版本识别会跳过 JDK 24+ 的警告行并去掉颜色码；每次运行前清理旧日志。（曾在 Windows 下把临时目录展开成长名，见下；该规避已由 T42 删除。）
 - **Maven 3.6.3 + JDK 21 已实测 15/15 通过**，证据 `docs/evidence/T41_MAVEN_363_20261120/`。
 - **Maven Wrapper + JDK 21 已实测 15/15 通过**（`892e217`），证据 `docs/evidence/T41_WRAPPER_20261120/`。
 - **GitHub Actions 四作业全绿**（run `44748507398`，提交 `9ff7830`）：Ubuntu/Windows/macOS 用 Wrapper、Ubuntu 另用 3.6.3；证据 `docs/evidence/T41_CI_20261120/`。
 - 前两次 CI 只在 Windows 失败，暴露两个真问题，均已修：
   - `67b7a0e`：`AgentRuntimeTest` 的超时用例断言通过后，被放弃的工具线程仍占着 `runtime.db`，JUnit 删 `@TempDir` 在 Windows 上失败。测试改为等文件可删除再结束。
-  - `9ff7830`：runner 的 `%TEMP%` 是 8.3 短名（`RUNNER~1`），Node 按长名解析，Vite 因此产出绝对 chunk 名、`npm run build` 失败。检查脚本改用 `GetLongPathNameW` 展开的目录克隆。
-- 仍未验证：真实视频、最终压缩包。CI 残留提示：`checkout@v4`、`setup-python@v5`、`upload-artifact@v4` 仍以 Node 20 为目标（被强制跑在 Node 24），不影响结果。
+  - `9ff7830`：runner 的 `%TEMP%` 是 8.3 短名（`RUNNER~1`），Node 按长名解析，Vite 因此产出绝对 chunk 名、`npm run build` 失败。检查脚本当时改用 `GetLongPathNameW` 展开的目录克隆；**此规避已被 T42 的产品侧修复取代并删除**，见第 18 节。
+- 仍未验证：真实视频、最终压缩包。CI 当时残留的 Node 20 提示已由 T43 升级 action 版本处理，见第 19 节。
 
 ## 18. 2026-11-20 T42（DONE，已推送）
 
 - 产品侧修掉 T41 只在检查脚本里规避的 Windows 短路径问题：`frontend/vite.config.ts` 的 `root` 取 `realpathSync.native(new URL('.', import.meta.url))`。**必须用 `.native`**——`fs.realpathSync` 是 JS 实现，在 Windows 上不展开 8.3 短名；第一版修复因此无效（`b4b9bd6`），改用 native 后 CI run `44755130890` 四作业全绿。
 - 新增 devDependency `@types/node@^22`（`node:fs` 类型）；`package.json` 仅加一行，lock 仅加 `@types/node`、`undici-types` 两条。
 - `scripts/fresh_checkout_check.py` 的 `long_path` 规避已删除，Windows CI 现在直接跑产品配置（克隆到短名 `%TEMP%` 路径）。
-- 构建时会打印一行 `[vite] root … (cwd …)`，用于在 CI 日志里区分短名与展开后的长名，长期保留作诊断线索。
+- 构建时会打印一行 `[vite] root … (cwd …)`，用于在 CI 日志里区分短名与展开后的长名，长期保留作诊断线索。（T43 起只在 root 与 cwd 不同时打印，见第 19 节。）
 - 证据 `docs/evidence/T42_VITE_SHORT_PATH_20261120/`（Windows 14/14 摘要 + 那行 root 日志）。
 
+
+## 19. 2026-11-20 T43 收尾清理（IN_PROGRESS，未提交）
+
+- 本文第 16、17 节的过时说法已更正（T40 实际已推送；「其他平台/Maven 最低版本」已由 T41 关闭；检查脚本的长名规避已被 T42 删除）。
+- `frontend/vite.config.ts`：`[vite] root … (cwd …)` 只在展开后的 root 与 cwd 字符串不同时打印。正常本地构建、`npm run dev`、Vitest 不再输出；Windows 短名路径（以及 macOS `/var` → `/private/var` 这类符号链接）下照常输出，CI 诊断能力不变。
+- `.github/workflows/fresh-checkout.yml`：`actions/checkout@v4→v5`、`actions/setup-python@v5→v6`、`actions/upload-artifact@v4→v6`，均已核对各自 `action.yml` 为 `using: node24`（`upload-artifact@v5` 仍是 node20，故直接取 v6）。输入参数未变。
+- 待用户：`cd frontend && npm run verify`；推送后看 GitHub Actions 四作业是否仍全绿且无 Node 20 弃用提示，Windows 作业日志里应仍有 `[vite] root` 那一行。
