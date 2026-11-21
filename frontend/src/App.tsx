@@ -3,15 +3,18 @@ import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from 'react'
 import { ArrowUp, ArrowUpRight, Bot, Check, ChevronRight, CircleDashed, FileCheck2, FileUp, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
 import { AGENT_TOOLS, agentProblem, localTime, ApiError, contextSummary, memoryProblem, SCOPE_LABEL, impactMessage, skillProblem, canVerifyOperation, citedKnowledge, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, describeUpload, findOpenTask, friendlyError, isTerminalTaskStatus, issueLocation, issueReason, MAPPING_FIELDS, mappingProblem, MAX_BATCH, parseTool, provenNotExecuted, queriedInvoices, REVIEW_REASON, SCAN_CHECK, scanProblem, UPLOAD_ACCEPT, uploadProblem, usableAgents, verifiedBatchResult, verifiedWriteResult, verifyPendingOperation } from './api'
 import type { Memory, MemoryScope, AgentDef, AgentSpec, AgentsView, Capabilities, Skill, SkillInfo, SkillSpec, ToolInfo, Approval, AuditEvent, Exchange, FileDetail, Invoice, PlanStep, RowIssue, SavedTrace, ScanConfirmation, ScanDraft, ScanImport, Session, SheetMapping, Statement, StoredFile, TableCandidate, Task, ToolProgress, TurnView, UploadResult } from './api'
-import { Button, Modal } from './ui'
+import { Button, Modal, SplitText } from './ui'
+import { useNavIndicator, useSpotlight } from './motion'
 
 const api = new DemoApi()
 type Page = 'home' | 'workspace' | 'review' | 'history' | 'files' | 'agents' | 'capabilities' | 'audit'
 type Message = {role: 'user' | 'agent' | 'notice'; text: string; history?: Exchange[]}
 // items (T47): the per-invoice operationIds of a batch; each must verify before the lock is released.
 type Operation = {id: string; taskId: string; unknown: boolean; items?: string[]}
+const HERO_TITLE = '今天，交给 Agent 什么任务？'
 const suggestions = ['查询 2026-09 发票与银行收支', '检查 2026-09 发票用途缺口', '继续核对待补充的发票信息']
 const statusLabel = {ACTIVE: '进行中', WAITING_USER: '等待补充', COMPLETED: '已结束', CANCELLED: '已取消'}
+const statusTone = {ACTIVE: 'accent', WAITING_USER: 'warn', COMPLETED: 'ok', CANCELLED: ''}
 const OPERATION_KEY = 'taxagent-pending-operation'
 const SHARED_OPERATION_KEY = 'taxagent-pending-operation-shared'
 const OPERATION_CHANNEL = 'taxagent-operation-lock'
@@ -83,7 +86,10 @@ export default function App() {
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null)
   const [pendingSwitch, setPendingSwitch] = useState<{kind: '工具' | '技能'; name: string; usedBy: string[]; enabling: boolean} | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
+  const navRef = useRef<HTMLElement>(null)
   useEffect(() => { heading.current?.focus() }, [page])
+  useNavIndicator(navRef, page)
+  useSpotlight()
   useEffect(() => {
     const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(OPERATION_CHANNEL)
     channelRef.current = channel
@@ -438,15 +444,15 @@ export default function App() {
   return <div className="app-shell">
     <a className="skip-link" href="#main">跳到主要内容</a>
     <header className="topbar"><button className="brand" onClick={() => navigate('home')} aria-label="财税 Agent 工作台"><span className="brand-mark"><Sparkles size={20}/></span><span>财税 Agent<small>HARNESS</small></span></button>
-      <nav aria-label="主导航">{([['home','工作台'],['history','任务历史'],['files','资料文件'],['agents','Agent 配置'],['capabilities','能力中心'],['audit','审计记录']] as const).map(([value,label]) => <button key={value} aria-current={page === value ? 'page' : undefined} onClick={() => navigate(value)}>{label}</button>)}</nav>
-      <Button variant="ghost" onClick={() => void openPreferences()} disabled={!selected || busy}>长期记忆</Button><Button className="identity-button" onClick={() => setIdentityOpen(true)} disabled={busy}>{selected ? `${session.enterprise} · ${session.profile === 'operator' ? '操作员' : '只读成员'}` : '选择企业 / 身份'}<ChevronRight size={14}/></Button>
+      <nav ref={navRef} aria-label="主导航">{([['home','工作台'],['history','任务历史'],['files','资料文件'],['agents','Agent 配置'],['capabilities','能力中心'],['audit','审计记录']] as const).map(([value,label]) => <button key={value} aria-current={page === value ? 'page' : undefined} onClick={() => navigate(value)}>{label}</button>)}</nav>
+      <div className="topbar-actions"><Button variant="ghost" onClick={() => void openPreferences()} disabled={!selected || busy}>长期记忆</Button><Button className="identity-button" onClick={() => setIdentityOpen(true)} disabled={busy}>{selected ? `${session.enterprise} · ${session.profile === 'operator' ? '操作员' : '只读成员'}` : '选择企业 / 身份'}<ChevronRight size={14}/></Button></div>
     </header>
     <div className="environment-line"><span className="dot"/> 本地演示工作空间 <span>·</span> {session?.identityNotice ?? '正在连接本地服务'}</div>
     <main id="main" tabIndex={-1} className={page === 'workspace' ? 'main workspace-main' : 'main'}>
       {error && <div role="alert" className="error-banner">{error}<Button variant="ghost" disabled={busy} onClick={() => void run(async () => { const s = await api.session(); setSession(s); if (s.profile) setTasks(await api.tasks()) })}>重新连接</Button></div>}
       {operation && <aside className="operation-warning" role="status">保存请求需核查 · operationId: <code>{operation.id}</code><br/>任务 {operation.taskId}。结果未核验前保持锁定；NOT_FOUND 不允许重试，DIVERGED 需人工核查。编号保留在本浏览器会话中。<Button disabled={busy || !selected || !canVerifyOperation(operation)} onClick={() => void verifyOperation()}>只读核验保存结果</Button>{!canVerifyOperation(operation) && <p>存储编号无法识别，请人工核查。</p>}</aside>}
       {page === 'home' && <div className="home">
-        <section className="hero"><span className="eyebrow"><Sparkles size={14}/> YOUR FINANCE WORKSPACE</span><h1 ref={heading} tabIndex={-1}>今天，交给 Agent 什么任务？</h1><p>从一个问题开始，让每一步执行都有据可查。</p>
+        <section className="hero"><div className="aurora" aria-hidden="true"><span/><span/><span/><span/></div><span className="eyebrow"><Sparkles size={14}/> YOUR FINANCE WORKSPACE</span><h1 ref={heading} tabIndex={-1} aria-label={HERO_TITLE}><SplitText text={HERO_TITLE}/></h1><p>从一个问题开始，让每一步执行都有据可查。</p>
           {sourceTaskId && <p className="source-task-note"><History size={14}/> 已带入历史任务目标（{sourceTaskId.slice(0,8)}）。创建后会生成全新的任务，不会恢复旧任务的写入授权。</p>}
           {openTask && <section className="open-task-banner" role="status" aria-label="已有未完成任务">
             <div><span className="open-task-label"><History size={15}/> 当前有未完成任务 · {statusLabel[openTask.status]}</span>
@@ -464,7 +470,7 @@ export default function App() {
       </div>}
       {page === 'history' && <section className="content-page"><div className="page-heading"><div><span className="eyebrow">YOUR TASKS</span><h1 ref={heading} tabIndex={-1}>任务历史</h1><p className="muted">恢复上下文，重新核对当前数据。</p></div><Button disabled={!selected || busy} onClick={() => void run(async () => setTasks(await api.tasks()))}>刷新任务</Button></div>{taskList()}</section>}
       {page === 'workspace' && task && <>
-        <header className="workspace-heading"><div><button className="back" onClick={() => navigate('home')}>工作台 /</button><h1 ref={heading} tabIndex={-1}>{task.goal}</h1><span className="muted">{statusLabel[task.status]} · {session?.enterprise} · {task.id.slice(0,8)}{taskAgent && <> · <Bot size={13} className="inline-icon"/> {taskAgent.spec.name} v{taskAgent.version}{!taskAgent.enabled && '（已停用）'}</>}</span></div><div className="workspace-actions"><Button disabled={busy || !turn || (loadedHistoricalTask && isTerminalTaskStatus(task.status))} onClick={() => navigate('review')}><FileCheck2 size={16}/>审核与结果</Button><Button aria-label="打开检查器" onClick={() => void openInspector()}><PanelRight size={17}/></Button></div></header>
+        <header className="workspace-heading"><div><button className="back" onClick={() => navigate('home')}>工作台 /</button><h1 ref={heading} tabIndex={-1}>{task.goal}</h1><span className="muted workspace-meta"><span className={`pill small ${statusTone[task.status]}`}>{statusLabel[task.status]}</span> {session?.enterprise} · {task.id.slice(0,8)}{taskAgent && <> · <Bot size={13} className="inline-icon"/> {taskAgent.spec.name} v{taskAgent.version}{!taskAgent.enabled && '（已停用）'}</>}</span></div><div className="workspace-actions"><Button disabled={busy || !turn || (loadedHistoricalTask && isTerminalTaskStatus(task.status))} onClick={() => navigate('review')}><FileCheck2 size={16}/>审核与结果</Button><Button aria-label="打开检查器" onClick={() => void openInspector()}><PanelRight size={17}/></Button></div></header>
         {loadedHistoricalTask && isTerminalTaskStatus(task.status) ? <TerminalTaskPanel task={task} onCreateNew={startNewFromHistory}/> : <>
           <Thread messages={messages} busy={busy} streaming={streamingText} progress={liveProgress}/>
           <Composer disabled={busy || !selected} onSend={m => void send(m, undefined, isTerminalTaskStatus(task.status))}/>
@@ -618,7 +624,7 @@ function Identity({busy,session,onSelect}: {busy:boolean; session:Session|null; 
 function Thread({messages,busy,streaming,progress}: {messages:Message[]; busy:boolean; streaming:string; progress:string}) {
   const bottom = useRef<HTMLDivElement>(null)
   useEffect(() => { bottom.current?.scrollIntoView({block:'nearest'}) }, [messages, busy, streaming, progress])
-  return <section className="thread" aria-label="任务对话"><div className="thread-inner" role="log" aria-live="polite">{messages.map((m,i) => <article key={i} className={`message ${m.role}`}><div className="message-label">{m.role === 'agent' ? <><Sparkles size={15}/>财税 Agent <span>模型生成 · 不代表保存成功</span></> : m.role === 'user' ? '你' : <><ShieldCheck size={14}/>工作空间</>}</div><p>{m.text}</p>{m.history && <ToolGroup history={m.history}/>}</article>)}{streaming && <article className="message agent"><div className="message-label"><Sparkles size={15}/>财税 Agent <span>模型生成 · 不代表保存成功</span></div><p>{streaming}</p></article>}{busy && <p className="request-state" role="status"><CircleDashed size={16}/>{progress || '请求处理中，等待后端完整响应…'}</p>}<div ref={bottom}/></div></section>
+  return <section className="thread" aria-label="任务对话"><div className="thread-inner" role="log" aria-live="polite">{messages.map((m,i) => <article key={i} className={`message ${m.role}`}><div className="message-label">{m.role === 'agent' ? <><Sparkles size={15}/>财税 Agent <span>模型生成 · 不代表保存成功</span></> : m.role === 'user' ? '你' : <><ShieldCheck size={14}/>工作空间</>}</div><p>{m.text}</p>{m.history && <ToolGroup history={m.history}/>}</article>)}{streaming && <article className="message agent streaming"><div className="message-label"><Sparkles size={15}/>财税 Agent <span>模型生成 · 不代表保存成功</span></div><p>{streaming}</p></article>}{busy && <p className="request-state" role="status"><CircleDashed size={16}/>{progress || '请求处理中，等待后端完整响应…'}</p>}<div ref={bottom}/></div></section>
 }
 function Composer({disabled,onSend}: {disabled:boolean; onSend:(m:string)=>void}) {
   const [message,setMessage] = useState('')
@@ -647,7 +653,7 @@ function VerificationPanel({turn}: {turn:TurnView|null}) {
     <div className="batch-table"><table><thead><tr><th>发票</th><th>数据库用途</th><th>数据库备注</th><th>复核</th></tr></thead>
       <tbody>{batch.results.map(r => { const review = batch.review.find(item => item.key.invoiceId === r.key.invoiceId)
         return <tr key={r.key.invoiceId} className={review ? 'needs-review' : ''}><td>{r.key.enterpriseId} / {r.key.invoiceId}</td><td>{r.purpose || '（空）'}</td><td>{r.remarks || '（空）'}</td>
-          <td>{review ? review.reasons.map(reason => REVIEW_REASON[reason] ?? reason).join('；') : '无需复核'}</td></tr> })}</tbody></table></div>
+          <td>{review ? <span className="pill-row">{review.reasons.map(reason => <span key={reason} className="pill warn">{REVIEW_REASON[reason] ?? reason}</span>)}</span> : <span className="pill ok">无需复核</span>}</td></tr> })}</tbody></table></div>
     <p className="hint">复核清单由程序根据保存前后的值和当前启用规则判断，不来自模型文字。</p></div></section>
   return <section className={`verification ${verification?.verified ? 'verified' : ''}`} aria-label="保存核验状态"><ShieldCheck size={22}/><div><h2>{verification?.verified ? 'verified=true · 数据库回读已核验' : '尚无已核验的保存结果'}</h2><p>{turn?.message ?? '请先查询发票，再逐项审核修改。模型建议与任务结束状态不构成保存证据。'}</p>{turn?.operationId && <p>operationId: <code>{turn.operationId}</code></p>}{verification && <><p>{verification.key.enterpriseId} / {verification.key.invoiceId}</p><dl><dt>数据库用途</dt><dd>{verification.purpose || '（空）'}</dd><dt>数据库备注</dt><dd>{verification.remarks || '（空）'}</dd></dl></>}</div></section>
 }
@@ -932,17 +938,19 @@ export function BatchReview({invoices,enterprise,supplied,disabled,onApprove}: {
     <p className="muted">一次确认多张发票的同一字段。整批在同一事务内保存：全部回读核验成功，或一张都不改。保存后程序列出仍需复核的发票。空白新值表示明确清空。</p>
     {!invoices.length && <p className="empty">本轮没有发票查询证据。返回对话，先让 Agent 查询当前企业的发票。</p>}
     <div className="review-row"><span>修改字段</span><div><label><span className="sr-only">修改字段</span><select value={field} onChange={e => change(() => { setField(e.target.value as 'purpose'|'remarks'); setValues({}) })}><option value="purpose">用途 purpose</option><option value="remarks">备注 remarks</option></select></label></div></div>
-    {invoices.length > 0 && <div className="batch-table"><table><thead><tr><th>选择</th><th>发票</th><th>日期 · 销售方</th><th>价税合计</th><th>数据库当前值</th><th>拟修改值</th></tr></thead>
+    {invoices.length > 0 && <div className="batch-table"><table><thead><tr><th><span className="sr-only">选择</span></th><th>发票</th><th>日期 · 销售方</th><th className="num">价税合计（元）</th><th>数据库当前值</th><th>拟修改值</th></tr></thead>
       <tbody>{invoices.map(i => { const id = i.key.invoice_id, on = selected.includes(id)
         return <tr key={id} className={on ? 'selected' : ''}>
           <td><input type="checkbox" aria-label={`选择 ${id}`} checked={on} disabled={disabled} onChange={() => toggle(id)}/></td>
-          <td>{enterprise} / {id}</td><td>{i.invoice_date} · {i.seller}</td><td>{(i.amount_cents / 100).toFixed(2)}</td>
+          <td>{enterprise} / {id}</td><td>{i.invoice_date} · {i.seller}</td><td className="num">{(i.amount_cents / 100).toFixed(2)}</td>
           <td>{i[field] || '（空）'}</td>
           <td>{on ? <label><span className="sr-only">{id} 的拟修改值</span><input value={valueOf(id)} maxLength={4000} disabled={disabled} onChange={e => { const value = e.target.value; change(() => setValues(old => ({...old, [id]: value}))) }} placeholder="空白表示清空"/></label> : <span className="muted">未选择</span>}</td></tr> })}</tbody></table></div>}
-    {problem && rows.length > 0 && <p className="hint">{problem}</p>}
-    <label className="check-label"><input type="checkbox" checked={checked} disabled={!!problem || disabled} onChange={e => setChecked(e.target.checked)}/><span>我已逐张核对以上 {rows.length} 张发票的{fieldLabel}、数据库当前值与拟修改值。</span></label>
-    <div className="review-actions"><p className="muted">每张发票有独立 operationId，可逐张只读核验。</p><Button variant="primary" disabled={!valid} onClick={() => setDraft({operationId:crypto.randomUUID(), confirmed:true,
-      items:rows.map(i => ({operationId:crypto.randomUUID(), invoiceId:i.key.invoice_id, changes:{[field]:valueOf(i.key.invoice_id)}}))})}>继续二次确认<ChevronRight size={16}/></Button></div>
+    <div className="batch-bar" role="group" aria-label="批量保存操作">
+      <div className="batch-bar-text"><strong>已选 {rows.length} 张</strong><span className={problem && rows.length > 0 ? 'hint' : 'muted'}>{problem && rows.length > 0 ? problem : '每张发票有独立 operationId，可逐张只读核验。'}</span></div>
+      <label className="check-label"><input type="checkbox" checked={checked} disabled={!!problem || disabled} onChange={e => setChecked(e.target.checked)}/><span>我已逐张核对以上 {rows.length} 张发票的{fieldLabel}、数据库当前值与拟修改值。</span></label>
+      <Button variant="primary" disabled={!valid} onClick={() => setDraft({operationId:crypto.randomUUID(), confirmed:true,
+        items:rows.map(i => ({operationId:crypto.randomUUID(), invoiceId:i.key.invoice_id, changes:{[field]:valueOf(i.key.invoice_id)}}))})}>继续二次确认<ChevronRight size={16}/></Button>
+    </div>
     <Modal open={draft !== null} onOpenChange={open => { if (!open) setDraft(null) }} title={`确认现在批量保存这 ${draft?.items?.length ?? 0} 张发票？`} description="点击下方按钮将授予本轮整批精确写入权限。整批同一事务：任一张失败则全部不改。结果以逐张 verified 与数据库回读为准。">
       {draft && <><div className="batch-table"><table><thead><tr><th>发票</th><th>字段</th><th>数据库当前值</th><th>拟修改值</th></tr></thead>
         <tbody>{draft.items?.map(item => { const invoice = rows.find(i => i.key.invoice_id === item.invoiceId)
@@ -993,17 +1001,24 @@ function ScanReview({draft, busy, onConfirm}: {draft: ScanDraft; busy: boolean; 
   const [checked, setChecked] = useState(false)
   const set = (key: keyof typeof values, value: string) => { setChecked(false); setValues(old => ({...old, [key]: value})) }
   const problem = scanProblem(values)
-  const flagged = (field: string) => draft.unreadable.includes(field) ? <small className="flag">模型未能看清</small> : null
-  const fields: [keyof typeof values, string, string][] = [['invoiceId','发票编号','invoice_id'],['invoiceDate','开票日期（YYYY-MM-DD）','invoice_date'],['seller','销售方名称','seller'],['item','项目名称','item'],['amount','价税合计（元）','amount'],['remarks','备注','remarks']]
+  // Until the amount is typed a second time, only the other problems are shown; a mismatch is not news yet.
+  const shown = values.amountConfirmation.trim() ? problem : scanProblem({...values, amountConfirmation:values.amount})
+  const flagged = (field: string) => draft.unreadable.includes(field) ? <span className="pill warn small">模型未能看清</span> : null
+  // [value key, label, draft field, spans both columns]; the amount and its retype sit side by side to compare.
+  const fields: [keyof typeof values, string, string, boolean][] = [['invoiceId','发票编号','invoice_id',false],['invoiceDate','开票日期（YYYY-MM-DD）','invoice_date',false],
+    ['seller','销售方名称','seller',true],['item','项目名称','item',true],['amount','价税合计（元）','amount',false]]
   return <div className="scan-review">
     <div className="scan-image"><img src={draft.pageImage} alt={`${draft.file.name} 第 1 页`}/></div>
     <form className="stack" onSubmit={e => { e.preventDefault(); if (!problem && checked) onConfirm({...values, confirmed:true}) }}>
       <p className={draft.status === 'DRAFT' ? 'hint' : 'error-banner'}>{draft.status === 'DRAFT' ? '以下为模型识别的草稿，不是事实；请逐项对照左侧票面核对。' : `读图模型不可用（${draft.errorCode}），请对照左侧票面手工录入。`}</p>
       {draft.fields.amount_in_words && <p className="muted">票面大写金额（模型读取）：{draft.fields.amount_in_words}</p>}
-      {draft.checks.length > 0 && <ul className="scan-checks">{draft.checks.map(check => <li key={check} className={check === 'AMOUNT_WORDS_MATCH' ? 'ok' : 'warn'}>{SCAN_CHECK[check] ?? check}</li>)}</ul>}
-      {fields.map(([key, label, field]) => <label key={key}>{label}{flagged(field)}<input value={values[key]} onChange={e => set(key, e.target.value)} maxLength={key === 'remarks' ? 500 : 200}/></label>)}
-      <label>再次输入价税合计（对照纸面，不从上面复制）<input value={values.amountConfirmation} onChange={e => set('amountConfirmation', e.target.value)} inputMode="decimal" autoComplete="off"/></label>
-      {problem && <p className="hint">{problem}</p>}
+      {draft.checks.length > 0 && <div className="pill-row" role="list" aria-label="程序核对">{draft.checks.map(check => <span role="listitem" key={check} className={`pill ${check === 'AMOUNT_WORDS_MATCH' ? 'ok' : 'warn'}`}>{SCAN_CHECK[check] ?? check}</span>)}</div>}
+      <div className="field-grid">
+        {fields.map(([key, label, field, wide]) => <label key={key} className={`${wide ? 'wide' : ''} ${key === 'amount' ? 'amount' : ''}`}><span className="field-label">{label}{flagged(field)}</span><input value={values[key]} onChange={e => set(key, e.target.value)} maxLength={200} inputMode={key === 'amount' ? 'decimal' : undefined}/></label>)}
+        <label className="amount"><span className="field-label">再次输入价税合计</span><input value={values.amountConfirmation} onChange={e => set('amountConfirmation', e.target.value)} inputMode="decimal" autoComplete="off" placeholder="对照纸面输入，不要复制"/></label>
+        <label className="wide"><span className="field-label">备注{flagged('remarks')}</span><input value={values.remarks} onChange={e => set('remarks', e.target.value)} maxLength={500}/></label>
+      </div>
+      {shown && <p className="hint">{shown}</p>}
       <label className="check-label"><input type="checkbox" checked={checked} disabled={!!problem || busy} onChange={e => setChecked(e.target.checked)}/><span>我已逐项对照票面核对，确认导入这张发票（同编号已存在时不覆盖）。</span></label>
       <Button type="submit" variant="primary" disabled={!!problem || !checked || busy}>确认导入</Button>
     </form>

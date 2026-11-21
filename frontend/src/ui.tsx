@@ -7,6 +7,11 @@ import { useRef } from 'react'
 export function Button({className = '', variant = 'secondary', ...props}: ButtonHTMLAttributes<HTMLButtonElement> & {variant?: 'primary' | 'secondary' | 'ghost'}) {
   return <button className={`button ${variant} ${className}`} {...props}/>
 }
+/** Headline that rises in token by token (a CJK character or a whole Latin word). Put the full text in the heading's aria-label. */
+export function SplitText({text}: {text: string}) {
+  const tokens = text.match(/[A-Za-z0-9]+|\s+|./gu) ?? []
+  return <span className="split" aria-hidden="true">{tokens.map((token, i) => <span key={i} className="tok">{token}</span>)}</span>
+}
 export function Modal({open, onOpenChange, title, description, children, drawer = false}: {
   open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; children: ReactNode; drawer?: boolean
 }) {
