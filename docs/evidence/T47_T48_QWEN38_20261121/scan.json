@@ -1,0 +1,40 @@
+{
+  "check": "T48 scanned invoice read under qwen3.8-flash (LLM_VISION_* set to the same model)",
+  "model": "qwen3.8-flash",
+  "input": "image-only PDF, no text layer, 66207 bytes (fictional invoice F9001 / 1234.56)",
+  "draft": {
+    "status": "DRAFT",
+    "errorCode": null,
+    "fields": {
+      "invoice_id": "F9001",
+      "invoice_date": "2026-10-20",
+      "seller": "合成供应商甲公司",
+      "item": "办公用品 (合成)",
+      "amount": "1234.56",
+      "amount_in_words": "壹仟贰佰叁拾肆元伍角陆分",
+      "remarks": "合成数据，仅用于识别测试"
+    },
+    "unreadable": [],
+    "checks": [
+      "AMOUNT_WORDS_MATCH"
+    ]
+  },
+  "http": 200,
+  "seconds": 5.6,
+  "confirmation": {
+    "invoiceId": "F9001",
+    "invoiceDate": "2026-10-20",
+    "seller": "合成供应商甲公司",
+    "item": "办公用品 (合成)",
+    "amount": "1234.56",
+    "remarks": "合成数据，仅用于识别测试",
+    "amountConfirmation": "1234.56",
+    "confirmed": true
+  },
+  "import": {
+    "status": "IMPORTED",
+    "invoiceId": "F9001",
+    "amountCents": 123456,
+    "differences": []
+  }
+}
