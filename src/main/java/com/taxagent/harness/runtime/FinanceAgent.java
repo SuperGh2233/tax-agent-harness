@@ -123,6 +123,34 @@ public final class FinanceAgent {
         return memory.continueTask(session, enterprise, id, message, runtime,
                 new AgentRuntime.ApprovedWrite(id, operationId, update, authorization), progress);
     }
+    /**
+     * T47: one trusted approval covering several invoices, saved in one transaction by a single update_invoice call.
+     * Same gates as a single save: selected enterprise, an agent allowed to save, saving switched on, and the user's
+     * explicit per-invoice confirmation from the trusted UI.
+     */
+    public TaskMemory.Turn approvedBatchTurn(String id, String message, String batchId,
+                                            List<InvoiceWriteService.BatchItem> items, InvoiceWriteService.Intent explicitIntent,
+                                            Consumer<AgentRuntime.Progress> progress) {
+        load(id);
+        if (items == null || items.isEmpty() || items.stream().anyMatch(i -> i == null || i.update() == null
+                || !enterprise.equals(i.update().key().enterpriseId())))
+            throw new DomainException(ErrorCode.PERMISSION_DENIED, "Selected enterprise required");
+        if (agent != null && !agent.allows(AgentDirectory.WRITE_TOOL))
+            throw new DomainException(ErrorCode.CAPABILITY_NOT_GRANTED, "This agent is not allowed to save");
+        if (effective != null && effective.disabledTools().contains(AgentDirectory.WRITE_TOOL))
+            throw new DomainException(ErrorCode.CAPABILITY_DISABLED, "Saving is switched off");
+        var authorization = InvoiceWriteService.authorizeExplicitBatch(session, id, batchId, items, explicitIntent);
+        return memory.continueTask(session, enterprise, id, message, runtime,
+                new AgentRuntime.ApprovedWrite(id, batchId, items.getFirst().update(), null, items, authorization), progress);
+    }
+    /** T47: unknown batch outcome, query only; empty is never permission to retry. */
+    public Optional<ToolContract.BatchUpdateResult> recoverBatch(String id, String batchId, List<InvoiceWriteService.BatchItem> items) {
+        if (items == null || items.isEmpty() || items.stream().anyMatch(i -> i == null || i.update() == null
+                || !enterprise.equals(i.update().key().enterpriseId())))
+            throw new DomainException(ErrorCode.PERMISSION_DENIED, "Selected enterprise required");
+        load(id);
+        return writer.recoverBatch(session, id, batchId, items);
+    }
     /** Unknown write outcome: query only; empty is never automatic retry permission. */
     public Optional<ToolContract.UpdateResult> recover(String id, String operationId, InvoiceUpdate update) {
         if (update == null || !enterprise.equals(update.key().enterpriseId()))

@@ -1425,3 +1425,26 @@ body:has(.dialog) {
 .memory-row { display:grid; gap:4px; padding:8px 0; border-bottom:1px solid var(--border) }
 .memory-row.overridden { opacity:.6 }
 .memory-row p { margin:0; overflow-wrap:anywhere }
+/* T46–T48: batch review, column mapping, scanned invoices */
+.segmented { display:inline-flex; gap:4px; margin:18px 0 6px; padding:3px; border:1px solid var(--border); border-radius:8px }
+.segmented button { border:0; background:transparent; color:var(--muted); padding:6px 14px; border-radius:6px }
+.segmented button[aria-pressed="true"] { background:#1d2230; color:#e5e8ef }
+.batch-table { overflow-x:auto; margin:12px 0 }
+.batch-table table { width:100%; border-collapse:collapse; font-size:12px; min-width:560px }
+.batch-table th { text-align:left; color:var(--muted); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:bottom }
+.batch-table td { padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; overflow-wrap:anywhere }
+.batch-table input, .batch-table select { width:100%; min-width:120px }
+.batch-table tr.selected td { background:rgba(100,134,232,.08) }
+.batch-table tr.needs-review td { background:rgba(217,112,95,.10) }
+.mapping-form, .scan-section { margin:22px 0; padding:16px 18px; border:1px solid var(--border); border-radius:8px }
+.mapping-card { margin:14px 0; padding-top:10px; border-top:1px solid var(--border) }
+.mapping-card header { display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center }
+.mapping-header { color:#e5e8ef; margin-bottom:4px }
+.scan-review { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; margin-top:16px }
+.scan-image { border:1px solid var(--border); border-radius:8px; overflow:auto; max-height:720px; background:#fff }
+.scan-image img { display:block; width:100%; height:auto }
+.scan-checks { margin:0; padding-left:18px }
+.scan-checks li.ok { color:#7cc29a }
+.scan-checks li.warn { color:#e3a46f }
+.flag { margin-left:8px; color:#e3a46f }
+@media (max-width: 760px) { .scan-review { grid-template-columns:1fr } }

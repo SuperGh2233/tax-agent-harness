@@ -177,6 +177,19 @@ public final class ToolContract {
         public PurposeResult { missing = List.copyOf(missing); rules = List.copyOf(rules); }
     }
     public record UpdateResult(InvoiceKey key, String purpose, String remarks, boolean verified) {}
+    /**
+     * T47: why an invoice in a verified batch still needs a person's look, decided by the program from the values
+     * before and after the save and the rule in force: OVERWROTE_PURPOSE / OVERWROTE_REMARKS (a non-empty value was
+     * replaced), CLEARED_PURPOSE / CLEARED_REMARKS (explicitly emptied), PURPOSE_STILL_REQUIRED (the rule still
+     * requires a purpose for this invoice), RULE_NOT_CHECKABLE (a replayed batch whose rule can no longer be read).
+     */
+    public record ReviewItem(InvoiceKey key, List<String> reasons) {
+        public ReviewItem { reasons = List.copyOf(reasons); }
+    }
+    /** T47: one approved batch, saved in one transaction: either every invoice is verified or none was changed. */
+    public record BatchUpdateResult(List<UpdateResult> results, boolean verified, List<ReviewItem> review, String note) {
+        public BatchUpdateResult { results = List.copyOf(results); review = List.copyOf(review); }
+    }
     public record StateResult(String id, String content) {}
     public record Error(ErrorCode code, String message) {}
     public record Response<T>(T data, Error error) {

@@ -70,6 +70,8 @@ class FileServiceTest {
         assertThat(first.conflicts()).hasSize(20 + 24).allSatisfy(i -> assertThat(i.reason()).isEqualTo("EXISTING_RECORD"));
         assertThat(first.skipped()).hasSize(20 + 24).allSatisfy(i -> assertThat(i.reason()).isEqualTo("ENTERPRISE_MISMATCH"));
         assertThat(first.chunks()).isPositive();
+        // T46: the description sheets (企业与用户, 字段说明) are not offered as tables to map.
+        assertThat(first.tables()).isEmpty();
 
         // Remove C001's records, then import them back from the official Excel.
         var before = List.of(totals("C001", "2026-08"), totals("C001", "2026-09"));

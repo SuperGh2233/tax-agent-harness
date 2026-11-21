@@ -1,21 +1,22 @@
 # Tax Agent Harness — 开发交接说明
 
-> 更新时间：2026-11-21（新增第 0 节当前状态与第 20 节收尾；第 1–11 节为 2026-11-02 起的历史快照，其中模型协议、测试数、「浏览器流程未通过」等表述已过时，以第 0 节为准）
+> 更新时间：2026-11-21（新增第 0 节当前状态与第 20 节收尾，第 0 节已补 T45–T48；第 1–11 节为 2026-11-02 起的历史快照，其中模型协议、测试数、「浏览器流程未通过」等表述已过时，以第 0 节为准）
 > 上次全面更新：2026-11-02
 > 用途：交给下一位队友继续开发。本文记录当前工作树、已完成能力、真实验证边界和推荐接手顺序。**不是比赛最终交付证明，也不代表当前 Git 工作区已提交。**
 
 ## 0. 当前状态（2026-11-21，暂停收尾时）
 
-- Git：`main` 与 `origin/main` 同为 `64e4a63`，工作区除本次文档同步外无改动；未跟踪的官方复赛材料（目录与 zip）和 `审计docs/` 刻意不入库。
-- 范围：复赛契约 `docs/FINAL_ROUND_CONTRACT.md` 的 T28–T35 已实现，T36–T43 为稳健性、真实验证与环境验证补强，全部 DONE 并推送。
-- 测试：JDK 21 `mvn test` 336/0/0/0；`cd frontend && npm run verify` 通过（Vitest 54）。
+- Git：`main` 与 `origin/main` 同为 `64e4a63`；工作区有 T44 文档同步与 T45–T48 的代码、测试、文档改动，**均未提交**；未跟踪的官方复赛材料（目录与 zip）和 `审计docs/` 刻意不入库。
+- 范围：复赛契约 `docs/FINAL_ROUND_CONTRACT.md` 的 T28–T35 已实现，T36–T43 为稳健性、真实验证与环境验证补强，全部 DONE 并推送。T45–T48（四项可选扩展：回复语气、陌生 Excel 列对应、批量保存与复核、扫描件识别与票面金额确认）为自动化验证 DONE、未提交，详见 `TASKS.md`。
+- 测试（2026-11-21，含 T45–T48 的工作树，用户 Mac）：JDK 21 `mvn test` 351/0/0/0；`cd frontend && npm run verify` 通过（Vitest 61）。下方全新检出与 CI 证据基于 `64e4a63`（336 项），未覆盖 T45–T48。
 - 进程级证据（`docs/evidence/`）：
   - 全新检出 + 空缓存构建：macOS 本机（T39），GitHub Actions Ubuntu / Windows / macOS（Wrapper 3.9.9）与 Ubuntu（Maven 3.6.3）四作业全绿（T41、T43）；
   - 故障注入：真实 JAR + 桩模型 8 场景 40 项（T40）；
   - 真实模型 `qwen3.7-flash`：受控保存对比 20/20 vs 9/20（T37）、30 轮长对话（T38）、大结果分页取回（T39），程序行为项全部通过。
-- 模型：统一 `qwen3.7-flash`，DashScope Anthropic 兼容入口（`LLM_PROTOCOL=anthropic`）；配置只走环境变量，见 `CLAUDE.md`「模型配置」。
-- **仍未完成**：≤5 分钟演示视频、最终作品压缩包（按 `RELEASE_CHECKLIST.md` 白名单人工整理与逐项审阅）。可选后续：写一个检查最终 zip 的脚本（解到空目录、核对禁止项、按 REPRODUCE 构建启动）。
-- 接手顺序：`AGENTS.md` → 本节 → `TASKS.md` 末尾 T38–T44 → `CLAUDE.md`（命令与架构）→ `REPRODUCE.md` / `作品使用说明.md`。
+- 模型：开发与已有真实验证用 `qwen3.7-flash`，DashScope Anthropic 兼容入口（`LLM_PROTOCOL=anthropic`）；最终比赛采用 `qwen3.8`（用户 2026-11-21），只改环境变量。扫描件读图另用 `LLM_VISION_*`。配置见 `CLAUDE.md`「模型配置」。
+- T45–T48 真实模型（2026-11-21，`qwen3.7-flash`，对话与读图同一档）：扫描件识别全链路与 2 张批量保存通过，证据 `docs/evidence/T47_T48_REAL_MODEL_20261121/`。
+- **仍未完成**：T45–T48 在 `qwen3.8` 下复跑、浏览器中三个新页面的实际操作；≤5 分钟演示视频、最终作品压缩包（按 `RELEASE_CHECKLIST.md` 白名单人工整理与逐项审阅）。可选后续：写一个检查最终 zip 的脚本（解到空目录、核对禁止项、按 REPRODUCE 构建启动）。
+- 接手顺序：`AGENTS.md` → 本节 → `TASKS.md` 末尾 T38–T48 → `CLAUDE.md`（命令与架构）→ `REPRODUCE.md` / `作品使用说明.md`。
 
 ## 1. 一句话结论
 

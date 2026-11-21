@@ -1,6 +1,7 @@
 package com.taxagent.harness.demo;
 
 import com.taxagent.harness.runtime.*;
+import com.taxagent.harness.tool.FileService;
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
@@ -32,6 +33,17 @@ public class DemoConfiguration {
                 return List.copyOf(out);
             }
         };
+    }
+    /**
+     * T48: scanned-invoice reading uses its own profile LLM_VISION_ENDPOINT / _API_KEY / _MODEL / _PROTOCOL, which
+     * must name a model that reads images. Unconfigured, scans fall back to manual entry; never to another profile.
+     */
+    @Bean FileService.ScanReader scanReader(Environment env) {
+        var p = prefix("VISION");
+        if (!configured(env, p)) return VisionClient.NOT_CONFIGURED;
+        String endpoint = env.getProperty(p + "ENDPOINT"), key = env.getProperty(p + "API_KEY"), model = env.getProperty(p + "MODEL");
+        var anthropic = "anthropic".equalsIgnoreCase(env.getProperty(p + "PROTOCOL")) || URI.create(endpoint).getPath().contains("/anthropic");
+        return new VisionClient(URI.create(endpoint), key, model, anthropic, Duration.ofSeconds(60));
     }
     private static String prefix(String name) { return "default".equals(name) ? "LLM_" : "LLM_" + name + "_"; }
     private static ModelProfiles.Profile profileOf(Environment env, String name) {

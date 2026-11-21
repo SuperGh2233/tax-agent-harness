@@ -232,13 +232,13 @@ Vite 开发服务器只监听本机回环地址，并将同源 `/api` 请求代�
 
 ## 测试与验证
 
-最近一次验证结果（2026-11-20，提交 `220b26c`／`64e4a63`；逐项证据见 [TASKS.md](TASKS.md) T38–T43 与 `docs/evidence/`）：
+最近一次验证结果（测试数为 2026-11-21 含 T45–T48 的工作树，其余行为 2026-11-20 提交 `220b26c`／`64e4a63`；逐项证据见 [TASKS.md](TASKS.md) T38–T48 与 `docs/evidence/`）：
 
 | 验证项 | 结果 |
 | --- | ---: |
-| Java 21 Maven 全量测试 | 336 passed，0 failures，0 errors，0 skipped |
-| 前端 `npm run verify`（TypeScript、ESLint、Vitest、Vite build） | 通过；Vitest 54 passed |
-| 全新检出 + 空 Maven 缓存：在线 test/package、JAR 内含 React 页面、新库初始化、loopback 健康检查、离线复跑 | macOS 本机通过；GitHub Actions Ubuntu / Windows / macOS（Maven Wrapper 3.9.9）与 Ubuntu（Maven 3.6.3）四作业全绿 |
+| Java 21 Maven 全量测试 | 351 passed，0 failures，0 errors，0 skipped |
+| 前端 `npm run verify`（TypeScript、ESLint、Vitest、Vite build） | 通过；Vitest 61 passed |
+| 全新检出 + 空 Maven 缓存：在线 test/package、JAR 内含 React 页面、新库初始化、loopback 健康检查、离线复跑 | macOS 本机通过；GitHub Actions Ubuntu / Windows / macOS（Maven Wrapper 3.9.9）与 Ubuntu（Maven 3.6.3）四作业全绿（基于 `64e4a63`，当时 336 项；T45–T48 尚未提交，未经此项覆盖） |
 | 故障注入（真实 JAR + 本机桩模型：超时、429、畸形回复、工具错误熔断、保存后进程被杀、流式中途断开） | 8 个场景 40 项通过 |
 | 真实模型 `qwen3.7-flash`：受控保存对比、30 轮长对话、大工具结果分页取回 | 程序行为项全部通过（模型行为项单列，见 T37–T39） |
 
@@ -312,8 +312,8 @@ python3 scripts/large_result_check.py --jar target/harness-0.0.1-SNAPSHOT.jar   
 
 - 后端核心流程、任务记忆、受控写入、演示 API 与本地 UI 已实现。
 - React 是唯一 UI；真实浏览器内的查询、受控保存、跨轮补充与 `verified=true` 回读已通过。
-- 复赛范围（`docs/FINAL_ROUND_CONTRACT.md`）的 T28–T43 均已完成并推送；JDK 21 全量 336 项、前端 Vitest 54 项通过，三平台全新检出构建与故障注入均有证据（见上表）。队友接手请先阅读 [开发交接说明](docs/agent-handoff.md)，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
-- **仍未完成：** ≤5 分钟演示视频、最终作品压缩包（需人工按 RELEASE_CHECKLIST 白名单整理并逐项审阅）。模型型号由配置决定，本项目统一 `qwen3.7-flash`。
+- 复赛范围（`docs/FINAL_ROUND_CONTRACT.md`）的 T28–T43 均已完成并推送；T45–T48（复赛视频提到的四项可选扩展：回复语气、陌生 Excel 列对应、批量保存与复核、扫描件识别与票面金额确认）已实现并通过自动化测试，尚未提交；真实模型 `qwen3.7-flash` 下扫描件识别与批量保存已通过（`docs/evidence/T47_T48_REAL_MODEL_20261121/`），qwen3.8 与浏览器验证未做。JDK 21 全量 351 项、前端 Vitest 61 项通过，三平台全新检出构建与故障注入均有证据（见上表）。队友接手请先阅读 [开发交接说明](docs/agent-handoff.md)，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
+- **仍未完成：** ≤5 分钟演示视频、最终作品压缩包（需人工按 RELEASE_CHECKLIST 白名单整理并逐项审阅）。模型型号由配置决定：开发与已有真实模型验证用 `qwen3.7-flash`，最终比赛采用 `qwen3.8`（只改环境变量）。
 - 当前系统用于比赛演示与技术验证，不应视为具备生产环境所需的认证、部署、审计防篡改和运维能力。
 
 ---

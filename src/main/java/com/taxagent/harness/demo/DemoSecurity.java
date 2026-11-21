@@ -34,7 +34,7 @@ public final class DemoSecurity extends OncePerRequestFilter {
     }
     @Override protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
             throws ServletException, IOException {
-        res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+        res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
         if (!req.getRequestURI().startsWith("/api/demo/")) {
             // Hashed assets may cache; the HTML entry must not, or an upgrade keeps serving stale JS.
             var path = req.getRequestURI();
@@ -49,7 +49,8 @@ public final class DemoSecurity extends OncePerRequestFilter {
                 || req.getHeader("X-Forwarded-Host") != null || "cross-site".equals(req.getHeader("Sec-Fetch-Site"))) {
             reject(res, "LOOPBACK_REQUIRED"); return;
         }
-        boolean upload = "POST".equals(req.getMethod()) && "/api/demo/files".equals(req.getRequestURI());
+        boolean upload = "POST".equals(req.getMethod())
+                && ("/api/demo/files".equals(req.getRequestURI()) || "/api/demo/files/scan".equals(req.getRequestURI()));
         if (upload && req.getContentLengthLong() < 0) { reject(res, "LENGTH_REQUIRED", 411); return; }
         if (req.getContentLengthLong() > (upload ? MAX_UPLOAD_BYTES : MAX_BODY_BYTES)) { reject(res, "REQUEST_TOO_LARGE", 413); return; }
         if (!rateAllows(req.getRemoteAddr())) { reject(res, "RATE_LIMITED", 429); return; }

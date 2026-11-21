@@ -1,0 +1,47 @@
+{
+  "check": "T48 scanned invoice read by the configured LLM_VISION_* profile",
+  "syntheticInput": {
+    "kind": "image-only PDF (no text layer), 66207 bytes",
+    "content": "fictional invoice F9001, 2026-10-20, seller 合成供应商甲公司, amount 1234.56, words 壹仟贰佰叁拾肆元伍角陆分"
+  },
+  "visionProfile": {
+    "model": "qwen3.7-flash",
+    "protocol": "anthropic-messages",
+    "endpointHost": "dashscope.aliyuncs.com"
+  },
+  "draft": {
+    "status": "DRAFT",
+    "errorCode": null,
+    "fields": {
+      "invoice_id": "F9001",
+      "invoice_date": "2026-10-20",
+      "seller": "合成供应商甲公司",
+      "item": "办公用品 (合成)",
+      "amount": "1234.56",
+      "amount_in_words": "壹仟贰佰叁拾肆元伍角陆分",
+      "remarks": "合成数据，仅用于识别测试"
+    },
+    "unreadable": [],
+    "checks": [
+      "AMOUNT_WORDS_MATCH"
+    ]
+  },
+  "http": 200,
+  "seconds": 4.9,
+  "confirmation": {
+    "invoiceId": "F9001",
+    "invoiceDate": "2026-10-20",
+    "seller": "合成供应商甲公司",
+    "item": "办公用品 (合成)",
+    "amount": "1234.56",
+    "remarks": "合成数据，仅用于识别测试",
+    "amountConfirmation": "1234.56",
+    "confirmed": true
+  },
+  "import": {
+    "status": "IMPORTED",
+    "invoiceId": "F9001",
+    "amountCents": 123456,
+    "differences": []
+  }
+}

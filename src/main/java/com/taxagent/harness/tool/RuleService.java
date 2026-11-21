@@ -194,6 +194,11 @@ public final class RuleService {
         return candidates.getFirst();
     }
 
+    /** T47: whether the purpose rule in force on this date requires a purpose for an invoice of this amount. */
+    static boolean purposeRequired(Connection c, String enterprise, LocalDate date, long amountCents) throws SQLException {
+        return requirement(purposeRule(c, enterprise, date).definition().content()).requires(amountCents);
+    }
+
     /** Writes need an executable purpose rule in force on the invoice date; no month is special-cased. */
     static void requireSupportedWriteRules(Connection c, String enterprise, LocalDate date) throws SQLException {
         requirement(purposeRule(c, enterprise, date).definition().content());

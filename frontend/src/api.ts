@@ -69,20 +69,43 @@ export interface Exchange { call: {id: string; name: string; arguments: string};
 export interface Result { status: 'FINISHED' | 'NEEDS_INPUT' | 'ERROR'; text: string; errorCode: string | null; history: Exchange[] }
 export interface Verification { key: {enterpriseId: string; invoiceId: string}; purpose: string; remarks: string; verified: boolean }
 export interface PromptTrace { systemPrompt: string; userMessage: string; tools: {name: string; parameters: unknown}[]; historySize: number }
-export interface TurnView { turn: {task: Task; result: Result} | null; verification: Verification | null; errorCode: string | null; message: string; operationId: string | null; modelInput?: string | null; promptTrace?: PromptTrace | null }
+// T47: an approved batch's verified read-back plus the program's review list. Envelope fields are camelCase.
+export interface ReviewItem { key: {enterpriseId: string; invoiceId: string}; reasons: string[] }
+export interface BatchResult { results: Verification[]; verified: boolean; review: ReviewItem[]; note: string }
+export interface TurnView { turn: {task: Task; result: Result} | null; verification: Verification | null; errorCode: string | null; message: string; operationId: string | null; modelInput?: string | null; promptTrace?: PromptTrace | null; batch?: BatchResult | null }
 export interface ToolProgress { phase: 'tool_start' | 'tool_result'; callId: string; name: string; durationMs: number; outcome: string }
-export interface Approval { operationId: string; invoiceId: string; changes: Partial<Record<'purpose' | 'remarks', string>>; confirmed: true }
+export type Changes = Partial<Record<'purpose' | 'remarks', string>>
+/** A single save sets invoiceId and changes; a batch (T47) sets items, each with its own operationId. */
+export interface BatchEntry { operationId: string; invoiceId: string; changes: Changes }
+export interface Approval { operationId: string; invoiceId?: string; changes?: Changes; items?: BatchEntry[]; confirmed: true }
+export const MAX_BATCH = 20
+export const REVIEW_REASON: Record<string, string> = {
+  OVERWROTE_PURPOSE: '覆盖了原有用途', OVERWROTE_REMARKS: '覆盖了原有备注',
+  CLEARED_PURPOSE: '用途被清空', CLEARED_REMARKS: '备注被清空',
+  PURPOSE_STILL_REQUIRED: '按当前规则仍须填写用途', RULE_NOT_CHECKABLE: '当前规则无法判断，需人工核对',
+}
+/** T47: only a batch whose every invoice came back verified, in the approved order and count, releases the lock. */
+export function verifiedBatchResult(result: TurnView, operationId: string, items: string[]): boolean {
+  const batch = result.batch
+  return result.operationId === operationId && !!batch && batch.verified === true
+    && Array.isArray(batch.results) && batch.results.length === items.length && batch.results.every(r => r?.verified === true)
+}
 export interface OperationVerification { operationId: string; status: 'VERIFIED' | 'NOT_FOUND' | 'DIVERGED'; verification: Verification | null }
 export function canVerifyOperation(operation: {id: string; taskId: string} | null): boolean {
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
   return !!operation && uuid.test(operation.id) && uuid.test(operation.taskId)
 }
 /** Shared by the React manual action and tests; clearing storage must succeed before unlocking. */
-export async function verifyPendingOperation(api: Pick<DemoApi, 'verify'>, operation: {id: string; taskId: string}, clear: () => void) {
+export async function verifyPendingOperation(api: Pick<DemoApi, 'verify'>, operation: {id: string; taskId: string; items?: string[]}, clear: () => void) {
   if (!canVerifyOperation(operation)) throw new ApiError('INVALID_RESPONSE')
-  const result = await api.verify(operation.taskId, operation.id)
-  if (result?.operationId !== operation.id || result?.status !== 'VERIFIED' || result?.verification?.verified !== true)
-    throw new Error('写入仍未核验；保留锁定，请人工核查。NOT_FOUND 不表示可以重试。')
+  // T47: a batch is verified per invoice; the lock stays unless every one of them is VERIFIED.
+  const ids = operation.items?.length ? operation.items : [operation.id]
+  if (operation.items?.length && !operation.items.every(id => canVerifyOperation({id, taskId: operation.taskId}))) throw new ApiError('INVALID_RESPONSE')
+  for (const id of ids) {
+    const result = await api.verify(operation.taskId, id)
+    if (result?.operationId !== id || result?.status !== 'VERIFIED' || result?.verification?.verified !== true)
+      throw new Error('写入仍未核验；保留锁定，请人工核查。NOT_FOUND 不表示可以重试。')
+  }
   clear()
 }
 export interface AuditEvent { id: number; requestId: string; taskId: string | null; tool: string | null; callId: string | null; month: string | null; invoiceId: string | null; fields: string | null; operationId: string | null; outcome: string; errorCode: string | null; verified: boolean; time: string }
@@ -91,7 +114,48 @@ export interface Invoice { key: {enterprise_id: string; invoice_id: string}; inv
 // Mirrors FileService (T29). Envelope fields are camelCase.
 export interface StoredFile { id: string; enterpriseId: string; name: string; version: number; sha256: string; kind: 'XLSX' | 'XLS' | 'DOCX' | 'PDF'; sizeBytes: number; uploadedBy: string; uploadedAt: string; knowledgeEnabled: boolean; latest: boolean }
 export interface RowIssue { sheet: string | null; row: number; recordId: string | null; reason: string }
-export interface UploadResult { status: 'IMPORTED' | 'DUPLICATE' | 'REJECTED'; file: StoredFile | null; invoicesImported: number; bankEntriesImported: number; conflicts: RowIssue[]; skipped: RowIssue[]; errors: RowIssue[]; chunks: number }
+// T46: a sheet that looks like a table but was not imported; suggested is a hint, never applied without the accountant.
+export interface TableCandidate { sheet: string; headerRow: number; headers: string[]; samples: string[][]; suggestedKind: 'INVOICE' | 'BANK'; suggested: Record<string, number>; reason: 'UNRECOGNIZED_HEADER' | 'MISSING_COLUMNS' }
+export interface SheetMapping { sheet: string; kind: 'INVOICE' | 'BANK'; headerRow: number; columns: Record<string, number> }
+export interface UploadResult { status: 'IMPORTED' | 'DUPLICATE' | 'REJECTED'; file: StoredFile | null; invoicesImported: number; bankEntriesImported: number; conflicts: RowIssue[]; skipped: RowIssue[]; errors: RowIssue[]; chunks: number; tables?: TableCandidate[] }
+export const MAPPING_FIELDS: Record<'INVOICE' | 'BANK', {field: string; label: string; required: boolean}[]> = {
+  INVOICE: [{field:'ID',label:'发票编号',required:true},{field:'DATE',label:'开票日期',required:true},{field:'SELLER',label:'销售方名称',required:true},
+    {field:'ITEM',label:'项目名称',required:true},{field:'AMOUNT',label:'价税合计（元）',required:true},{field:'PURPOSE',label:'用途',required:false},
+    {field:'REMARKS',label:'备注',required:false},{field:'ENTERPRISE',label:'企业编号',required:false}],
+  BANK: [{field:'ID',label:'流水编号',required:true},{field:'DATE',label:'交易日期',required:true},{field:'DIRECTION',label:'收支方向',required:true},
+    {field:'AMOUNT',label:'金额（元）',required:true},{field:'COUNTERPARTY',label:'对方名称',required:true},{field:'REMARKS',label:'备注',required:false},
+    {field:'ENTERPRISE',label:'企业编号',required:false}],
+}
+/** Client copy of the server's mapping checks: every required field once, no column used twice. */
+export function mappingProblem(kind: 'INVOICE' | 'BANK', columns: Record<string, number>): string | null {
+  const missing = MAPPING_FIELDS[kind].filter(f => f.required && columns[f.field] === undefined).map(f => f.label)
+  if (missing.length) return `还需要指定：${missing.join('、')}。`
+  const used = Object.values(columns)
+  if (new Set(used).size !== used.length) return '同一列不能对应两个字段。'
+  return null
+}
+// T48: scanned invoices. A model reading is only a draft; the invoice exists after the accountant confirms it.
+export interface ScanDraft { status: 'DRAFT' | 'MANUAL'; errorCode: string | null; draftId: string; file: StoredFile; fields: Record<string, string>; unreadable: string[]; checks: string[]; pageImage: string }
+export interface ScanConfirmation { invoiceId: string; invoiceDate: string; seller: string; item: string; amount: string; remarks: string; amountConfirmation: string; confirmed: true }
+export interface ScanImport { status: 'IMPORTED' | 'CONFLICT'; file: StoredFile; invoiceId: string; amountCents: number; differences: string[] }
+export const SCAN_CHECK: Record<string, string> = {
+  AMOUNT_WORDS_MATCH: '大写金额与小写金额一致', AMOUNT_WORDS_MISMATCH: '大写金额与小写金额不一致，请对照票面核实',
+  AMOUNT_WORDS_UNREADABLE: '未能读出大写金额，请对照票面核实金额', AMOUNT_INVALID: '识别出的金额不是有效数字',
+  DATE_INVALID: '识别出的日期无法确认', EXISTING_INVOICE: '系统中已有同编号发票，确认后不会覆盖',
+}
+/** "1,234.5" → 123450; NaN unless a plain amount with at most two decimals (the server applies the same rule). */
+export function amountCents(value: string): number {
+  const text = value.trim().replace(/,/g, '')
+  return /^\d+(\.\d{1,2})?$/.test(text) ? Math.round(Number(text) * 100) : NaN
+}
+export function scanProblem(c: Omit<ScanConfirmation, 'confirmed'>): string | null {
+  if (![c.invoiceId, c.invoiceDate, c.seller, c.item, c.amount].every(v => v.trim())) return '发票编号、开票日期、销售方、项目和价税合计都必须填写。'
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(c.invoiceId.trim())) return '发票编号只能包含字母、数字、- 和 _。'
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(c.invoiceDate.trim())) return '开票日期请写成 YYYY-MM-DD。'
+  if (!(amountCents(c.amount) > 0)) return '价税合计须为正数，最多两位小数。'
+  if (amountCents(c.amount) !== amountCents(c.amountConfirmation)) return '两次输入的价税合计不一致。'
+  return null
+}
 export interface FileChunk { seq: number; location: string; text: string }
 export interface FileDetail { file: StoredFile; chunks: FileChunk[] }
 
@@ -113,7 +177,8 @@ const issueReasons: Record<string, string> = {
   MISSING_REQUIRED_FIELD: '缺少必填字段',
   MISSING_ENTERPRISE: '缺少企业编号',
   DUPLICATE_IN_FILE: '文件内编号重复',
-  NOT_TEXT_PDF: '不是文字型 PDF（扫描件无法读取文字）',
+  NOT_TEXT_PDF: '不是文字型 PDF（扫描件无法读取文字；发票扫描件可用下方“识别扫描件发票”）',
+  MAPPED_SHEET_NOT_FOUND: '指定列对应的工作表不存在',
   ENCRYPTED_PDF: 'PDF 已加密',
   NO_TEXT: '文档没有可读取的文字',
   TOO_MANY_SEGMENTS: '内容过多，超出分段上限',
@@ -135,6 +200,7 @@ export function describeUpload(result: UploadResult): string {
   if (result.conflicts.length) parts.push(`${result.conflicts.length} 条与已有记录同编号，未覆盖`)
   if (result.skipped.length) parts.push(`${result.skipped.length} 条属于其他企业，未导入`)
   parts.push(`共 ${result.chunks} 个可引用文本段`)
+  if (result.tables?.length) parts.push(`另有 ${result.tables.length} 个表格未能识别列，可在下方指定列对应后导入`)
   return parts.join('；') + '。'
 }
 
@@ -148,6 +214,7 @@ export function provenNotExecuted(result: TurnView, operationId: string): boolea
   return result.operationId === operationId
     && result.errorCode === 'WRITE_NOT_EXECUTED'
     && result.verification === null
+    && !result.batch
 }
 
 export class ApiError extends Error {
@@ -400,16 +467,28 @@ export class DemoApi {
   deleteMemory(scope: MemoryScope, name: string) { return this.request<Memory[]>(`/memories/${scope}/${encodeURIComponent(name)}`, 'DELETE') }
   verify(taskId: string, operationId: string) { return this.request<OperationVerification>(`/tasks/${encodeURIComponent(taskId)}/operations/${encodeURIComponent(operationId)}/verify`, 'POST') }
   audit() { return this.request<AuditEvent[]>('/audit') }
-  /** Multipart upload; the browser sets the boundary and length. Never retried automatically. */
-  async upload(file: File): Promise<UploadResult> {
+  /** Multipart upload; the browser sets the boundary and length. Never retried automatically.
+   * T46: mappings, when given, are the accountant's explicit column assignment for the named sheets. */
+  async upload(file: File, mappings?: SheetMapping[]): Promise<UploadResult> {
     const form = new FormData()
     form.append('file', file, file.name)
+    if (mappings?.length) form.append('mapping', JSON.stringify(mappings))
+    return this.multipart<UploadResult>('/api/demo/files', form)
+  }
+  /** T48: stores the scanned PDF and returns the model's draft (or a manual one); nothing is imported yet. */
+  scan(file: File): Promise<ScanDraft> {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    return this.multipart<ScanDraft>('/api/demo/files/scan', form)
+  }
+  confirmScan(draftId: string, confirmation: ScanConfirmation) { return this.request<ScanImport>(`/files/scan/${encodeURIComponent(draftId)}/confirm`, 'POST', confirmation) }
+  private async multipart<T>(url: string, form: FormData): Promise<T> {
     let response: Response
     try {
-      response = await fetch('/api/demo/files', {method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      response = await fetch(url, {method: 'POST', credentials: 'same-origin', cache: 'no-store',
         headers: {'X-CSRF-Token': this.csrf}, body: form})
     } catch { throw new ApiError('NETWORK_UNKNOWN') }
-    let data: UploadResult & {errorCode?: string}
+    let data: T & {errorCode?: string}
     try { data = await response.json() } catch { throw new ApiError('INVALID_RESPONSE', response.status) }
     if (!response.ok) throw new ApiError(data.errorCode ?? `HTTP_${response.status}`, response.status)
     return data

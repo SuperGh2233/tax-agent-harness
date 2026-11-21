@@ -512,7 +512,7 @@ class DemoApiTest {
         assertThat(denied.getFirst().path("errorCode").asText()).isEqualTo("NOT_FOUND");
     }
     @Test void strictCspCoversPageResourcesAndApiIncludingRejections() throws Exception {
-        String policy="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+        String policy="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
         for (String path:List.of("/","/react-app/","/api/demo/session"))
             mvc.perform(get(path)).andExpect(header().string("Content-Security-Policy",policy));
         mvc.perform(get("/api/demo/session").header("Origin","https://evil.example"))

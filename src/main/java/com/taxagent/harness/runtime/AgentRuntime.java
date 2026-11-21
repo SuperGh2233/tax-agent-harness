@@ -52,8 +52,32 @@ public final class AgentRuntime {
     static final int MAX_MODEL_RESULT_CHARS = 6000, MODEL_ROWS = 20;
     /** T36: this many failing tool calls in a row end the turn with TOOL_ERRORS_REPEATED. */
     static final int MAX_CONSECUTIVE_TOOL_ERRORS = 3;
+    /**
+     * T47: a batch approval carries its items and batch authorization; operationId is then the batch id and update
+     * the first item (used only for the enterprise check). The model still only decides whether to save.
+     */
     public record ApprovedWrite(String taskId, String operationId, ToolContract.InvoiceUpdate update,
-                                InvoiceWriteService.Authorization authorization) {}
+                                InvoiceWriteService.Authorization authorization,
+                                List<InvoiceWriteService.BatchItem> items,
+                                InvoiceWriteService.BatchAuthorization batchAuthorization) {
+        public ApprovedWrite {
+            items = items == null ? List.of() : List.copyOf(items);
+            if (!items.isEmpty() && (batchAuthorization == null || !items.getFirst().update().equals(update)))
+                throw new IllegalArgumentException("Batch approval needs its authorization and first item");
+        }
+        public ApprovedWrite(String taskId, String operationId, ToolContract.InvoiceUpdate update,
+                             InvoiceWriteService.Authorization authorization) {
+            this(taskId, operationId, update, authorization, List.of(), null);
+        }
+        public boolean isBatch() { return !items.isEmpty(); }
+        /** What the model is told it may save this turn. */
+        String describe() {
+            if (!isBatch()) return String.valueOf(update);
+            var lines = new StringBuilder("批量保存 " + items.size() + " 张发票（同一事务：全部核验成功或全部不改）：");
+            for (var item : items) lines.append("\n- ").append(item.update());
+            return lines.toString();
+        }
+    }
     public AgentRuntime(LlmClient model, ReadOnlyFinanceTools finance, RuleService rules, Limits limits) {
         this(model, finance, rules, limits, null);
     }
@@ -133,7 +157,7 @@ public final class AgentRuntime {
                 + "金额、用途、规则必须重新调用工具查询，用户本轮更正优先；task.awaitingSave 是用户已声明但尚未经核验保存的"
                 + "发票字段，不得说成已保存，只能提示用户在审核页逐项确认保存或更正）：\n" + memoryJson
                 + "\n当前企业：" + enterprise + "\n本轮可信保存请求（仍须后端精确校验）："
-                + (approval == null ? "无；补充信息不是保存授权" : approval.update())
+                + (approval == null ? "无；补充信息不是保存授权" : approval.describe())
                 + "\n本轮用户消息：\n" + message, enterprise, approval, traceSink, progressSink);
     }
     private Result runInternal(PermissionGuard.Session session, String message, String enterprise, ApprovedWrite approval,
@@ -223,8 +247,11 @@ public final class AgentRuntime {
                         if ("update_invoice".equals(call.name())) writeDispatched = true;
                         var recall = activeRecall; var turnSoFar = List.copyOf(history);
                         Callable<Object> action = () -> switch (call.name()) {
-                            case "update_invoice" -> writer.execute(session, approval.taskId(), approval.operationId(),
-                                    approval.update(), approval.authorization());
+                            case "update_invoice" -> approval.isBatch()
+                                    ? writer.executeBatch(session, approval.taskId(), approval.operationId(),
+                                            approval.items(), approval.batchAuthorization())
+                                    : writer.execute(session, approval.taskId(), approval.operationId(),
+                                            approval.update(), approval.authorization());
                             case "query_invoices" -> finance.queryInvoices(session, (ToolContract.Query) input);
                             case "query_bank_entries" -> finance.queryBankEntries(session, (ToolContract.Query) input);
                             case "check_invoice_purpose" -> rules.checkInvoicePurpose(session, (ToolContract.PurposeCheck) input);
@@ -239,10 +266,8 @@ public final class AgentRuntime {
                         // Only this turn's server execution can supply evidence. execute above binds
                         // the exact update and operationId to the trusted one-turn authorization.
                         if (call.name().equals("update_invoice") && approval != null
-                                && data instanceof ToolContract.UpdateResult saved && saved.verified()
-                                && approval.update().key().equals(saved.key())
-                                && approval.update().changes().entrySet().stream().allMatch(e ->
-                                    e.getValue().equals(e.getKey().equals("purpose") ? saved.purpose() : saved.remarks()))) {
+                                && (!approval.isBatch() && data instanceof ToolContract.UpdateResult saved && matches(approval.update(), saved)
+                                    || approval.isBatch() && data instanceof ToolContract.BatchUpdateResult batch && matches(approval.items(), batch))) {
                             verifiedWrite = true;
                             // The read-back proves the approved save; an earlier failed call this turn (for example
                             // malformed save arguments the model then corrected) no longer decides the outcome.
@@ -314,9 +339,21 @@ public final class AgentRuntime {
             try { submitted = ToolContract.decode(arguments, ToolContract.InvoiceUpdate.class); }
             catch (DomainException e) { throw new DomainException(ErrorCode.INVALID_ARGUMENT, hint); }
         }
-        if (approval == null || submitted != null && !approval.update().equals(submitted))
+        if (approval == null || submitted != null && (approval.isBatch() || !approval.update().equals(submitted)))
             throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, hint);
         return approval.update();
+    }
+    /** A verified read-back of exactly the approved key and values. */
+    static boolean matches(ToolContract.InvoiceUpdate approved, ToolContract.UpdateResult saved) {
+        return saved != null && saved.verified() && approved.key().equals(saved.key())
+                && approved.changes().entrySet().stream().allMatch(e ->
+                    e.getValue().equals(e.getKey().equals("purpose") ? saved.purpose() : saved.remarks()));
+    }
+    /** T47: a batch counts only when every approved invoice, in order, has its own verified matching read-back. */
+    static boolean matches(List<InvoiceWriteService.BatchItem> items, ToolContract.BatchUpdateResult batch) {
+        if (batch == null || !batch.verified() || batch.results().size() != items.size()) return false;
+        for (int i = 0; i < items.size(); i++) if (!matches(items.get(i).update(), batch.results().get(i))) return false;
+        return true;
     }
     /** What the model is told about the save call, in its schema and when it gets the arguments wrong. */
     public static final String SAVE_ARGUMENTS = "update_invoice 不接受任何参数：保存内容就是用户本轮在审核页批准的修改。"

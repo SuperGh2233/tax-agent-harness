@@ -23,6 +23,21 @@ public final class InvoiceWriteService {
             this.session = session; this.taskId = taskId; this.operationId = operationId; this.update = update;
         }
     }
+    /** T47: most invoices one batch approval may cover. */
+    public static final int MAX_BATCH = 20;
+    /** T47: one invoice of a batch approval; each keeps its own ledger operation id, so verify works per invoice. */
+    public record BatchItem(String operationId, InvoiceUpdate update) {}
+    /** T47: one-time trusted approval of an exact batch; consumed on first use like {@link Authorization}. */
+    public static final class BatchAuthorization {
+        private final Session session;
+        private final String taskId;
+        private final String batchId;
+        private final List<BatchItem> items;
+        private final AtomicBoolean consumed = new AtomicBoolean();
+        private BatchAuthorization(Session session, String taskId, String batchId, List<BatchItem> items) {
+            this.session = session; this.taskId = taskId; this.batchId = batchId; this.items = items;
+        }
+    }
     private final String url;
     private final PermissionGuard guard = new PermissionGuard();
 
@@ -98,6 +113,145 @@ public final class InvoiceWriteService {
         });
     }
 
+    /**
+     * T47: the trusted UI's batch approval, from the user's explicit per-invoice confirmation. Same intent rules as a
+     * single save; every invoice is validated before the approval exists.
+     */
+    public static BatchAuthorization authorizeExplicitBatch(Session session, String taskId, String batchId,
+                                                            List<BatchItem> items, Intent intent) {
+        text(taskId);
+        validateBatch(session, batchId, items);
+        if (intent == null || intent == Intent.EXPLANATION)
+            throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Explicit immediate modification required");
+        if (intent != Intent.CLEAR_NOW && items.stream().anyMatch(i -> i.update().changes().values().stream().anyMatch(String::isBlank)))
+            throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Explicit clearing request required");
+        return new BatchAuthorization(session, taskId, batchId, List.copyOf(items));
+    }
+    /** Fences that hold before anything is read or written: size, distinct ids and invoices, one enterprise. */
+    private static void validateBatch(Session session, String batchId, List<BatchItem> items) {
+        text(batchId);
+        if (items == null || items.size() < 2 || items.size() > MAX_BATCH)
+            throw ToolContract.invalid("A batch holds 2 to " + MAX_BATCH + " invoices");
+        var operations = new HashSet<String>(); var keys = new HashSet<InvoiceKey>(); String enterprise = null;
+        for (var item : items) {
+            if (item == null) throw ToolContract.invalid("Batch item required");
+            validate(session, item.operationId(), item.update());
+            if (item.operationId().equals(batchId) || !operations.add(item.operationId()))
+                throw ToolContract.invalid("Each invoice in a batch needs its own operation id");
+            if (!keys.add(item.update().key())) throw ToolContract.invalid("An invoice appears twice in the batch");
+            if (enterprise == null) enterprise = item.update().key().enterpriseId();
+            else if (!enterprise.equals(item.update().key().enterpriseId()))
+                throw new DomainException(ErrorCode.PERMISSION_DENIED, "A batch covers one enterprise");
+        }
+    }
+
+    /**
+     * T47: the whole approved batch in one transaction. Every invoice is read and its rule checked before the first
+     * UPDATE, every one is read back after the last, and any failure rolls all of them back: the outcome is either
+     * every invoice verified or none changed. A batch already in the ledger is returned, never executed again.
+     * The review list is computed by the program, not the model.
+     */
+    public BatchUpdateResult executeBatch(Session session, String taskId, String batchId, List<BatchItem> items,
+                                          BatchAuthorization authorization) {
+        text(taskId);
+        validateBatch(session, batchId, items);
+        if (authorization == null || !authorization.session.equals(session) || !authorization.taskId.equals(taskId)
+                || !authorization.batchId.equals(batchId) || !authorization.items.equals(items))
+            throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Exact trusted authorization required");
+        if (!authorization.consumed.compareAndSet(false, true))
+            throw new DomainException(ErrorCode.CONFLICT, "Authorization consumed; query operation status");
+        return transaction(session, items.getFirst().update(), c -> {
+            var prior = priorBatch(c, session, taskId, items);
+            if (prior != null) return prior;
+            var before = new ArrayList<Invoice>();
+            for (var item : items) {
+                var key = item.update().key();
+                try {
+                    var old = read(c, key);
+                    RuleService.requireSupportedWriteRules(c, key.enterpriseId(), old.invoiceDate());
+                    before.add(old);
+                } catch (DomainException e) {
+                    throw new DomainException(e.code(), "发票 " + key.invoiceId() + "：" + e.getMessage() + "；整批未修改", e);
+                }
+            }
+            var expected = new ArrayList<Invoice>();
+            for (int i = 0; i < items.size(); i++) {
+                var item = items.get(i); var old = before.get(i);
+                String purpose = item.update().changes().getOrDefault("purpose", old.purpose());
+                String remarks = item.update().changes().getOrDefault("remarks", old.remarks());
+                if (!purpose.equals(old.purpose()) || !remarks.equals(old.remarks())) {
+                    try (var s = c.prepareStatement("UPDATE invoices SET purpose=?,remarks=? WHERE enterprise_id=? AND id=?")) {
+                        s.setString(1, purpose); s.setString(2, remarks); key(s, 3, item.update().key());
+                        if (s.executeUpdate() != 1) throw conflict();
+                    }
+                }
+                try (var s = c.prepareStatement("INSERT INTO invoice_operations(operation_id,user_id,enterprise_id,invoice_id,payload,purpose,remarks,task_id) VALUES (?,?,?,?,?,?,?,?)")) {
+                    s.setString(1, item.operationId()); s.setString(2, session.userId()); key(s, 3, item.update().key());
+                    s.setString(5, payload(item.update())); s.setString(6, purpose); s.setString(7, remarks);
+                    s.setString(8, taskId); s.executeUpdate();
+                }
+                expected.add(new Invoice(old.key(), old.invoiceDate(), old.seller(), old.item(), old.amountCents(), purpose, remarks));
+            }
+            // Read every invoice back after the last write, so a trigger or a later row cannot hide a difference.
+            var results = new ArrayList<UpdateResult>();
+            for (int i = 0; i < items.size(); i++) {
+                var saved = read(c, items.get(i).update().key());
+                if (!saved.equals(expected.get(i))) throw conflict();
+                results.add(result(saved));
+            }
+            return review(c, items, results, before);
+        });
+    }
+    /** All items already committed (same task, payload and current values): their results. None: null. Some: conflict. */
+    private BatchUpdateResult priorBatch(Connection c, Session session, String taskId, List<BatchItem> items) throws Exception {
+        var prior = new ArrayList<UpdateResult>();
+        for (var item : items) {
+            var recorded = recorded(c, session, taskId, item.operationId(), item.update());
+            if (recorded != null) prior.add(recorded);
+        }
+        if (prior.isEmpty()) return null;
+        if (prior.size() != items.size()) throw conflict();
+        return review(c, items, prior, null);
+    }
+    /** Deterministic review list; before is null for a batch replayed from the ledger (only rule checks then). */
+    private static BatchUpdateResult review(Connection c, List<BatchItem> items, List<UpdateResult> results, List<Invoice> before) throws Exception {
+        var review = new ArrayList<ReviewItem>();
+        for (int i = 0; i < items.size(); i++) {
+            var changes = items.get(i).update().changes(); var saved = results.get(i);
+            var reasons = new ArrayList<String>();
+            for (var field : List.of("purpose", "remarks")) {
+                if (!changes.containsKey(field)) continue;
+                String now = field.equals("purpose") ? saved.purpose() : saved.remarks();
+                if (now.isBlank()) reasons.add("CLEARED_" + field.toUpperCase(Locale.ROOT));
+                else if (before != null) {
+                    String old = field.equals("purpose") ? before.get(i).purpose() : before.get(i).remarks();
+                    if (!old.isBlank() && !old.equals(now)) reasons.add("OVERWROTE_" + field.toUpperCase(Locale.ROOT));
+                }
+            }
+            var invoice = readStatic(c, saved.key());
+            // A replayed batch may meet a rule that has since changed: say it cannot be checked, never guess.
+            try {
+                if (saved.purpose().isBlank()
+                        && RuleService.purposeRequired(c, saved.key().enterpriseId(), invoice.invoiceDate(), invoice.amountCents()))
+                    reasons.add("PURPOSE_STILL_REQUIRED");
+            } catch (DomainException e) { reasons.add("RULE_NOT_CHECKABLE"); }
+            if (!reasons.isEmpty()) review.add(new ReviewItem(saved.key(), reasons));
+        }
+        var note = "整批 " + items.size() + " 张发票已在同一事务内保存并逐张回读核验（verified=true）。"
+                + (review.isEmpty() ? "程序检查没有发现需要复核的发票。"
+                : "其中 " + review.size() + " 张需要复核，原因见 review（覆盖了原有值、被清空，或规则仍要求填写用途）。");
+        return new BatchUpdateResult(results, true, review, note);
+    }
+    /**
+     * T47: the read-only counterpart of recover for a batch: every item committed gives their results, none gives
+     * empty (never permission to retry), and a partial ledger is a conflict that needs a person.
+     */
+    public Optional<BatchUpdateResult> recoverBatch(Session session, String taskId, String batchId, List<BatchItem> items) {
+        text(taskId);
+        validateBatch(session, batchId, items);
+        return Optional.ofNullable(transaction(session, items.getFirst().update(), c -> priorBatch(c, session, taskId, items)));
+    }
+
     /** Required after timeout/unknown outcome. Empty means no committed operation observed, NOT permission to retry.
      * Never writes business data. Missing record requires investigation/new explicit authorization.
      */
@@ -159,7 +313,8 @@ public final class InvoiceWriteService {
             }
         } catch (DomainException e) { throw e; } catch (Exception e) { throw storage(e); }
     }
-    private Invoice read(Connection c, InvoiceKey key) throws SQLException {
+    private Invoice read(Connection c, InvoiceKey key) throws SQLException { return readStatic(c, key); }
+    private static Invoice readStatic(Connection c, InvoiceKey key) throws SQLException {
         try (var s = c.prepareStatement("SELECT * FROM invoices WHERE enterprise_id=? AND id=?")) {
             key(s, 1, key);
             try (var r = s.executeQuery()) {

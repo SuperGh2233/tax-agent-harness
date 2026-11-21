@@ -467,6 +467,23 @@ public final class TaskMemory {
                 var error = response.get("error");
                 var data = response.get("data");
                 if (error != null && !error.isNull() || data == null || !data.path("verified").asBoolean(false)) continue;
+                if (approval.isBatch()) {
+                    // T47: all or nothing, as the batch itself: every approved invoice needs its own matching read-back.
+                    var results = data.path("results");
+                    if (!results.isArray() || results.size() != approval.items().size()) continue;
+                    var batch = new HashMap<String, String>();
+                    boolean all = true;
+                    for (int i = 0; i < approval.items().size() && all; i++) {
+                        var item = approval.items().get(i).update(); var saved = results.get(i);
+                        all = saved.path("verified").asBoolean(false)
+                                && item.key().enterpriseId().equals(saved.path("key").path("enterprise_id").asText())
+                                && item.key().invoiceId().equals(saved.path("key").path("invoice_id").asText())
+                                && item.changes().entrySet().stream().allMatch(change -> change.getValue().equals(saved.path(change.getKey()).asText(null)));
+                        if (all) item.changes().forEach((field, value) -> batch.put(item.key().invoiceId() + "." + field, value));
+                    }
+                    if (all) resolved.putAll(batch);
+                    continue;
+                }
                 var key = data.path("key");
                 if (!approval.update().key().enterpriseId().equals(key.path("enterprise_id").asText())
                         || !approval.update().key().invoiceId().equals(key.path("invoice_id").asText())) continue;

@@ -1,0 +1,79 @@
+{
+  "check": "T47 batch save with LLM_MODEL configured",
+  "llmModel": "qwen3.7-flash",
+  "invoices": [
+    "F002",
+    "F003"
+  ],
+  "query": {
+    "http": 200,
+    "seconds": 11.7,
+    "errorCode": null,
+    "tools": [
+      "check_invoice_purpose",
+      "query_invoices"
+    ]
+  },
+  "save": {
+    "http": 200,
+    "seconds": 11.6,
+    "errorCode": null,
+    "batch": {
+      "results": [
+        {
+          "key": {
+            "enterpriseId": "C001",
+            "invoiceId": "F002"
+          },
+          "purpose": "办公用品（合成）",
+          "remarks": "",
+          "verified": true
+        },
+        {
+          "key": {
+            "enterpriseId": "C001",
+            "invoiceId": "F003"
+          },
+          "purpose": "办公用品（合成）",
+          "remarks": "",
+          "verified": true
+        }
+      ],
+      "verified": true,
+      "review": [],
+      "note": "整批 2 张发票已在同一事务内保存并逐张回读核验（verified=true）。程序检查没有发现需要复核的发票。"
+    },
+    "message": "批量 2 张发票在同一事务内保存，逐张 verified=true 且数据库回读已核验；程序检查无需复核",
+    "tools": [
+      "update_invoice"
+    ]
+  },
+  "databaseAfter": [
+    [
+      "F002",
+      "办公用品（合成）"
+    ],
+    [
+      "F003",
+      "办公用品（合成）"
+    ]
+  ],
+  "auditRowsPerInvoice": [
+    {
+      "tool": "update_invoice",
+      "invoiceId": "F002",
+      "fields": "purpose",
+      "operationId": "23ec9106-70a5-4951-adb3-95b9e19e83ed",
+      "verified": 1,
+      "outcome": "TOOL_RESULT"
+    },
+    {
+      "tool": "update_invoice",
+      "invoiceId": "F003",
+      "fields": "purpose",
+      "operationId": "c8846ca2-581d-4103-90ff-4daa63e52c67",
+      "verified": 1,
+      "outcome": "TOOL_RESULT"
+    }
+  ]
+}

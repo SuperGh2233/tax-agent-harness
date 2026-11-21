@@ -37,6 +37,8 @@ public final class DemoController {
     private final Path database;
     private final ModelProfiles profiles;
     private final DemoAudit audit;
+    /** T48: reads scanned invoices; NOT_CONFIGURED unless LLM_VISION_* is set. */
+    private final FileService.ScanReader scanReader;
     // Presentation transport only; each turn still runs under the same mutation lock and audit rules.
     private final ExecutorService streamExecutor = Executors.newCachedThreadPool(task -> {
         var thread = new Thread(task, "turn-stream"); thread.setDaemon(true); return thread;
@@ -49,14 +51,22 @@ public final class DemoController {
     public record AgentToggle(Boolean enabled) {}
     /** Task context plus the agent the task is bound to (its current version, even if since disabled). */
     public record LoadView(TaskMemory.Task task, Map<String, TaskMemory.Input> preferences, AgentDirectory.Agent agent) {}
-    public record Approval(String operationId, String invoiceId, Map<String,String> changes, boolean confirmed) {}
+    /** T47: one invoice of a batch approval, with its own operationId (the batch's own id is Approval.operationId). */
+    public record BatchEntry(String operationId, String invoiceId, Map<String,String> changes) {}
+    /** A single save sets invoiceId and changes; a batch (T47) sets items instead and leaves both null. */
+    public record Approval(String operationId, String invoiceId, Map<String,String> changes, boolean confirmed, List<BatchEntry> items) {}
     public record Turn(String message, Approval approval, String requestId) {}
     public record Supplement(long version, Map<String,TaskMemory.Input> statements) {}
     public record Preference(String name, String value, String userRequest) {}
     public record MemoryInput(TaskMemory.Scope scope, String name, String value, String userRequest, String expiresOn) {}
     public record Cancel(Long version, Boolean confirmed) {}
+    /** batch (T47): the verified read-back and program review of an approved batch; verification stays null then. */
     public record TurnView(TaskMemory.Turn turn, UpdateResult verification, String errorCode, String message,
-                           String operationId, String modelInput, AgentRuntime.Trace promptTrace) {
+                           String operationId, String modelInput, AgentRuntime.Trace promptTrace, BatchUpdateResult batch) {
+        public TurnView(TaskMemory.Turn turn, UpdateResult verification, String errorCode, String message,
+                        String operationId, String modelInput, AgentRuntime.Trace promptTrace) {
+            this(turn, verification, errorCode, message, operationId, modelInput, promptTrace, null);
+        }
         public TurnView(TaskMemory.Turn turn, UpdateResult verification, String errorCode, String message,
                         String operationId) {
             this(turn, verification, errorCode, message, operationId, null, null);
@@ -67,9 +77,12 @@ public final class DemoController {
         }
     }
     @org.springframework.beans.factory.annotation.Autowired
-    public DemoController(@Value("${taxagent.database:data/harness.db}") String database, ModelProfiles profiles) {
+    public DemoController(@Value("${taxagent.database:data/harness.db}") String database, ModelProfiles profiles,
+                          FileService.ScanReader scanReader) {
         this.database = Path.of(database); this.profiles = profiles; audit = new DemoAudit(this.database);
+        this.scanReader = Objects.requireNonNull(scanReader);
     }
+    public DemoController(String database, ModelProfiles profiles) { this(database, profiles, VisionClient.NOT_CONFIGURED); }
     /** One client as the default profile (tests and single-model setups). */
     public DemoController(String database, LlmClient model) { this(database, ModelProfiles.single(model)); }
     private static <T> T decode(JsonNode body, Class<T> type) {
@@ -81,6 +94,9 @@ public final class DemoController {
         try { if (!UUID.fromString(id).toString().equals(id)) throw invalid(); } catch (Exception e) { throw invalid(); }
     }
     private static void text(String value) { if (value == null || value.isBlank()) throw invalid(); }
+    private static void uuid(String id) {
+        try { if (!UUID.fromString(id).toString().equals(id)) throw invalid(); } catch (Exception e) { throw invalid(); }
+    }
     private DemoPrincipal principal(HttpSession session) {
         var p = (DemoPrincipal) session.getAttribute(DemoSecurity.PRINCIPAL);
         if (p == null) throw new DomainException(ErrorCode.AUTHENTICATION_REQUIRED, "Select local demo identity");
@@ -176,14 +192,52 @@ public final class DemoController {
     }
     // Uploads are scoped to the session's enterprise; FileService rechecks WRITE in its own transaction.
     @PostMapping(value = "/files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Object upload(@RequestParam("file") MultipartFile file, HttpSession session) {
+    public Object upload(@RequestParam("file") MultipartFile file,
+                         @RequestParam(value = "mapping", required = false) String mapping, HttpSession session) {
+        var p = principal(session);
+        if (file == null || file.isEmpty() || file.getSize() > FileService.MAX_BYTES) throw invalid();
+        // T46: the accountant's explicit column mapping, strictly decoded; the service validates every field.
+        List<FileService.SheetMapping> mappings = List.of();
+        if (mapping != null && !mapping.isBlank()) {
+            if (mapping.length() > 64 * 1024) throw invalid();
+            try { mappings = List.of(JSON.readValue(mapping, FileService.SheetMapping[].class)); }
+            catch (Exception e) { throw invalid(); }
+        }
+        byte[] content;
+        try { content = file.getBytes(); } catch (java.io.IOException e) { throw invalid(); }
+        var applied = mappings;
+        synchronized (mutationLock(p)) {
+            return request(p, null, applied.isEmpty() ? "file-upload" : "file-upload-mapped", () -> new FileService(database)
+                    .upload(p.trustedSession(), p.enterprise(), file.getOriginalFilename(), content, applied));
+        }
+    }
+    /**
+     * T48: a scanned invoice PDF. The file is stored like any upload and read by the vision profile into a draft;
+     * no invoice exists until the accountant confirms it. Without a vision model the draft is MANUAL.
+     */
+    @PostMapping(value = "/files/scan", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Object scan(@RequestParam("file") MultipartFile file, HttpSession session) {
         var p = principal(session);
         if (file == null || file.isEmpty() || file.getSize() > FileService.MAX_BYTES) throw invalid();
         byte[] content;
         try { content = file.getBytes(); } catch (java.io.IOException e) { throw invalid(); }
         synchronized (mutationLock(p)) {
-            return request(p, null, "file-upload", () -> new FileService(database)
-                    .upload(p.trustedSession(), p.enterprise(), file.getOriginalFilename(), content));
+            return request(p, null, "file-scan", () -> new FileService(database)
+                    .recognize(p.trustedSession(), p.enterprise(), file.getOriginalFilename(), content, scanReader));
+        }
+    }
+    public record ScanConfirm(String invoiceId, String invoiceDate, String seller, String item, String amount,
+                              String remarks, String amountConfirmation, boolean confirmed) {}
+    /** T48: the accountant's field-by-field confirmation; only this creates the invoice, and only for a missing key. */
+    @PostMapping("/files/scan/{draftId}/confirm")
+    public Object confirmScan(@PathVariable String draftId, @RequestBody JsonNode body, HttpSession session) {
+        var p = principal(session); uuid(draftId);
+        var input = decode(body, ScanConfirm.class);
+        if (!input.confirmed()) throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED, "Structured confirmation required");
+        synchronized (mutationLock(p)) {
+            return request(p, null, "file-scan-confirm", () -> new FileService(database).confirm(p.trustedSession(), p.enterprise(), draftId,
+                    new FileService.ScanConfirmation(input.invoiceId(), input.invoiceDate(), input.seller(), input.item(),
+                            input.amount(), input.remarks(), input.amountConfirmation())));
         }
     }
     public record KnowledgeToggle(Boolean enabled) {}
@@ -427,20 +481,48 @@ public final class DemoController {
             return cached.view();
         }
         Approval approval = input.approval(); InvoiceUpdate update = null;
+        List<InvoiceWriteService.BatchItem> batch = null;
         if (approval != null) {
             if (!approval.confirmed()) throw new DomainException(ErrorCode.CONFIRMATION_REQUIRED,"Structured confirmation required");
-            try { if (!UUID.fromString(approval.operationId()).toString().equals(approval.operationId())) throw invalid(); }
-            catch (Exception e) { throw invalid(); }
-            update = new InvoiceUpdate(new InvoiceKey(p.enterprise(),approval.invoiceId()),approval.changes());
+            uuid(approval.operationId());
+            if (approval.items() != null) {
+                // T47: every invoice was confirmed one by one in the trusted UI; the server re-checks each of them.
+                if (approval.invoiceId() != null || approval.changes() != null || approval.items().isEmpty()
+                        || approval.items().size() > InvoiceWriteService.MAX_BATCH) throw invalid();
+                batch = new ArrayList<>();
+                for (var entry : approval.items()) {
+                    if (entry == null) throw invalid();
+                    uuid(entry.operationId());
+                    batch.add(new InvoiceWriteService.BatchItem(entry.operationId(),
+                            new InvoiceUpdate(new InvoiceKey(p.enterprise(), entry.invoiceId()), entry.changes())));
+                }
+                update = batch.getFirst().update();
+            } else update = new InvoiceUpdate(new InvoiceKey(p.enterprise(),approval.invoiceId()),approval.changes());
         }
+        var items = batch;
         log(p,requestId,taskId,"turn","REQUESTED",null);
         long turnStarted = System.nanoTime();
         TaskMemory.Turn turn;
         try {
-            turn = update == null ? a.turn(taskId,input.message(),progress) : a.approvedTurn(taskId,input.message(),approval.operationId(),update,
+            turn = update == null ? a.turn(taskId,input.message(),progress)
+                    : items != null ? a.approvedBatchTurn(taskId, input.message(), approval.operationId(), items,
+                        items.stream().anyMatch(i -> i.update().changes().values().stream().anyMatch(String::isBlank))
+                                ? InvoiceWriteService.Intent.CLEAR_NOW : InvoiceWriteService.Intent.SAVE_NOW, progress)
+                    : a.approvedTurn(taskId,input.message(),approval.operationId(),update,
                     update.changes().values().stream().anyMatch(String::isBlank) ? InvoiceWriteService.Intent.CLEAR_NOW : InvoiceWriteService.Intent.SAVE_NOW, progress);
         } catch (DomainException failure) {
-            if (update != null) {
+            if (items != null) {
+                var recovered = a.recoverBatch(taskId, approval.operationId(), items); // Query only, never a retry.
+                if (recovered.isPresent()) {
+                    try {
+                        audit.append(p.trustedSession(),p.enterprise(),event(requestId,taskId,"recover",null,null,null,null,
+                                approval.operationId(),"RECOVERABLE_TASK_STATE_FAILURE",failure.code().name(),recovered.get().verified()));
+                    } catch (DemoAudit.Failure auditFailure) {
+                        return new TurnView(null,null,"AUDIT_STORAGE_ERROR","批量写入已核验但任务状态保存失败；恢复审计记录也失败，请保留 operationId 核查，绝不重复写入",approval.operationId(),null,null,recovered.get());
+                    }
+                    return new TurnView(null,null,"TASK_STATE_SAVE_FAILED","批量写入已核验但任务状态保存失败；请恢复任务并查询，绝不重复写入",approval.operationId(),null,null,recovered.get());
+                }
+            } else if (update != null) {
                 var recovered = a.recover(taskId,approval.operationId(),update); // Query only, never retry a financial update.
                 if (recovered.isPresent()) {
                     try {
@@ -457,6 +539,7 @@ public final class DemoController {
         }
         long turnDurationMs = Math.max(0, (System.nanoTime() - turnStarted) / 1_000_000);
         UpdateResult verified = null;
+        BatchUpdateResult batchResult = null;
         try {
             var trace = turn.promptTrace();
             if (trace != null) audit.appendTrace(p.trustedSession(), p.enterprise(), requestId, taskId,
@@ -472,6 +555,15 @@ public final class DemoController {
                 String code = ok ? null : safe(result.at("/error/code").asText());
                 // An approved write executes the trusted approval payload, not the model's (empty) arguments.
                 boolean approvedWrite = "update_invoice".equals(tool) && update != null;
+                if (approvedWrite && items != null) {
+                    // T47: one audit row per invoice of the batch, each with its own operationId.
+                    for (var item : items)
+                        audit.append(p.trustedSession(),p.enterprise(),event(requestId,taskId,tool,safe(call.id()),null,
+                                safe(item.update().key().invoiceId()),fields(item.update().changes().keySet()),item.operationId(),
+                                ok ? "TOOL_RESULT" : "TOOL_ERROR",code,saved,ruleVersion(result),turn.memorySource(),exchange.durationMs()));
+                    if (saved) batchResult = a.recoverBatch(taskId, approval.operationId(), items).orElse(null);
+                    continue;
+                }
                 audit.append(p.trustedSession(),p.enterprise(),event(requestId,taskId,tool,safe(call.id()),
                         month(args.path("month").asText()),
                         approvedWrite ? safe(update.key().invoiceId()) : safe(args.at("/key/invoice_id").asText()),
@@ -483,19 +575,22 @@ public final class DemoController {
                     turn.memorySource(), turnDurationMs);
         } catch (DemoAudit.Failure failure) {
             // A committed write stays committed. Return explicit audit failure plus read-only verification.
-            if (update != null) verified = a.recover(taskId,approval.operationId(),update).orElse(null);
-            return new TurnView(turn,verified,"AUDIT_STORAGE_ERROR","审计记录失败；以回读核验为准，请勿重复写入",approval == null ? null : approval.operationId());
+            if (items != null) batchResult = a.recoverBatch(taskId, approval.operationId(), items).orElse(null);
+            else if (update != null) verified = a.recover(taskId,approval.operationId(),update).orElse(null);
+            return new TurnView(turn,verified,"AUDIT_STORAGE_ERROR","审计记录失败；以回读核验为准，请勿重复写入",approval == null ? null : approval.operationId(),null,null,batchResult);
         } catch (DomainException e) { throw e;
         } catch (Exception e) { throw new DemoAudit.Failure(); }
         String message;
-        if (verified != null) message = "实际工具 verified=true 且数据库回读已核验";
+        if (batchResult != null) message = "批量 " + batchResult.results().size() + " 张发票在同一事务内保存，逐张 verified=true 且数据库回读已核验"
+                + (batchResult.review().isEmpty() ? "；程序检查无需复核" : "；其中 " + batchResult.review().size() + " 张需要复核");
+        else if (verified != null) message = "实际工具 verified=true 且数据库回读已核验";
         else if ("WRITE_NOT_EXECUTED".equals(turn.result().errorCode()))
             message = "本轮未执行保存；旧批准已结束，如需保存请重新确认";
         else if ("WRITE_NOT_VERIFIED".equals(turn.result().errorCode()))
             message = "写入结果未核验；保留操作锁，请核查台账与发票";
         else message = "模型文字不是写入证据；请查看实际工具结果";
         var view = new TurnView(turn,verified,turn.result().errorCode(),message,approval == null ? null : approval.operationId(),
-                turn.modelInput(), turn.promptTrace());
+                turn.modelInput(), turn.promptTrace(), batchResult);
         if (turnCache.size() >= TURN_CACHE_MAX) turnCache.clear();
         turnCache.put(cacheKey, new CachedTurn(fingerprint, view, System.currentTimeMillis() + TURN_CACHE_TTL_MS));
         return view;
@@ -505,7 +600,7 @@ public final class DemoController {
     private static String fingerprint(Turn input) {
         var approval = input.approval();
         return input.message() + "|" + (approval == null ? "" : approval.operationId() + "|" + approval.invoiceId()
-                + "|" + approval.changes());
+                + "|" + approval.changes() + "|" + approval.items());
     }
     private static String safe(String value) { return value != null && value.matches("[A-Za-z0-9_-]{1,80}") ? value : null; }
     private static String ruleVersion(JsonNode result) {

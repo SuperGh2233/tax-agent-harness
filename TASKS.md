@@ -738,3 +738,19 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 原因：README「测试与验证」仍是 2026-11-02 的 223 项 / Vitest 71 项，「当前状态与限制」仍写 252/37 项与「T15 浏览器流程仍在进行」，环境说明仍写「其他操作系统尚未完成完整复现验证」；`作品使用说明.md`、`RELEASE_CHECKLIST.md`、`docs/SUBMISSION_NOTES.md`、`docs/index.md`、交接说明头部同样停留在初赛时点；交付白名单缺复赛新增的 `作品使用说明.md`、`自主创新说明.md` 与检查脚本。
 - 改动：上述文件改为当前状态（336 项后端、54 项前端、三平台全新检出构建、故障注入 40 项、真实模型三项检查），历史快照原文保留并加注过时；白名单补入复赛新增说明、`CLAUDE.md`、`.github/workflows/**` 与 `scripts/` 下五个检查脚本；`docs/index.md` 补 T37–T43 证据条目；交接说明新增第 0 节（当前状态与接手顺序）与第 20 节。
 - 仍未完成（不属本任务）：≤5 分钟演示视频、最终作品压缩包。
+
+### T45–T48 — 复赛视频提到的四项可选扩展（2026-11-21）
+- 状态：**DONE（自动化验证）**（2026-11-21，Coding Agent；用户 Mac：JDK 21 `mvn test` 351/0/0/0，`npm run verify` 通过、Vitest 61）。真实模型（`qwen3.7-flash`）下 T47、T48 已通过；`qwen3.8` 与浏览器 UI 尚未验证，见末条。依据用户指示「这几项都做」（2026-11-21），并告知最终比赛采用 **qwen3.8**（模型仍只经环境变量切换，代码未写型号）。
+- 契约说明：T48 把扫描件 PDF 经人工确认后导入为发票，偏离复赛契约「待确认」第 4 条的默认值（上传的 PDF 只作检索知识）。用户 2026-11-21 明确要求实现这四项，视为对该条的批准；契约原文未改。其余写入边界不变：只补缺失键、不覆盖、银行只读、发票可变字段仍只有用途与备注。
+- **T45 回复语气**：两个协议的系统提示末尾追加一句风格要求（结论和关键数字先行，再说办到哪、还缺什么、下一步；不寒暄、不复述问题、不套话）。程序固定文案（`AgentRuntime.honest`、“任务尚未完成。”）未动。
+- **T46 陌生 Excel 列对应**：此前表头不含「发票编号+开票日期」/「流水编号+交易日期」的表格会被当作纯知识存下，**静默导入 0 条**；缺必需列则整文件拒绝。现在 `FileService` 对这两种情况在结果里返回 `tables`（表头、最多 3 行样例、按常见写法给出的建议对应），界面让会计逐列指定后连同 `mapping` 再次上传；已存的同一文件（同哈希）按映射只导入被映射的工作表，不新增文件版本。映射逐条写入 `file_column_mappings`（只追加）。建议只是提示，导入只按会计提交的映射执行；映射严格校验（必需字段齐全、一列一个字段、字段属于该类型、工作表存在）。官方工作簿的「企业与用户」「字段说明」两个说明表不会被当作待映射表格（要求建议覆盖 ≥2 个必需字段，或样例行同时含日期和金额）。
+- **T47 批量保存＋复核**：审核页新增「批量保存」：一次选 2–20 张本轮已查询发票、同一字段，逐张核对后二次确认，得到一个批次 operationId 和每张发票各自的 operationId。模型仍只发 `update_invoice {}`；`InvoiceWriteService.executeBatch` 在**一个事务**内先逐张读取并检查规则，再写入、写台账，最后逐张回读，任一失败全部回滚（不做部分成功）。已入账的批次重放只返回结果、不再执行；台账只有部分条目时报 CONFLICT 交人处理。写后由程序给出复核清单：覆盖了原有非空值、被清空、按当前规则仍须填写用途（重放时规则不可读则标「无法判断」）。前端写入锁记录各张的 operationId，只有每张都 VERIFIED 才释放；审计每张一行。
+- **T48 扫描件识别＋票面金额确认**：资料文件页新增「识别扫描件发票」，文字型 PDF 上传被拒为 NOT_TEXT_PDF 时也可一键转入。PDF 照常存为文件（哈希/版本规则不变），渲染前两页，交读图模型（`LLM_VISION_ENDPOINT/_API_KEY/_MODEL/_PROTOCOL`，OpenAI 兼容或 Anthropic Messages，不回退到其他配置）读成草稿；程序解析大写金额并与小写金额比对（一致/不一致/读不出），标出已存在的发票编号。会计对照页面图片逐项核对、**再次输入价税合计**并勾选确认后才导入，且只补缺失编号；模型不可用或回复无法解析时给出 MANUAL 草稿，可手工录入。草稿与确认（含与草稿的差异）分别存 `scan_drafts`、`scan_confirmations`（不可改）；来源位置记为「第1页（扫描件，人工确认）」，并追加一个可检索文本段。CSP 新增 `img-src 'self' data:` 以显示页面图片（`DemoApiTest` 中的 CSP 断言同步更新）。
+- 新增测试：`ColumnMappingTest`、`BatchSaveTest`（服务、Agent 轮次、API）、`ScanInvoiceTest`（桩读图器，无网络）；`FileServiceTest` 官方工作簿用例补一条「不提供待映射表格」；前端 `tests/extensions.test.ts`。
+- 第一轮验证（2026-11-21，用户 Mac）：前端 `npm run verify` 通过（Vitest 61 = 54 + 7）。后端首跑测试编译失败 3 处（lambda 内受检异常、`VisionClient.isJsonObject` 不可见），已修；复跑 350 项 1 失败：`FileServiceTest.officialWorkbookReimportsExactlyAndNeverOverwrites` —— 官方「说明」表的月度汇总被 T46 兜底规则（样例含日期和金额）误判为待映射表格。已改为还须有一列逐行不同的编号（含数字、非数字非日期），汇总表每行重复企业编号故不再命中；`ColumnMappingTest` 新增正反两例。
+- 第二轮验证（2026-11-21，用户 Mac，JDK 21）：`mvn test` **351/0/0/0**（336 + 新增 15：`BatchSaveTest` 6、`ColumnMappingTest` 5、`ScanInvoiceTest` 4）；前端未改动，沿用第一轮 `npm run verify` 通过（Vitest 61）。
+- 真实模型验证（2026-11-21 22:17，用户 Mac，Temurin 21.0.12.1，全新临时库经 `--initialize-data` 播种，loopback；对话与读图均为 `qwen3.7-flash`、Anthropic 协议），证据 `docs/evidence/T47_T48_REAL_MODEL_20261121/`（`summary.md`、`scan.json`、`batch.json`，已核对不含密钥与页面图片）：
+  - **T48**：无文本层的合成发票 PDF → `DRAFT`、`errorCode=null`（4.9s），六个字段与大写金额全部读对，程序判定 `AMOUNT_WORDS_MATCH`、`unreadable=[]`；逐项确认后 `IMPORTED`、`amountCents=123456`、`differences=[]`。由此确认 `qwen3.7-flash` 能读图，`LLM_VISION_*` 可与 `LLM_*` 填相同值。
+  - **T47**：真模型查询轮（`check_invoice_purpose`、`query_invoices`）后发结构化批量批准，模型只调用一次 `update_invoice`；F002、F003 整批 `verified=true`、逐张回读一致、`review=[]`；`demo_audit` 每张一行、各自 operationId、`verified=1`。
+  - 范围限制：只覆盖 2 张补空用途的最小批；覆盖非空值、清空、失败整批回滚等复核分支仍只有离线 `BatchSaveTest`。T45（回复语气）未单独评估；T46 不依赖模型，但页面未在浏览器中操作过。
+- 仍未验证：`LLM_MODEL=qwen3.8`（及 `LLM_VISION_MODEL`）下复跑同一检查；浏览器中列对应、批量保存、扫描件确认三个页面的实际操作。

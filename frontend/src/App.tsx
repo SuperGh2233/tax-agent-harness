@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from 'react'
 import { ArrowUp, ArrowUpRight, Bot, Check, ChevronRight, CircleDashed, FileCheck2, FileUp, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
-import { AGENT_TOOLS, agentProblem, localTime, ApiError, contextSummary, memoryProblem, SCOPE_LABEL, impactMessage, skillProblem, canVerifyOperation, citedKnowledge, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, describeUpload, findOpenTask, friendlyError, isTerminalTaskStatus, issueLocation, issueReason, parseTool, provenNotExecuted, queriedInvoices, UPLOAD_ACCEPT, uploadProblem, usableAgents, verifiedWriteResult, verifyPendingOperation } from './api'
-import type { Memory, MemoryScope, AgentDef, AgentSpec, AgentsView, Capabilities, Skill, SkillInfo, SkillSpec, ToolInfo, Approval, AuditEvent, Exchange, FileDetail, Invoice, PlanStep, RowIssue, SavedTrace, Session, Statement, StoredFile, Task, ToolProgress, TurnView, UploadResult } from './api'
+import { AGENT_TOOLS, agentProblem, localTime, ApiError, contextSummary, memoryProblem, SCOPE_LABEL, impactMessage, skillProblem, canVerifyOperation, citedKnowledge, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, describeUpload, findOpenTask, friendlyError, isTerminalTaskStatus, issueLocation, issueReason, MAPPING_FIELDS, mappingProblem, MAX_BATCH, parseTool, provenNotExecuted, queriedInvoices, REVIEW_REASON, SCAN_CHECK, scanProblem, UPLOAD_ACCEPT, uploadProblem, usableAgents, verifiedBatchResult, verifiedWriteResult, verifyPendingOperation } from './api'
+import type { Memory, MemoryScope, AgentDef, AgentSpec, AgentsView, Capabilities, Skill, SkillInfo, SkillSpec, ToolInfo, Approval, AuditEvent, Exchange, FileDetail, Invoice, PlanStep, RowIssue, SavedTrace, ScanConfirmation, ScanDraft, ScanImport, Session, SheetMapping, Statement, StoredFile, TableCandidate, Task, ToolProgress, TurnView, UploadResult } from './api'
 import { Button, Modal } from './ui'
 
 const api = new DemoApi()
 type Page = 'home' | 'workspace' | 'review' | 'history' | 'files' | 'agents' | 'capabilities' | 'audit'
 type Message = {role: 'user' | 'agent' | 'notice'; text: string; history?: Exchange[]}
-type Operation = {id: string; taskId: string; unknown: boolean}
+// items (T47): the per-invoice operationIds of a batch; each must verify before the lock is released.
+type Operation = {id: string; taskId: string; unknown: boolean; items?: string[]}
 const suggestions = ['查询 2026-09 发票与银行收支', '检查 2026-09 发票用途缺口', '继续核对待补充的发票信息']
 const statusLabel = {ACTIVE: '进行中', WAITING_USER: '等待补充', COMPLETED: '已结束', CANCELLED: '已取消'}
 const OPERATION_KEY = 'taxagent-pending-operation'
@@ -22,13 +23,20 @@ export function initialOperation(read = () => sessionStorage.getItem(OPERATION_K
     let raw = read()
     if (raw === null && typeof localStorage !== 'undefined') raw = localStorage.getItem(SHARED_OPERATION_KEY)
     if (raw === null) return null
-    const value = JSON.parse(raw) as Partial<Operation> | null
-    if (value && typeof value === 'object' && !Array.isArray(value)
-      && typeof value.id === 'string' && value.id.trim()
-      && typeof value.taskId === 'string' && value.taskId.trim() && value.unknown === true)
-      return {id:value.id, taskId:value.taskId, unknown:true}
+    const value = parseOperation(JSON.parse(raw))
+    if (value) return value
   } catch { /* Unreadable storage cannot prove there is no pending write. */ }
   return unknown
+}
+/** A stored or broadcast lock in its exact shape; anything else is not a lock this tab may adopt. */
+function parseOperation(raw: unknown): Operation | null {
+  const value = raw as Partial<Operation> | null
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.id !== 'string' || !value.id.trim()
+    || typeof value.taskId !== 'string' || !value.taskId.trim() || value.unknown !== true) return null
+  if (value.items === undefined) return {id:value.id, taskId:value.taskId, unknown:true}
+  if (Array.isArray(value.items) && value.items.length > 0 && value.items.every(item => typeof item === 'string' && item.trim()))
+    return {id:value.id, taskId:value.taskId, unknown:true, items:[...value.items]}
+  return null
 }
 
 export default function App() {
@@ -65,6 +73,10 @@ export default function App() {
   const [files, setFiles] = useState<StoredFile[] | null>(null)
   const [upload, setUpload] = useState<UploadResult | null>(null)
   const [fileDetail, setFileDetail] = useState<FileDetail | null>(null)
+  const [lastUpload, setLastUpload] = useState<File | null>(null)
+  const [scanDraft, setScanDraft] = useState<ScanDraft | null>(null)
+  const [scanResult, setScanResult] = useState<ScanImport | null>(null)
+  const [reviewMode, setReviewMode] = useState<'single' | 'batch'>('single')
   const [agentsView, setAgentsView] = useState<AgentsView | null>(null)
   const [agentChoice, setAgentChoice] = useState('')
   const [taskAgent, setTaskAgent] = useState<AgentDef | null>(null)
@@ -76,9 +88,10 @@ export default function App() {
     const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(OPERATION_CHANNEL)
     channelRef.current = channel
     if (channel) channel.onmessage = event => {
-      const value = event.data?.operation as Operation | null | undefined
-      if (value === null) { try { sessionStorage.removeItem(OPERATION_KEY); setOperation(null) } catch { /* keep lock */ } return }
-      if (value && typeof value.id === 'string' && typeof value.taskId === 'string' && value.unknown === true) {
+      const raw = event.data?.operation as unknown
+      if (raw === null) { try { sessionStorage.removeItem(OPERATION_KEY); setOperation(null) } catch { /* keep lock */ } return }
+      const value = parseOperation(raw)
+      if (value) {
         try { sessionStorage.setItem(OPERATION_KEY, pretty(value)); setOperation(value) } catch { /* keep lock */ }
       }
     }
@@ -86,10 +99,8 @@ export default function App() {
       if (event.key !== SHARED_OPERATION_KEY) return
       try {
         if (event.newValue === null) { sessionStorage.removeItem(OPERATION_KEY); setOperation(null); return }
-        const value = JSON.parse(event.newValue) as Partial<Operation> | null
-        if (value && typeof value.id === 'string' && typeof value.taskId === 'string' && value.unknown === true) {
-          sessionStorage.setItem(OPERATION_KEY, pretty(value)); setOperation({id:value.id, taskId:value.taskId, unknown:true})
-        }
+        const value = parseOperation(JSON.parse(event.newValue))
+        if (value) { sessionStorage.setItem(OPERATION_KEY, pretty(value)); setOperation(value) }
       } catch { /* malformed or unavailable storage keeps the in-memory lock */ }
     }
     window.addEventListener('storage', onStorage)
@@ -146,7 +157,7 @@ export default function App() {
       try { setSavedTrace((await api.traces(task.id))[0] ?? null) } catch { setSavedTrace(null) }
     }
   }
-  function reset() { setMemories([]); setCapabilities(null); setPendingSwitch(null); setAgentsView(null); setAgentChoice(''); setTaskAgent(null); setFiles(null); setUpload(null); setFileDetail(null); setTask(null); setCancelCandidate(null); setLoadedHistoricalTask(false); setSourceTaskId(null); setMessages([]); setTurn(null); setSavedTrace(null); setAudit(null); setTasks([]); setInspector(false); setPage('home'); setPreferences({}); setPreferencesOpen(false) }
+  function reset() { setLastUpload(null); setScanDraft(null); setScanResult(null); setReviewMode('single'); setMemories([]); setCapabilities(null); setPendingSwitch(null); setAgentsView(null); setAgentChoice(''); setTaskAgent(null); setFiles(null); setUpload(null); setFileDetail(null); setTask(null); setCancelCandidate(null); setLoadedHistoricalTask(false); setSourceTaskId(null); setMessages([]); setTurn(null); setSavedTrace(null); setAudit(null); setTasks([]); setInspector(false); setPage('home'); setPreferences({}); setPreferencesOpen(false) }
   async function load(id: string) {
     await run(async () => {
       const context = await api.load(id)
@@ -280,7 +291,8 @@ export default function App() {
       } else {
         setMessages(old => [...old, {role:'user', text:message}])
       }
-      if (approval) rememberOperation({id:approval.operationId, taskId:target.id, unknown:true})
+      const itemIds = approval?.items?.map(item => item.operationId)
+      if (approval) rememberOperation({id:approval.operationId, taskId:target.id, unknown:true, ...(itemIds ? {items:itemIds} : {})})
       let result: TurnView
       try { result = await api.streamTurn(target.id, message, approval, streamHandlers) }
       catch (e) {
@@ -298,7 +310,7 @@ export default function App() {
       }
       // A timeout or empty history is never proof of no write. Only a matching verified
       // readback, or the explicit WRITE_NOT_VERIFIED terminal receipt, may release the lock.
-      if (approval && verifiedWriteResult(result, approval.operationId)) rememberOperation(null)
+      if (approval && (itemIds ? verifiedBatchResult(result, approval.operationId, itemIds) : verifiedWriteResult(result, approval.operationId))) rememberOperation(null)
       else if (notExecuted) rememberOperation(null)
       if (result.errorCode) setError(friendlyError(result.errorCode))
       setAudit(null)
@@ -341,18 +353,44 @@ export default function App() {
     await run(async () => { await api.setAgentEnabled(agent.id, !agent.enabled); setAgentsView(await api.agents()) })
   }
   async function refreshFiles() { await run(async () => { setFiles(await api.files()) }) }
-  async function uploadFile(file: File) {
+  async function uploadFile(file: File, mappings?: SheetMapping[]) {
     const problem = uploadProblem(file)
     if (problem) { setError(problem); return }
     await run(async () => {
-      setUpload(null); setFileDetail(null)
-      try { setUpload(await api.upload(file)) }
+      setUpload(null); setFileDetail(null); setLastUpload(file); setScanDraft(null); setScanResult(null)
+      try { setUpload(await api.upload(file, mappings)) }
       catch (e) {
         // A lost response may still have stored the file; the list is the source of truth, not a retry.
         if (e instanceof ApiError && (e.code === 'NETWORK_UNKNOWN' || e.code === 'INVALID_RESPONSE')) {
           try { setFiles(await api.files()) } catch { /* list stays as it was */ }
           throw new Error('上传结果未确认。请查看下方文件列表确认是否已保存；重复上传相同内容不会产生新数据。')
         }
+        throw e
+      }
+      setFiles(await api.files())
+    })
+  }
+  async function scanFile(file: File) {
+    if (!/\.pdf$/i.test(file.name)) { setError('扫描件发票请上传 PDF。'); return }
+    await run(async () => {
+      setScanDraft(null); setScanResult(null); setFileDetail(null)
+      try { setScanDraft(await api.scan(file)) }
+      catch (e) {
+        if (e instanceof ApiError && (e.code === 'NETWORK_UNKNOWN' || e.code === 'INVALID_RESPONSE')) {
+          try { setFiles(await api.files()) } catch { /* list stays as it was */ }
+          throw new Error('识别请求结果未确认。文件可能已保存，但不会据此导入任何发票；请重新识别。')
+        }
+        throw e
+      }
+      setFiles(await api.files())
+    })
+  }
+  async function confirmScan(draftId: string, confirmation: ScanConfirmation) {
+    await run(async () => {
+      try { setScanResult(await api.confirmScan(draftId, confirmation)); setScanDraft(null) }
+      catch (e) {
+        if (e instanceof ApiError && (e.code === 'NETWORK_UNKNOWN' || e.code === 'INVALID_RESPONSE'))
+          throw new Error('确认结果未知。请先查询该发票编号是否已存在，不要重复确认。')
         throw e
       }
       setFiles(await api.files())
@@ -385,7 +423,7 @@ export default function App() {
     if (!operation) return
     await run(async () => {
       await verifyPendingOperation(api, operation, () => rememberOperation(null))
-      setMessages(old => [...old, {role:'notice', text:'VERIFIED · 已提交操作与当前发票快照一致；未重新执行写入。'}])
+      setMessages(old => [...old, {role:'notice', text:operation.items?.length ? `VERIFIED · 批量 ${operation.items.length} 张发票的操作均与当前发票快照一致；未重新执行写入。` : 'VERIFIED · 已提交操作与当前发票快照一致；未重新执行写入。'}])
       setAudit(null)
     })
   }
@@ -435,10 +473,15 @@ export default function App() {
       </>}
       {page === 'review' && task && <section className="content-page review"><div className="page-heading"><div><span className="eyebrow">HUMAN IN THE LOOP</span><h1 ref={heading} tabIndex={-1}>审核与结果</h1><p className="muted">Agent 建议不等于授权。每一项修改，由你决定。</p></div><Button onClick={() => navigate('workspace')}>返回对话</Button></div>
         <VerificationPanel turn={turn}/>
-        <Review key={`${task.id}:${task.version}`} invoices={invoices} enterprise={session?.enterprise ?? ''} disabled={busy || session?.profile !== 'operator' || !!operation || task.status === 'COMPLETED' || task.status === 'CANCELLED'} onApprove={approval => void send(`现在保存以下经我逐项核对的精确修改，并查询发票核对：${pretty({enterprise:session?.enterprise,invoiceId:approval.invoiceId,changes:approval.changes})}`, approval)}/>
+        <div className="segmented" role="group" aria-label="修改方式"><button type="button" aria-pressed={reviewMode === 'single'} onClick={() => setReviewMode('single')}>单张修改</button><button type="button" aria-pressed={reviewMode === 'batch'} onClick={() => setReviewMode('batch')}>批量保存（2–{MAX_BATCH} 张）</button></div>
+        {reviewMode === 'single'
+          ? <Review key={`${task.id}:${task.version}`} invoices={invoices} enterprise={session?.enterprise ?? ''} disabled={busy || session?.profile !== 'operator' || !!operation || task.status === 'COMPLETED' || task.status === 'CANCELLED'} onApprove={approval => void send(`现在保存以下经我逐项核对的精确修改，并查询发票核对：${pretty({enterprise:session?.enterprise,invoiceId:approval.invoiceId,changes:approval.changes})}`, approval)}/>
+          : <BatchReview key={`batch:${task.id}:${task.version}`} invoices={invoices} enterprise={session?.enterprise ?? ''} supplied={task.supplied} disabled={busy || session?.profile !== 'operator' || !!operation || task.status === 'COMPLETED' || task.status === 'CANCELLED'} onApprove={approval => void send(`现在批量保存以下经我逐张核对的精确修改（共 ${approval.items?.length ?? 0} 张，同一事务），并查询发票核对：${pretty({enterprise:session?.enterprise,items:approval.items?.map(item => ({invoiceId:item.invoiceId,changes:item.changes}))})}`, approval)}/>}
       </section>}
       {page === 'files' && <FilesPage heading={heading} selected={selected} canUpload={session?.profile === 'operator'} enterprise={session?.enterprise ?? ''} busy={busy}
-        files={files} upload={upload} detail={fileDetail} onUpload={file => void uploadFile(file)} onRefresh={() => void refreshFiles()} onOpen={id => void openFile(id)} onToggle={file => void toggleKnowledge(file)}/>}
+        files={files} upload={upload} detail={fileDetail} onUpload={file => void uploadFile(file)} onRefresh={() => void refreshFiles()} onOpen={id => void openFile(id)} onToggle={file => void toggleKnowledge(file)}
+        lastUpload={lastUpload} onMap={mappings => { if (lastUpload) void uploadFile(lastUpload, mappings) }}
+        scanDraft={scanDraft} scanResult={scanResult} onScan={file => void scanFile(file)} onConfirmScan={(draftId, confirmation) => void confirmScan(draftId, confirmation)}/>}
       {page === 'agents' && <AgentsPage heading={heading} selected={selected} canEdit={session?.profile === 'operator'} enterprise={session?.enterprise ?? ''} busy={busy}
         view={agentsView} skills={capabilities?.skills ?? []} onRefresh={() => void refreshAgents()} onSave={async (id, spec) => { let saved = false; await run(async () => { await saveAgent(id, spec); saved = true }); return saved }} onToggle={agent => void toggleAgent(agent)}
         onHistory={id => api.agentHistory(id)}/>}
@@ -597,6 +640,15 @@ function Supplement({busy,onSubmit}: {busy:boolean; onSubmit:(key:string,value:s
 }
 function VerificationPanel({turn}: {turn:TurnView|null}) {
   const verification = turn?.verification
+  const batch = turn?.batch
+  if (batch) return <section className={`verification ${batch.verified ? 'verified' : ''}`} aria-label="保存核验状态"><ShieldCheck size={22}/><div>
+    <h2>{batch.verified ? `批量 verified=true · ${batch.results.length} 张发票已逐张回读核验` : '批量保存未核验'}</h2>
+    <p>{turn?.message}</p>{turn?.operationId && <p>批次 operationId: <code>{turn.operationId}</code></p>}
+    <div className="batch-table"><table><thead><tr><th>发票</th><th>数据库用途</th><th>数据库备注</th><th>复核</th></tr></thead>
+      <tbody>{batch.results.map(r => { const review = batch.review.find(item => item.key.invoiceId === r.key.invoiceId)
+        return <tr key={r.key.invoiceId} className={review ? 'needs-review' : ''}><td>{r.key.enterpriseId} / {r.key.invoiceId}</td><td>{r.purpose || '（空）'}</td><td>{r.remarks || '（空）'}</td>
+          <td>{review ? review.reasons.map(reason => REVIEW_REASON[reason] ?? reason).join('；') : '无需复核'}</td></tr> })}</tbody></table></div>
+    <p className="hint">复核清单由程序根据保存前后的值和当前启用规则判断，不来自模型文字。</p></div></section>
   return <section className={`verification ${verification?.verified ? 'verified' : ''}`} aria-label="保存核验状态"><ShieldCheck size={22}/><div><h2>{verification?.verified ? 'verified=true · 数据库回读已核验' : '尚无已核验的保存结果'}</h2><p>{turn?.message ?? '请先查询发票，再逐项审核修改。模型建议与任务结束状态不构成保存证据。'}</p>{turn?.operationId && <p>operationId: <code>{turn.operationId}</code></p>}{verification && <><p>{verification.key.enterpriseId} / {verification.key.invoiceId}</p><dl><dt>数据库用途</dt><dd>{verification.purpose || '（空）'}</dd><dt>数据库备注</dt><dd>{verification.remarks || '（空）'}</dd></dl></>}</div></section>
 }
 const toolLabel: Record<string, string> = {
@@ -760,13 +812,18 @@ function IssueList({title, issues}: {title: string; issues: RowIssue[]}) {
     <ul>{issues.map((issue, i) => <li key={i}><code>{issueLocation(issue)}</code>{issueReason(issue.reason)}</li>)}</ul></details>
 }
 
-function FilesPage({heading, selected, canUpload, enterprise, busy, files, upload, detail, onUpload, onRefresh, onOpen, onToggle}: {
+function FilesPage({heading, selected, canUpload, enterprise, busy, files, upload, detail, onUpload, onRefresh, onOpen, onToggle, lastUpload, onMap, scanDraft, scanResult, onScan, onConfirmScan}: {
   heading: RefObject<HTMLHeadingElement | null>; selected: boolean; canUpload: boolean; enterprise: string; busy: boolean
   files: StoredFile[] | null; upload: UploadResult | null; detail: FileDetail | null
   onUpload: (file: File) => void; onRefresh: () => void; onOpen: (id: string) => void; onToggle: (file: StoredFile) => void
+  lastUpload: File | null; onMap: (mappings: SheetMapping[]) => void
+  scanDraft: ScanDraft | null; scanResult: ScanImport | null; onScan: (file: File) => void; onConfirmScan: (draftId: string, confirmation: ScanConfirmation) => void
 }) {
   const input = useRef<HTMLInputElement>(null)
+  const scanInput = useRef<HTMLInputElement>(null)
   const [chosen, setChosen] = useState<File | null>(null)
+  const [scanChosen, setScanChosen] = useState<File | null>(null)
+  const scannedPdf = upload?.errors.some(issue => issue.reason === 'NOT_TEXT_PDF') && lastUpload && /\.pdf$/i.test(lastUpload.name)
   function submit(event: FormEvent) {
     event.preventDefault()
     if (!chosen) return
@@ -791,7 +848,24 @@ function FilesPage({heading, selected, canUpload, enterprise, busy, files, uploa
         <IssueList title="同编号已有记录，未覆盖" issues={upload.conflicts}/>
         <IssueList title="属于其他企业，未导入" issues={upload.skipped}/>
         {(upload.conflicts.length >= 200 || upload.skipped.length >= 200 || upload.errors.length >= 200) && <p className="hint">只显示前 200 条。</p>}
+        {scannedPdf && canUpload && <p><Button variant="primary" disabled={busy} onClick={() => lastUpload && onScan(lastUpload)}>把这份 PDF 作为发票扫描件识别</Button></p>}
       </section>}
+      {upload?.tables?.length && lastUpload && canUpload ? <MappingForm key={`${lastUpload.name}:${lastUpload.size}:${lastUpload.lastModified}:${upload.status}`} tables={upload.tables} busy={busy} onSubmit={onMap}/> : null}
+      <section className="scan-section" aria-label="扫描件发票">
+        <h2>识别扫描件发票</h2>
+        <p className="muted">PDF 扫描件由读图模型（LLM_VISION_*）识别为草稿，程序核对大写与小写金额；只有你逐项确认、并再次输入价税合计后才导入，且不覆盖已有发票。未配置读图模型时，可对照页面图片手工录入。</p>
+        <form className="upload-form" onSubmit={event => { event.preventDefault(); if (scanChosen) { onScan(scanChosen); setScanChosen(null); if (scanInput.current) scanInput.current.value = '' } }}>
+          <label className="upload-drop"><FileUp size={20}/><span><strong>{scanChosen ? scanChosen.name : '选择发票扫描件（PDF）'}</strong><small>{scanChosen ? size(scanChosen.size) : `.pdf，最大 10 MB · 归属 ${enterprise}`}</small></span>
+            <input ref={scanInput} type="file" accept=".pdf" disabled={!canUpload || busy} onChange={e => setScanChosen(e.target.files?.[0] ?? null)}/></label>
+          <Button type="submit" variant="primary" disabled={!canUpload || busy || !scanChosen}>识别</Button>
+        </form>
+        {scanDraft && <ScanReview key={scanDraft.draftId} draft={scanDraft} busy={busy} onConfirm={confirmation => onConfirmScan(scanDraft.draftId, confirmation)}/>}
+        {scanResult && <div className={`upload-result ${scanResult.status === 'IMPORTED' ? 'imported' : 'rejected'}`} role="status">
+          <h3>{scanResult.status === 'IMPORTED' ? `已导入发票 ${scanResult.invoiceId}` : `发票 ${scanResult.invoiceId} 已存在，未覆盖`}</h3>
+          <p>价税合计 {(scanResult.amountCents / 100).toFixed(2)} 元 · 来源 {scanResult.file.name} v{scanResult.file.version}（第1页，人工确认）。用途为空，需要时在对话中查询后经审核页保存。</p>
+          {scanResult.differences.length > 0 && <><p>你更正了模型识别的 {scanResult.differences.length} 处：</p><ul>{scanResult.differences.map(d => <li key={d}>{d}</li>)}</ul></>}
+        </div>}
+      </section>
       <section className="file-list" aria-label="已上传文件">
         <h2>{enterprise} 的文件</h2>
         {files === null ? <p className="muted">正在加载…</p> : files.length === 0 ? <p className="empty">还没有上传文件。</p> :
@@ -836,4 +910,102 @@ export function Review({invoices,enterprise,disabled,onApprove}: {invoices:Invoi
       {draft && <><dl className="confirmation-values"><dt>企业 / 发票</dt><dd>{enterprise} / {draft.invoiceId}</dd><dt>字段</dt><dd>{fieldLabel}</dd><dt>数据库当前值</dt><dd>{current || '（空）'}</dd><dt>拟修改值</dt><dd>{value || '（明确清空）'}</dd><dt>operationId</dt><dd><code>{draft.operationId}</code></dd></dl><p className="muted">未知结果不自动重试。此授权不会随任务恢复。</p><div className="dialog-actions"><Button onClick={() => setDraft(null)}>返回核对</Button><Button variant="primary" disabled={!valid} onClick={() => { const exact = draft; setDraft(null); setChecked(false); onApprove(exact) }}>确认，现在保存{!value && ' / 清空'}</Button></div></>}
     </Modal>
   </section>
+}
+
+/** T47: one approval for several invoices and one field; each invoice is checked on screen, then confirmed in a dialog. */
+export function BatchReview({invoices,enterprise,supplied,disabled,onApprove}: {invoices:Invoice[]; enterprise:string; supplied:Record<string, Statement>; disabled:boolean; onApprove:(a:Approval)=>void}) {
+  const [field,setField] = useState<'purpose'|'remarks'>('purpose')
+  const [values,setValues] = useState<Record<string, string>>({})
+  const [selected,setSelected] = useState<string[]>([])
+  const [checked,setChecked] = useState(false), [draft,setDraft] = useState<Approval|null>(null)
+  const change = (work:()=>void) => { work(); setChecked(false); setDraft(null) }
+  // A value the user already stated in this task (e.g. F002.purpose) is offered as the starting value, never saved by itself.
+  const valueOf = (id: string) => values[id] ?? supplied[`${id}.${field}`]?.value ?? ''
+  const rows = selected.map(id => invoices.find(i => i.key.invoice_id === id)).filter((i): i is Invoice => !!i)
+  const fieldLabel = field === 'purpose' ? '用途 purpose' : '备注 remarks'
+  const problem = rows.length < 2 ? '批量保存至少选择 2 张本轮已查询的发票；只改一张请用“单张修改”。'
+    : rows.length > MAX_BATCH ? `一次最多 ${MAX_BATCH} 张。`
+    : rows.some(i => i[field] === valueOf(i.key.invoice_id)) ? '有发票的拟修改值与数据库当前值相同，请修改或取消选择。' : null
+  const valid = !problem && checked && !disabled
+  const toggle = (id: string) => change(() => setSelected(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]))
+  return <section className="review-editor batch-review"><h2>批量核对精确修改</h2>
+    <p className="muted">一次确认多张发票的同一字段。整批在同一事务内保存：全部回读核验成功，或一张都不改。保存后程序列出仍需复核的发票。空白新值表示明确清空。</p>
+    {!invoices.length && <p className="empty">本轮没有发票查询证据。返回对话，先让 Agent 查询当前企业的发票。</p>}
+    <div className="review-row"><span>修改字段</span><div><label><span className="sr-only">修改字段</span><select value={field} onChange={e => change(() => { setField(e.target.value as 'purpose'|'remarks'); setValues({}) })}><option value="purpose">用途 purpose</option><option value="remarks">备注 remarks</option></select></label></div></div>
+    {invoices.length > 0 && <div className="batch-table"><table><thead><tr><th>选择</th><th>发票</th><th>日期 · 销售方</th><th>价税合计</th><th>数据库当前值</th><th>拟修改值</th></tr></thead>
+      <tbody>{invoices.map(i => { const id = i.key.invoice_id, on = selected.includes(id)
+        return <tr key={id} className={on ? 'selected' : ''}>
+          <td><input type="checkbox" aria-label={`选择 ${id}`} checked={on} disabled={disabled} onChange={() => toggle(id)}/></td>
+          <td>{enterprise} / {id}</td><td>{i.invoice_date} · {i.seller}</td><td>{(i.amount_cents / 100).toFixed(2)}</td>
+          <td>{i[field] || '（空）'}</td>
+          <td>{on ? <label><span className="sr-only">{id} 的拟修改值</span><input value={valueOf(id)} maxLength={4000} disabled={disabled} onChange={e => { const value = e.target.value; change(() => setValues(old => ({...old, [id]: value}))) }} placeholder="空白表示清空"/></label> : <span className="muted">未选择</span>}</td></tr> })}</tbody></table></div>}
+    {problem && rows.length > 0 && <p className="hint">{problem}</p>}
+    <label className="check-label"><input type="checkbox" checked={checked} disabled={!!problem || disabled} onChange={e => setChecked(e.target.checked)}/><span>我已逐张核对以上 {rows.length} 张发票的{fieldLabel}、数据库当前值与拟修改值。</span></label>
+    <div className="review-actions"><p className="muted">每张发票有独立 operationId，可逐张只读核验。</p><Button variant="primary" disabled={!valid} onClick={() => setDraft({operationId:crypto.randomUUID(), confirmed:true,
+      items:rows.map(i => ({operationId:crypto.randomUUID(), invoiceId:i.key.invoice_id, changes:{[field]:valueOf(i.key.invoice_id)}}))})}>继续二次确认<ChevronRight size={16}/></Button></div>
+    <Modal open={draft !== null} onOpenChange={open => { if (!open) setDraft(null) }} title={`确认现在批量保存这 ${draft?.items?.length ?? 0} 张发票？`} description="点击下方按钮将授予本轮整批精确写入权限。整批同一事务：任一张失败则全部不改。结果以逐张 verified 与数据库回读为准。">
+      {draft && <><div className="batch-table"><table><thead><tr><th>发票</th><th>字段</th><th>数据库当前值</th><th>拟修改值</th></tr></thead>
+        <tbody>{draft.items?.map(item => { const invoice = rows.find(i => i.key.invoice_id === item.invoiceId)
+          return <tr key={item.operationId}><td>{enterprise} / {item.invoiceId}</td><td>{fieldLabel}</td><td>{invoice?.[field] || '（空）'}</td><td>{item.changes[field] || '（明确清空）'}</td></tr> })}</tbody></table></div>
+        <p className="muted">批次 operationId <code>{draft.operationId}</code>。未知结果不自动重试；此授权不会随任务恢复。</p>
+        <div className="dialog-actions"><Button onClick={() => setDraft(null)}>返回核对</Button><Button variant="primary" disabled={!valid} onClick={() => { const exact = draft; setDraft(null); setChecked(false); onApprove(exact) }}>确认，现在批量保存</Button></div></>}
+    </Modal>
+  </section>
+}
+
+/** T46: the accountant assigns each column; the program's suggestion is only the starting point. */
+function MappingForm({tables, busy, onSubmit}: {tables: TableCandidate[]; busy: boolean; onSubmit: (mappings: SheetMapping[]) => void}) {
+  const [state, setState] = useState(() => tables.map(t => ({sheet:t.sheet, kind:t.suggestedKind, headerRow:t.headerRow, columns:{...t.suggested} as Record<string, number>, include:true})))
+  const [checked, setChecked] = useState(false)
+  const update = (index: number, next: Partial<(typeof state)[number]>) => { setChecked(false); setState(old => old.map((s, i) => i === index ? {...s, ...next} : s)) }
+  const assign = (index: number, column: number, field: string) => {
+    const current = state[index]
+    const columns = Object.fromEntries(Object.entries(current.columns).filter(([f, c]) => f !== field && c !== column))
+    if (field) columns[field] = column
+    update(index, {columns})
+  }
+  const included = state.filter(s => s.include)
+  const problems = included.map(s => mappingProblem(s.kind, s.columns)).filter(Boolean)
+  const valid = included.length > 0 && problems.length === 0 && checked && !busy
+  return <section className="mapping-form" aria-label="指定列对应">
+    <h2>这些表格的列需要你来对应</h2>
+    <p className="muted">程序没有认出下列表格的表头，只给出建议，不会自行猜测导入。请逐列确认它对应的字段；确认后按此导入，只补缺失编号，不覆盖已有记录，列对应会留痕。</p>
+    {tables.map((table, index) => { const s = state[index]
+      return <article key={table.sheet} className="mapping-card">
+        <header><label className="check-label"><input type="checkbox" checked={s.include} onChange={e => update(index, {include:e.target.checked})}/><span><strong>{table.sheet}</strong> · 第 {table.headerRow} 行为表头 · {table.reason === 'MISSING_COLUMNS' ? '表头缺少必需列' : '表头未识别'}</span></label>
+          <label>记录类型<select value={s.kind} onChange={e => update(index, {kind:e.target.value as 'INVOICE' | 'BANK', columns:{}})}><option value="INVOICE">发票</option><option value="BANK">银行流水</option></select></label></header>
+        <div className="batch-table"><table><thead><tr>{table.headers.map((header, column) => { const field = Object.entries(s.columns).find(([, c]) => c === column)?.[0] ?? ''
+          return <th key={column}><div className="mapping-header">{header || `第 ${column + 1} 列`}</div>
+            <label><span className="sr-only">{header || `第 ${column + 1} 列`} 对应字段</span><select value={field} disabled={!s.include} onChange={e => assign(index, column, e.target.value)}>
+              <option value="">不导入</option>{MAPPING_FIELDS[s.kind].map(f => <option key={f.field} value={f.field}>{f.label}{f.required ? ' *' : ''}</option>)}</select></label></th> })}</tr></thead>
+          <tbody>{table.samples.map((row, r) => <tr key={r}>{row.map((cell, c) => <td key={c}>{cell}</td>)}</tr>)}</tbody></table></div>
+        {s.include && mappingProblem(s.kind, s.columns) && <p className="hint">{mappingProblem(s.kind, s.columns)}</p>}
+      </article> })}
+    <label className="check-label"><input type="checkbox" checked={checked} disabled={busy || included.length === 0 || problems.length > 0} onChange={e => setChecked(e.target.checked)}/><span>我已核对以上列对应，按此导入。</span></label>
+    <Button variant="primary" disabled={!valid} onClick={() => onSubmit(included.map(({sheet, kind, headerRow, columns}) => ({sheet, kind, headerRow, columns})))}>按此列对应导入</Button>
+  </section>
+}
+
+/** T48: the model's reading next to the page image; the accountant corrects, retypes the amount and confirms. */
+function ScanReview({draft, busy, onConfirm}: {draft: ScanDraft; busy: boolean; onConfirm: (c: ScanConfirmation) => void}) {
+  const [values, setValues] = useState(() => ({invoiceId:draft.fields.invoice_id ?? '', invoiceDate:draft.fields.invoice_date ?? '', seller:draft.fields.seller ?? '',
+    item:draft.fields.item ?? '', amount:draft.fields.amount ?? '', remarks:draft.fields.remarks ?? '', amountConfirmation:''}))
+  const [checked, setChecked] = useState(false)
+  const set = (key: keyof typeof values, value: string) => { setChecked(false); setValues(old => ({...old, [key]: value})) }
+  const problem = scanProblem(values)
+  const flagged = (field: string) => draft.unreadable.includes(field) ? <small className="flag">模型未能看清</small> : null
+  const fields: [keyof typeof values, string, string][] = [['invoiceId','发票编号','invoice_id'],['invoiceDate','开票日期（YYYY-MM-DD）','invoice_date'],['seller','销售方名称','seller'],['item','项目名称','item'],['amount','价税合计（元）','amount'],['remarks','备注','remarks']]
+  return <div className="scan-review">
+    <div className="scan-image"><img src={draft.pageImage} alt={`${draft.file.name} 第 1 页`}/></div>
+    <form className="stack" onSubmit={e => { e.preventDefault(); if (!problem && checked) onConfirm({...values, confirmed:true}) }}>
+      <p className={draft.status === 'DRAFT' ? 'hint' : 'error-banner'}>{draft.status === 'DRAFT' ? '以下为模型识别的草稿，不是事实；请逐项对照左侧票面核对。' : `读图模型不可用（${draft.errorCode}），请对照左侧票面手工录入。`}</p>
+      {draft.fields.amount_in_words && <p className="muted">票面大写金额（模型读取）：{draft.fields.amount_in_words}</p>}
+      {draft.checks.length > 0 && <ul className="scan-checks">{draft.checks.map(check => <li key={check} className={check === 'AMOUNT_WORDS_MATCH' ? 'ok' : 'warn'}>{SCAN_CHECK[check] ?? check}</li>)}</ul>}
+      {fields.map(([key, label, field]) => <label key={key}>{label}{flagged(field)}<input value={values[key]} onChange={e => set(key, e.target.value)} maxLength={key === 'remarks' ? 500 : 200}/></label>)}
+      <label>再次输入价税合计（对照纸面，不从上面复制）<input value={values.amountConfirmation} onChange={e => set('amountConfirmation', e.target.value)} inputMode="decimal" autoComplete="off"/></label>
+      {problem && <p className="hint">{problem}</p>}
+      <label className="check-label"><input type="checkbox" checked={checked} disabled={!!problem || busy} onChange={e => setChecked(e.target.checked)}/><span>我已逐项对照票面核对，确认导入这张发票（同编号已存在时不覆盖）。</span></label>
+      <Button type="submit" variant="primary" disabled={!!problem || !checked || busy}>确认导入</Button>
+    </form>
+  </div>
 }

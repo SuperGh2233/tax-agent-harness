@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 比赛/研究型本地演示项目，不是生产财务系统；仅面向 loopback，单 JVM，无生产认证，不得暴露公网。
 - 复赛范围以 `docs/FINAL_ROUND_CONTRACT.md`（2026-11-18 批准）为准；初赛契约 `docs/BUSINESS_CONTRACT.md` 保持冻结，作为历史依据和回归基线，二者冲突时以复赛契约为准。不要修改官方材料、计划书、两份契约或“已 DONE”任务的范围。
 - 官方种子（2 家企业、2 个用户、40 张发票、48 条流水、5 条规则版本）是初始数据和回归基线；可经原入口上传导入新的**合成**数据。禁止真实财务数据和个人数据。上传不能新增用户/权限，也不覆盖同键已有记录。
-- 唯一可变业务字段是发票 `purpose` 与 `remarks`。银行记录只读，不得修改或删除；新增发票/流水只能经文件上传导入且只补缺失键（T29，复赛契约 A1/B2）。用途缺口检查不限月份：每张发票按其日期当日唯一启用的用途规则判断，无适用规则则 `UNSUPPORTED_SCOPE`（T28，复赛契约 A2）。
+- 唯一可变业务字段是发票 `purpose` 与 `remarks`。银行记录只读，不得修改或删除；新增发票/流水只能经文件上传导入且只补缺失键（T29，复赛契约 A1/B2），或扫描件经会计逐项确认后导入（T48，同样只补缺失键；用户 2026-11-21 批准偏离契约「待确认」第 4 条）。用途缺口检查不限月份：每张发票按其日期当日唯一启用的用途规则判断，无适用规则则 `UNSUPPORTED_SCOPE`（T28，复赛契约 A2）。
 - 金额由程序用整数分（`amount_cents`）计算，发票合计与银行收入/支出独立统计，不抵销、不匹配、不推断付款。
 - 密钥只通过环境变量注入，绝不写入源码、日志、文档、截图或 Git。`.env` 不会自动加载。
 - 不擅自 `git add`/`commit`/`push`，不覆盖他人工作树。开工前先读 `TASKS.md`、`git status`，认领一个无冲突任务；完成并实际验证后才标 DONE。
@@ -23,6 +23,8 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
 export PATH="$JAVA_HOME/bin:$PATH"
 export REPO_CACHE="$PWD/.m2/repository"
 ```
+
+`/usr/libexec/java_home` 只在 macOS 上有；Linux/Windows 直接把 `JAVA_HOME` 指向 JDK 21。下文的 `mvn` 都可以换成仓库自带的 Maven Wrapper `./mvnw`（Windows 用 `mvnw.cmd`，固定 Maven 3.9.9），CI 默认用它。
 
 ### 后端
 
@@ -66,7 +68,8 @@ LLM_PROTOCOL=anthropic
 
 - `DemoConfiguration` 在 `LLM_PROTOCOL=anthropic` 或 endpoint 路径含 `/anthropic` 时选 `AnthropicMessagesClient`（追加 `/v1/messages`）；否则选 `OpenAiCompatibleClient`（`/responses` 或追加 `/chat/completions`）。不自动回退。
 - 缺少任一配置时返回 `MODEL_NOT_CONFIGURED`，不会用假模型伪造成功。模型超时 60 秒；运行时不重试模型（`modelRetries=0`），三种协议适配器对**格式无法解析**的回复统一纠正重试一次（`LlmClient.CORRECTION`），仍失败为 `MODEL_RESPONSE_INVALID`；HTTP 401/403/429/其他统一映射为 `MODEL_AUTH_FAILED`/`MODEL_RATE_LIMITED`/`MODEL_HTTP_ERROR`，均不重试（T36）。
-- 换模型只改环境变量，不要把型号写进代码或规则。
+- 换模型只改环境变量，不要把型号写进代码或规则。开发期一直用 qwen3.7-flash，最终比赛采用 qwen3.8（用户 2026-11-21）。
+- 扫描件读图（T48）用独立配置 `LLM_VISION_ENDPOINT / _API_KEY / _MODEL / _PROTOCOL`（`VisionClient`，必须是能读图的模型；`qwen3.7-flash` 已实测能读图，可与 `LLM_*` 填相同值）；未配置时扫描件走手工录入草稿，不回退到 `LLM_*`，也不会自动继承 `LLM_*`。
 - 命名模型配置（T30）：`LLM_<NAME>_ENDPOINT / _API_KEY / _MODEL / _PROTOCOL`，Agent 只引用配置名（`default` 即上面的 `LLM_*`）；未配置的名称返回 `MODEL_NOT_CONFIGURED`，从不回退到其他配置。密钥永不入库。
 
 ### 前端
@@ -96,7 +99,7 @@ java -jar target/harness-0.0.1-SNAPSHOT.jar --taxagent.database="$DEMO_DB" \
 主链：`DemoController → FinanceAgent → TaskMemory / AgentRuntime → LlmClient → 财税工具 → SQLite`。
 
 - **`DemoController`**（`demo/`）：本地演示 REST API。每个请求新建 `FinanceAgent`；状态都在 SQLite。`DemoPrincipal` 只由固定 profile 映射构造（operator→U001，viewer→U002），绝不由 HTTP 请求体或模型参数反序列化。
-- **`DemoSecurity`**：只允许直接 loopback、同源 Origin、无转发头、GET/POST/DELETE、CSRF Token、请求体 ≤64KB、每 IP 每分钟 600 次。所有信任来自可信会话，不来自 `userId` 参数。
+- **`DemoSecurity`**：只允许直接 loopback、同源 Origin、无转发头、GET/POST/DELETE、CSRF Token、请求体 ≤64KB（`/files` 与 `/files/scan` 上传除外）、每 IP 每分钟 600 次；CSP 仅放开 `img-src data:`（扫描件页面图片）。所有信任来自可信会话，不来自 `userId` 参数。
 - **`AgentDirectory`**（T30）：可配置 Agent（名称、职责、提示词、模型配置名、能力、适用企业），版本不可改、最高版本生效；任务创建时绑定 Agent，每轮开始时解析当时生效的版本，因此修改从下一轮起生效。提示词追加在固定系统安全规则之后，不能覆盖；能力 = Agent 能力 ∩ 运行时工具；无 `update_invoice` 的 Agent 收不到写工具，批准轮在调用模型前即拒绝；用户权限仍由 `PermissionGuard` 逐次校验。修改需对 Agent 覆盖的每家企业有修改权限。默认 Agent `finance-assistant` 即 T30 之前的行为。
 - **`CapabilityRegistry`**（T31）：工具（代码内置契约版本＋全局启停，状态历史只追加）与技能（说明＋所需查询工具，版本不可改）。Agent 每轮可用工具 = (Agent 工具 ∪ 其启用技能的工具) ∩ 已启用工具；技能不能授予 `update_invoice`。未授予 → `CAPABILITY_NOT_GRANTED`，已停用 → `CAPABILITY_DISABLED`，未知工具名 → `INVALID_ARGUMENT`。全局修改需对所有企业有修改权限；每个工具与技能列出使用它的 Agent（变更影响）。
 - **`FinanceAgent`**：任务/记忆/运行时/写入的组合入口。`approvedTurn` 是唯一写入通道，必须由可信 UI 传入本轮精确 `operationId` + `InvoiceUpdate` + 明确 `Intent`。
@@ -105,9 +108,10 @@ java -jar target/harness-0.0.1-SNAPSHOT.jar --taxagent.database="$DEMO_DB" \
 - **`ContextProjector`**：每轮把任务上下文裁剪为 ≤6000 字符（`MAX_CHARS`，T34 起由 4000 上调）的 JSON 再交给模型；完整上下文仍以数据库为准。投影不是证据、不是写入授权。
 - **上下文压缩与回溯**（T34）：`AgentRuntime` 把超过 6000 字符的工具结果压缩为摘要（合计仍由程序对全部记录计算）；模型需要原文时调用 `recall_context`，由 `ContextRecall` 只读取回当前任务/企业的轮次或工具结果，每次经 `TaskMemory`/`FileService` 重新校验访问；模型平时看不到 `call_id`（只在压缩提示里给出），未知 `call_id` 的 NOT_FOUND 信息会列出本任务最近可取回的调用供其改正（T38）；取回页按大小截断（`ContextRecall.MAX_PAGE_CHARS`），保证整页送达模型、不被再次压缩，备注给出继续用的 offset（T39）。该工具没有企业参数，只在绑定了当前任务时提供。
 - **`AgentRuntime`**：模型决策循环（最多 8 步）。决策可为单工具、最多 8 个只读工具的批量、`ask`、`finish`。整批先预校验再串行执行；无批准或含多个 `update_invoice` 的批次直接拒绝。T37：批准轮中“一个保存 + 只读查询”的批次（真实模型常把“保存并查询核对”合批）先单独执行保存、再执行查询，结果按供应商原顺序回放（Anthropic 回放校验顺序）；本轮已 `verified=true` 后再调用保存不再执行，也不算失败；已核验的保存使本轮先前的工具错误不再决定结果；批准轮保存参数畸形时仍拒绝，但拒绝信息与 schema 描述（`AgentRuntime.SAVE_ARGUMENTS`）提示模型改用 `{}` 重试。T36：只读工具超时或 `STORAGE_ERROR` 时重试一次，`update_invoice` 永不重试，写入 `STORAGE_ERROR`/超时即停止本轮（结果只能经 verify/recover 判定）；连续 3 次工具错误熔断为 `TOOL_ERRORS_REPEATED`；未解决的工具错误使模型结束时本轮失败，但只读工具的参数错误（`INVALID_ARGUMENT`/`NOT_FOUND`）在同一工具随后成功时视为已自我纠正而解除（T38），拒绝/停用/存储/超时错误从不解除；无法解析的只读参数回给模型 `AgentRuntime.readArguments` + 该工具 schema 的 `description`；失败回复由 `AgentRuntime.honest` 按本轮工具证据说明真实数据状态（已核验不重做 / 结果未知勿重复保存 / 未修改），`UNSUPPORTED_SCOPE` 另附固定原因说明（无唯一启用规则、不猜测）。模型把结束协议发成 `finish`/`ask` 伪工具调用时按文本协议归一化。
-- **工具层**（`tool/`）：`query_invoices`、`query_bank_entries`、`check_invoice_purpose`、`query_rules`、`search_knowledge`（T32，`KnowledgeService`）、`recall_context`（T34）、`update_invoice`。上传文件由 `FileService` 管理（T29）。`ToolContract` 用严格 JSON 反序列化（拒绝未知字段、标量强制转换、重复键），身份与授权不在工具参数里。
+- **工具层**（`tool/`）：`query_invoices`、`query_bank_entries`、`check_invoice_purpose`、`query_rules`、`search_knowledge`（T32，`KnowledgeService`）、`recall_context`（T34）、`update_invoice`。上传文件由 `FileService` 管理（T29）：认不出的表头作为 `tables` 返回、由会计提交 `SheetMapping` 后再导入（T46，同哈希文件只导入被映射工作表，映射记入 `file_column_mappings`）；扫描件 `recognize` → 草稿（`scan_drafts`）→ `confirm`（金额输两遍、大写金额由 `wordsToCents` 比对）才建发票（T48）。`ToolContract` 用严格 JSON 反序列化（拒绝未知字段、标量强制转换、重复键），身份与授权不在工具参数里。
 - **`PermissionGuard`**：每次业务操作在事务内重新查 `permissions` 表；自然语言不能改变身份或权限。
 - **`InvoiceWriteService`**：一次性 `Authorization` 对象（消费后不可复用）、字段白名单、`operationId` 台账幂等、事务内回读、`verified=true` 才算成功。超时/未知结果只能走只读 `recover`/`verify`，空结果不等于可以重试。
+- **批量保存**（T47）：`Approval.items`（2–20 张，每张独立 operationId，批次另有一个）→ `FinanceAgent.approvedBatchTurn` → `ApprovedWrite.isBatch()`；模型仍只发 `update_invoice {}`，`executeBatch` 单事务全成或全不改，结果 `BatchUpdateResult` 附程序生成的复核清单（`ReviewItem`）。证据门、`TaskMemory.verifiedApprovedFields` 与前端写入锁都要求**每张**回读匹配；`recoverBatch` 只读。
 - **证据门**：模型文字、`FINISHED`、旧轮历史都不是保存成功的证据。批准轮没有本轮 `update_invoice` 的 `verified=true` 回读时，只能返回 `WRITE_NOT_EXECUTED` 或 `WRITE_NOT_VERIFIED`，任务保持 ACTIVE。
 - **`DemoAudit`**：append-only 脱敏审计；每次变更前先写 REQUESTED，审计不可用则 fail closed。`agent_trace` 记录每轮模型输入摘要。
 - **`RuleService`**：只执行已存储规则文本中的既有表述（`每张必填` / `≥X 元必填`），按企业、日期、启用状态选版本；矛盾或无法解析时返回 `UNSUPPORTED_SCOPE`，不猜。规则版本不可原地修改，只新增版本/停用。
@@ -121,7 +125,16 @@ java -jar target/harness-0.0.1-SNAPSHOT.jar --taxagent.database="$DEMO_DB" \
 - `DemoApiTest` 用 standalone MockMvc + `DemoSecurity` 覆盖会话、CSRF、权限、并发与负例。
 - 前端：Vitest，测试在 `frontend/tests/`。
 - 真实模型/浏览器验证只能使用合成数据、独立临时 SQLite、loopback，并且要与自动化测试分开记录；API 通过不等于 UI 验证通过。
-- 真实进程级检查脚本在 `scripts/`：`long_conversation_check.py`、`large_result_check.py`（真实模型）、`fault_injection_check.py`（本机桩模型，无需密钥，T40）、`fresh_checkout_check.py`（全新检出、空缓存构建，只覆盖已提交内容）。
+- 进程级检查脚本在 `scripts/`，都跑在已打好的 JAR 上（合成数据、独立临时库、只走 loopback）：
+
+  ```sh
+  python3 scripts/fault_injection_check.py --jar target/harness-0.0.1-SNAPSHOT.jar   # 本机桩模型，无需密钥（T40）；--skip timeout 跳过超时场景
+  python3 scripts/long_conversation_check.py --jar target/harness-0.0.1-SNAPSHOT.jar # 真实模型，消耗额度
+  python3 scripts/large_result_check.py --jar target/harness-0.0.1-SNAPSHOT.jar      # 真实模型，消耗额度
+  python3 scripts/fresh_checkout_check.py [--maven 3.6.3|wrapper]                     # 全新克隆＋空缓存构建，只覆盖已提交内容，需联网
+  ```
+
+- CI（`.github/workflows/fresh-checkout.yml`）只跑 `fresh_checkout_check.py`：Ubuntu/Windows/macOS × Wrapper，外加 Ubuntu × Maven 3.6.3。CI 里没有密钥，也不调用模型；未提交的改动它看不到。
 
 ## 容易踩的坑
 
@@ -132,3 +145,4 @@ java -jar target/harness-0.0.1-SNAPSHOT.jar --taxagent.database="$DEMO_DB" \
 - 写入待核验锁会跨会话/换库残留，演示前清理 `taxagent-pending-operation*` 存储键。
 - 不要用 `data/harness.db` 或已有库做初始化/演示；`data/`、`*.db`、`.env`、`target/`、`.m2/` 都不入库。
 - 规则“更新”是新增版本，不是原地改写；停用后检查必须随当前启用版本变化。
+- `frontend/vite.config.ts` 用 `realpathSync.native` 固定 Vite root，这是为了修 Windows 8.3 短路径（`RUNNER~1`）导致的构建失败（T42）。不要把它“简化”成 `process.cwd()`，也不要换成非 native 的 `realpathSync`。
