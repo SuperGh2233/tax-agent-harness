@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>财税 Agent Harness 宣传片</title>
+<!--
+  12 秒宣传片：1920×1080、30 fps、120 BPM。画面与配乐都由本文件的代码生成，单文件、无外部依赖。
+  画面是时间的纯函数 render(t)，所以任意一帧都能精确复现：
+    ?capture=1&t=3.5   以 1920×1080 原尺寸停在第 3.5 秒（截帧、出 MP4 用）
+    window.__seek(t)    跳到任意时刻
+    window.__renderWav() 离线合成整段配乐，返回 WAV 的 base64
+  出 MP4：python3 docs/demo/render_promo_video.py（需要 playwright 与 ffmpeg，见脚本说明）。
+  关键数字与合成种子数据一致：C001 2026-09 发票 10 张、合计 9,622.06 元、缺用途 5 张；保存 F002/F004/F006 后剩 2 张。
+-->
+<style>
+:root {
+  --bg: #FFFFFF; --card: #F4F4F5; --line: #ECECEE; --ink: #0D0D0D; --muted: #6E6E80;
+  --bar: #DCDCE0; --bar-on-white: #E6E6E9;
+  --blue: #2F5BEA; --blue-soft: #EEF2FF; --green: #0E8A6A; --green-soft: #E6F5EF; --red: #C0362C; --red-soft: #FDEEEC;
+  --page: #F6F6F7;
+  --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "SF Pro Text", "Noto Sans CJK SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+* { box-sizing: border-box }
+html, body { margin: 0; background: var(--page) }
+body { font-family: var(--font); color: var(--ink); -webkit-font-smoothing: antialiased;
+  padding-block: 24px 40px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+.viewport { position: relative; width: 100%; max-width: 1280px; margin: 0 auto; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 16px;
+  background: var(--bg); box-shadow: 0 2px 6px rgb(0 0 0 / .04), 0 24px 64px -16px rgb(0 0 0 / .16) }
+#stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; background: var(--bg); overflow: hidden }
+.abs { position: absolute }
+.bar { position: absolute; height: 12px; border-radius: 6px; background: var(--bar) }
+.on-white .bar, .bar.w { background: var(--bar-on-white) }
+.card { position: absolute; background: var(--card); border: 1.5px solid var(--line); border-radius: 28px; overflow: hidden }
+.panel { position: absolute; background: var(--bg); border: 1.5px solid var(--line); border-radius: 20px; overflow: hidden }
+.btn { position: absolute; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 999px; font-size: 22px; font-weight: 600; white-space: nowrap }
+.btn.ink { background: var(--ink); color: var(--bg) }
+.btn.ghost { background: var(--bg); color: var(--ink); border: 1.5px solid #D9D9DE }
+.btn.off { background: var(--bar); color: var(--bg) }
+.pill { position: absolute; display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 999px; font-size: 18px; font-weight: 600; white-space: nowrap }
+.label { position: absolute; font-size: 18px; color: var(--muted); white-space: nowrap }
+.big { position: absolute; font-size: 56px; font-weight: 650; letter-spacing: -.03em; font-variant-numeric: tabular-nums; white-space: nowrap }
+.unit { font-size: 24px; font-weight: 600; color: var(--muted); margin-left: 6px; letter-spacing: 0 }
+.mono { font-family: var(--mono) }
+.check { position: absolute; width: 24px; height: 24px; border-radius: 7px; border: 2px solid #C9C9CF; background: var(--bg) }
+.check i { position: absolute; inset: -2px; border-radius: 7px; background: var(--ink) }
+.check svg { position: absolute; inset: 2px; width: 16px; height: 16px }
+.input { position: absolute; height: 32px; border-radius: 9px; border: 1.5px solid #D9D9DE; background: var(--bg); overflow: hidden }
+#cursor { position: absolute; left: 0; top: 0; width: 40px; height: 40px; z-index: 50; pointer-events: none; transform-origin: 4px 3px }
+.ring { position: absolute; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; border: 2.5px solid var(--ink); z-index: 49; opacity: 0; pointer-events: none }
+
+.controls { max-width: 1280px; margin: 16px auto 0; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; font-size: 14px; color: var(--muted) }
+.controls button { font: inherit; font-size: 14px; height: 36px; padding: 0 16px; border-radius: 999px; border: 1px solid #D9D9DE; background: var(--bg); color: var(--ink); cursor: pointer }
+.controls button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink) }
+.controls button:focus-visible, .controls input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px }
+.controls input[type=range] { flex: 1 1 240px; min-width: 0; accent-color: var(--ink) }
+.controls .time { font-variant-numeric: tabular-nums; min-width: 128px; color: var(--ink) }
+.controls label { display: inline-flex; gap: 6px; align-items: center }
+.report { max-width: 1280px; margin: 10px auto 0; font-size: 13px; color: var(--muted); line-height: 1.6 }
+.report b { color: var(--ink); font-weight: 600 }
+
+body.capture { padding: 0; background: var(--bg) }
+body.capture .viewport { max-width: none; width: 1920px; height: 1080px; aspect-ratio: auto; border-radius: 0; box-shadow: none }
+body.capture .controls, body.capture .report { display: none }
+</style>
+</head>
+<body>
+<div class="viewport" id="viewport"><div id="stage" aria-label="财税 Agent Harness 宣传片画面"></div></div>
+<div class="controls" role="group" aria-label="播放控制">
+  <button class="primary" id="play" type="button">播放（含配乐）</button>
+  <button id="restart" type="button">从头播放</button>
+  <input id="scrub" type="range" min="0" max="12" step="0.0333333" value="0" aria-label="时间">
+  <span class="time" id="time">0.00 s · 第 1 拍</span>
+  <label><input type="checkbox" id="sound" checked> 声音</label>
+  <button id="wav" type="button">下载配乐 WAV</button>
+</div>
+<p class="report" id="report"></p>
+
+<script>
+(() => {
+'use strict'
+const DUR = 12, FPS = 30, BPM = 120, HALF = 60 / BPM / 2   // 0.25 s per landing slot
+
+/* ───────────── timeline: every change lands on a half beat ───────────── */
+const T = {
+  barsIn: [0.25, 0.5, 0.75],      // goal text lands as grey bars
+  createClick: 1.25, taskIn: 1.5, // cursor clicks 创建任务, task card springs up
+  rows: [{inn: 2.5, done: 3.0}, {inn: 3.25, done: 3.5}, {inn: 3.75, done: 4.0}],
+  count: [3.0, 3.5],              // 0 → 10 张, 0.00 → 9,622.06 元
+  tableIn: 4.5, gaps: 5.0, gapCount: 5.25,
+  reviewClick: 6.5, expand: 6.75,
+  checks: [7.0, 7.25, 7.5],       // F002, F004, F006
+  fills: [8.0, 8.25, 8.5],
+  ready: 8.5, continueClick: 8.75, modalIn: 9.0, confirmClick: 9.5, modalOut: 9.75,
+  verified: 10.0, drop: 10.25,
+  auditClick: 10.5, collapse: 10.75, auditText: 11.0, stack: [11.25, 11.5],
+}
+const BEAT_POINTS = [...T.barsIn, T.createClick, T.taskIn, ...T.rows.flatMap(r => [r.inn, r.done]), ...T.count, T.tableIn, T.gaps, T.gapCount,
+  T.reviewClick, T.expand, ...T.checks, ...T.fills, T.continueClick, T.modalIn, T.confirmClick, T.modalOut, T.verified, T.drop,
+  T.auditClick, T.collapse, T.auditText, ...T.stack]
+
+/* ───────────── data (synthetic seed, C001 · 2026-09) ───────────── */
+const N_ROWS = 10
+const GAP_ROWS = [1, 2, 3, 5, 8]          // F002 F003 F004 F006 F009 — 缺用途 5 张
+const SAVE_ROWS = [1, 3, 5]               // F002 F004 F006 — saved in one batch, 5 → 2
+const rowBars = Array.from({length: N_ROWS}, (_, i) => ({id: 64 + (i * 7) % 18, date: 96 + (i * 13) % 26, seller: 180 + (i * 37) % 120, amount: 72 + (i * 11) % 30}))
+
+/* ───────────── layout (stage px); cursor targets are derived from the same numbers ───────────── */
+const CARD = {x: 240, y: 128, w: 1440, h: 900}
+const AUDIT_ROW = {x: 410, y: 496, w: 1100, h: 88}
+const COMPOSER = {x: 460, y: 330, w: 1000, h: 300}
+const BTN_CREATE = {x: COMPOSER.x + 790, y: COMPOSER.y + 216, w: 170, h: 56}
+const BTN_REVIEW = {x: 1200, y: 28, w: 200, h: 52}               // card-relative
+const PROG = {x: 40, y: 112, w: 640, h: 200}
+const TILE_Y = 112, TILE_H = 200, TILE_X = [720, 926, 1210], TILE_W = [190, 268, 190]   // ends at 1400, inside the card's 40px padding
+const TABLE = {x: 40, y: 342, w: 1360, h: 484}
+const HEAD_H = 44, ROW_H = 44, SHIFT = 44
+const CHECK_X = 20, INPUT_X = 1040, INPUT_W = 300
+const BTN_CONT = {x: 1200, y: 842, w: 200, h: 44}                // card-relative
+const MODAL = {x: 550, y: 330, w: 820, h: 420}
+const BTN_CONFIRM = {x: 540, y: 328, w: 240, h: 56}              // modal-relative
+const NAV_AUDIT = {x: 1300, y: 26, w: 92, h: 32}
+const center = (b, ox = 0, oy = 0) => [ox + b.x + b.w / 2, oy + b.y + b.h / 2]
+const rowCenterY = i => CARD.y + TABLE.y + HEAD_H + i * ROW_H + ROW_H / 2
+const TARGET = {
+  create: center(BTN_CREATE),
+  review: center(BTN_REVIEW, CARD.x, CARD.y),
+  check: i => [CARD.x + TABLE.x + CHECK_X + 12, rowCenterY(i)],
+  input: i => [CARD.x + TABLE.x + INPUT_X + INPUT_W / 2, rowCenterY(i)],
+  cont: center(BTN_CONT, CARD.x, CARD.y),
+  confirm: center(BTN_CONFIRM, MODAL.x, MODAL.y),
+  audit: center(NAV_AUDIT),
+}
+const REST = [1700, 820]
+
+/* cursor travel: [start, arrive, [x, y]]; arrival is critically damped and lands exactly on the target */
+const MOVES = [
+  [0.75, T.createClick, TARGET.create],
+  [1.5, 2.0, REST],
+  [6.0, T.reviewClick, TARGET.review],
+  [T.reviewClick, T.checks[0], TARGET.check(SAVE_ROWS[0])],
+  [T.checks[0], T.checks[1], TARGET.check(SAVE_ROWS[1])],
+  [T.checks[1], T.checks[2], TARGET.check(SAVE_ROWS[2])],
+  [T.checks[2], T.fills[0], TARGET.input(SAVE_ROWS[0])],
+  [T.fills[0], T.fills[1], TARGET.input(SAVE_ROWS[1])],
+  [T.fills[1], T.fills[2], TARGET.input(SAVE_ROWS[2])],
+  [T.fills[2], T.continueClick, TARGET.cont],
+  [T.modalIn, T.confirmClick, TARGET.confirm],
+  [T.modalOut, T.auditClick, TARGET.audit],
+  [T.collapse, 11.5, [1560, 880]],
+]
+const CURSOR_START = [1600, 900]
+const CLICKS = [
+  [T.createClick, TARGET.create, '创建任务'], [T.reviewClick, TARGET.review, '审核与结果'],
+  [T.checks[0], TARGET.check(SAVE_ROWS[0]), '勾选 F002'], [T.checks[1], TARGET.check(SAVE_ROWS[1]), '勾选 F004'], [T.checks[2], TARGET.check(SAVE_ROWS[2]), '勾选 F006'],
+  [T.fills[0], TARGET.input(SAVE_ROWS[0]), '填 F002'], [T.fills[1], TARGET.input(SAVE_ROWS[1]), '填 F004'], [T.fills[2], TARGET.input(SAVE_ROWS[2]), '填 F006'],
+  [T.continueClick, TARGET.cont, '继续二次确认'], [T.confirmClick, TARGET.confirm, '确认，现在批量保存'], [T.auditClick, TARGET.audit, '审计记录'],
+]
+
+/* ───────────── motion helpers ───────────── */
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v))
+const mix = (a, b, p) => a + (b - a) * p
+// Under-damped spring 0 → 1 with a light overshoot (~8%); settles in ~0.45 s.
+function spring(t, t0, f = 2.4, z = 0.6) {
+  const x = t - t0
+  if (x <= 0) return 0
+  if (x > 2.5) return 1
+  const w = 2 * Math.PI * f, wd = w * Math.sqrt(1 - z * z)
+  return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + (z * w / wd) * Math.sin(wd * x))
+}
+// Press: dips to (1 - depth) right at tc, then springs back with a small bounce.
+function press(t, tc, depth = 0.06) {
+  const x = t - tc
+  if (x < 0) return 1
+  if (x < 0.06) return 1 - depth * (x / 0.06)
+  return 1 - depth * (1 - spring(t, tc + 0.06, 3, 0.45))
+}
+function cursorAt(t) {
+  let pos = CURSOR_START
+  for (const [s, e, to] of MOVES) {
+    if (t <= s) break
+    const from = pos
+    if (t >= e) { pos = to; continue }
+    const x = (t - s) / (e - s), w = 8.5
+    const p = x >= 1 ? 1 : 1 - Math.exp(-w * x) * (1 + w * x)
+    const k = clamp(p / (1 - Math.exp(-w) * (1 + w)))   // normalised so it is exactly 1 at arrival
+    return [mix(from[0], to[0], k), mix(from[1], to[1], k)]
+  }
+  return pos
+}
+const fmtMoney = cents => (cents / 100).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+
+/* ───────────── build the scene once ───────────── */
+const stage = document.getElementById('stage')
+function el(cls, parent = stage, style = {}, html = '') {
+  const e = document.createElement('div')
+  if (cls) e.className = cls
+  Object.assign(e.style, Object.fromEntries(Object.entries(style).map(([k, v]) => [k, typeof v === 'number' ? v + 'px' : v])))
+  if (html) e.innerHTML = html
+  parent.appendChild(e)
+  return e
+}
+const STAR = '<svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><path d="M16 5Q17 15 27 16Q17 17 16 27Q15 17 5 16Q15 15 16 5Z" fill="#fff"/></svg>'
+const TICK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+const TICK_INK = c => `<svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+
+// top bar
+el('abs', stage, {left: 64, top: 24, width: 36, height: 36, borderRadius: 10, background: 'var(--ink)', display: 'grid', placeItems: 'center'}, STAR)
+el('bar', stage, {left: 116, top: 36, width: 132})
+for (let i = 0; i < 5; i++) el('bar', stage, {left: 700 + i * 120, top: 37, width: 64, height: 10})
+const navAudit = el('label', stage, {left: NAV_AUDIT.x, top: NAV_AUDIT.y, width: NAV_AUDIT.w, height: NAV_AUDIT.h, lineHeight: '32px', textAlign: 'center'}, '审计记录')
+const navLine = el('abs', stage, {left: NAV_AUDIT.x + 10, top: NAV_AUDIT.y + 36, width: NAV_AUDIT.w - 20, height: 3, borderRadius: 2, background: 'var(--ink)', transformOrigin: 'left center'})
+el('abs', stage, {left: 1720, top: 26, width: 136, height: 32, borderRadius: 16, background: 'var(--card)'})
+el('abs', stage, {left: 0, top: 84, width: 1920, height: 1.5, background: 'var(--line)'})
+
+// act 1: composer
+const composer = el('card', stage, {left: COMPOSER.x, top: COMPOSER.y, width: COMPOSER.w, height: COMPOSER.h, borderRadius: 26})
+const caret = el('abs', composer, {left: 40, top: 40, width: 2.5, height: 28, background: 'var(--ink)', borderRadius: 2})
+const goalBars = [[40, 48, 820], [40, 84, 700], [40, 120, 460]].map(([x, y, w]) => el('bar', composer, {left: x, top: y, width: w, height: 16, borderRadius: 8, background: '#CFCFD5'}))
+el('bar', composer, {left: 40, top: 238, width: 168, height: 10})
+const btnCreate = el('btn ink', composer, {left: BTN_CREATE.x - COMPOSER.x, top: BTN_CREATE.y - COMPOSER.y, width: BTN_CREATE.w, height: BTN_CREATE.h}, '创建任务 <span style="font-size:22px">↑</span>')
+
+// task card
+const card = el('card', stage, {left: CARD.x, top: CARD.y, width: CARD.w, height: CARD.h, zIndex: 3})
+const content = el('abs', card, {left: 0, top: 0, width: CARD.w, height: CARD.h})
+el('bar', content, {left: 40, top: 44, width: 380, height: 18, borderRadius: 9, background: '#CFCFD5'})
+const pill = el('pill', content, {left: 450, top: 35})
+const btnReview = el('btn ghost', content, {left: BTN_REVIEW.x, top: BTN_REVIEW.y, width: BTN_REVIEW.w, height: BTN_REVIEW.h}, '审核与结果')
+
+// tool progress (rows roll up inside a clipped panel)
+const prog = el('panel on-white', content, {left: PROG.x, top: PROG.y, width: PROG.w, height: PROG.h})
+const progRows = T.rows.map((r, i) => {
+  const row = el('abs', prog, {left: 24, top: 18 + i * 58, width: PROG.w - 48, height: 48, display: 'flex', alignItems: 'center', gap: '14px', fontSize: '22px'})
+  const icon = el('abs', row, {left: 0, top: 12, width: 24, height: 24})
+  const spin = el('abs', icon, {inset: 0, border: '3px solid #D9D9DE', borderTopColor: 'var(--ink)', borderRadius: '50%'})
+  const done = el('abs', icon, {inset: 0, display: 'grid', placeItems: 'center'}, TICK_INK('#0D0D0D'))
+  let text
+  if (i === 0) text = el('abs', row, {left: 40, top: 8, whiteSpace: 'nowrap', fontWeight: 500})
+  else { text = el('bar w', row, {left: 40, top: 18, width: i === 1 ? 300 : 240, height: 14, borderRadius: 7}) }
+  return {row, spin, done, text}
+})
+
+// stat tiles
+function tile(i, label) {
+  const t = el('panel', content, {left: TILE_X[i], top: TILE_Y, width: TILE_W[i], height: TILE_H})
+  el('label', t, {left: 24, top: 22}, label)
+  return t
+}
+const tileCount = tile(0, '发票')
+const countNum = el('big', tileCount, {left: 24, top: 92})
+const tileSum = tile(1, '合计')
+const sumNum = el('big', tileSum, {left: 24, top: 100, fontSize: '40px'})
+const tileGap = tile(2, '缺用途')
+const gapOld = el('big', tileGap, {left: 24, top: 92, color: 'var(--red)'}, '5<span class="unit">张</span>')
+const gapNew = el('big', tileGap, {left: 24, top: 92, color: 'var(--red)'}, '2<span class="unit">张</span>')
+const gapDash = el('big', tileGap, {left: 24, top: 92, color: '#D9D9DE'}, '—')
+
+// invoice table
+const table = el('panel on-white', content, {left: TABLE.x, top: TABLE.y, width: TABLE.w, height: TABLE.h})
+const head = el('abs', table, {left: 0, top: 0, width: TABLE.w, height: HEAD_H, borderBottom: '1.5px solid var(--line)'})
+const headInner = el('abs', head, {left: 0, top: 0, width: TABLE.w, height: HEAD_H})
+;[[16, 56], [120, 72], [270, 120], [780, 72]].forEach(([x, w]) => el('bar', headInner, {left: x, top: 17, width: w, height: 10, background: '#D4D4D9'}))
+const headInput = el('bar', head, {left: INPUT_X, top: 17, width: 96, height: 10, background: '#D4D4D9'})
+const rows = Array.from({length: N_ROWS}, (_, i) => {
+  const row = el('abs', table, {left: 0, top: HEAD_H + i * ROW_H, width: TABLE.w, height: ROW_H, borderBottom: i < N_ROWS - 1 ? '1px solid var(--line)' : 'none'})
+  const tint = el('abs', row, {inset: 0, background: 'var(--red-soft)'})
+  const sel = el('abs', row, {inset: 0, background: 'var(--card)'})
+  const stripe = el('abs', row, {left: 0, top: 6, width: 4, height: ROW_H - 12, borderRadius: 2, background: 'var(--red)', transformOrigin: 'center'})
+  const check = el('check', row, {left: CHECK_X, top: (ROW_H - 24) / 2}, '<i></i>' + TICK)
+  const inner = el('abs', row, {left: 0, top: 0, width: TABLE.w, height: ROW_H})
+  const b = rowBars[i]
+  el('bar', inner, {left: 16, top: 16, width: b.id})
+  el('bar', inner, {left: 120, top: 16, width: b.date})
+  el('bar', inner, {left: 270, top: 16, width: b.seller})
+  el('bar', inner, {left: 880 - b.amount, top: 16, width: b.amount})
+  const tag = el('abs', inner, {left: 920, top: 9, height: 26, padding: '0 10px', borderRadius: 13, fontSize: '16px', lineHeight: '26px', fontWeight: 600, color: 'var(--red)', background: 'var(--bg)', border: '1.5px solid rgba(192,54,44,.35)', whiteSpace: 'nowrap'}, '缺用途')
+  const ok = el('abs', inner, {left: 924, top: 11, width: 22, height: 22}, TICK_INK('#0E8A6A'))
+  const input = el('input', row, {left: INPUT_X, top: (ROW_H - 32) / 2, width: INPUT_W, transformOrigin: 'left center'})
+  const value = el('bar w', input, {left: 12, top: 9, width: 0, height: 11, transformOrigin: 'left center'})
+  return {row, tint, sel, stripe, check, inner, tag, ok, input, value}
+})
+
+// batch bar
+const batch = el('abs', content, {left: 40, top: 838, width: 1360, height: 52})
+const batchCount = el('abs', batch, {left: 0, top: 12, fontSize: '20px', fontWeight: 600, whiteSpace: 'nowrap'})
+el('bar', batch, {left: 130, top: 20, width: 260, height: 11})
+const btnCont = el('btn off', content, {left: BTN_CONT.x, top: BTN_CONT.y, width: BTN_CONT.w, height: BTN_CONT.h, fontSize: '19px'}, '继续二次确认')
+
+// audit row content (inside the card once it collapses)
+const AUDIT_HTML = '<span class="mono" style="color:var(--muted)">10:42:18</span><span style="color:#C9C9CF">·</span><span class="mono">update_invoice</span><span style="color:#C9C9CF">·</span><span style="display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-radius:999px;background:var(--green-soft);color:var(--green);font-family:var(--mono);font-weight:600">' + TICK_INK('#0E8A6A') + 'verified=true</span>'
+const auditText = el('abs', card, {left: 36, top: 0, height: AUDIT_ROW.h, display: 'flex', alignItems: 'center', gap: '22px', fontSize: '26px', fontWeight: 500, whiteSpace: 'nowrap'}, AUDIT_HTML)
+const extraRows = [0, 1].map(() => {
+  const r = el('card', stage, {left: AUDIT_ROW.x, top: AUDIT_ROW.y, width: AUDIT_ROW.w, height: AUDIT_ROW.h, borderRadius: 16, zIndex: 2})
+  el('abs', r, {left: 36, top: 0, height: AUDIT_ROW.h, display: 'flex', alignItems: 'center', gap: '22px', fontSize: '26px', fontWeight: 500, whiteSpace: 'nowrap'}, AUDIT_HTML)
+  return r
+})
+
+// modal
+const overlay = el('abs', stage, {inset: 0, background: 'rgba(13,13,13,.18)', zIndex: 10})
+const modal = el('abs', stage, {left: MODAL.x, top: MODAL.y, width: MODAL.w, height: MODAL.h, background: 'var(--bg)', borderRadius: 28, border: '1.5px solid var(--line)',
+  boxShadow: '0 2px 6px rgba(0,0,0,.05), 0 30px 80px -20px rgba(0,0,0,.25)', zIndex: 11, overflow: 'hidden'})
+el('bar', modal, {left: 40, top: 44, width: 420, height: 20, borderRadius: 10, background: '#CFCFD5'})
+el('bar w', modal, {left: 40, top: 80, width: 560, height: 12})
+SAVE_ROWS.forEach((r, k) => {
+  const y = 124 + k * 52
+  el('abs', modal, {left: 40, top: y, width: 740, height: 44, borderRadius: 12, background: 'var(--card)'})
+  el('bar', modal, {left: 60, top: y + 16, width: rowBars[r].id})
+  el('abs', modal, {left: 360, top: y + 8, fontSize: '22px', color: 'var(--muted)'}, '→')
+  el('bar', modal, {left: 410, top: y + 16, width: 150 + k * 24})
+})
+el('bar w', modal, {left: 40, top: 296, width: 300, height: 10})
+const btnBack = el('btn ghost', modal, {left: 380, top: 328, width: 140, height: 56})
+el('bar', btnBack, {position: 'static', width: 64, height: 11})
+const btnConfirm = el('btn ink', modal, {left: BTN_CONFIRM.x, top: BTN_CONFIRM.y, width: BTN_CONFIRM.w, height: BTN_CONFIRM.h, fontSize: '20px'}, '确认，现在批量保存')
+
+// cursor + click rings
+const rings = CLICKS.map(() => el('ring'))
+const cursor = el('', stage, {}, '<svg id="cursor-svg" viewBox="0 0 40 40" width="40" height="40" aria-hidden="true"><path d="M5 3 L5 31 L12.5 24 L17.5 35.5 L22.5 33.3 L17.6 22 L28 22 Z" fill="#0D0D0D" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/></svg>')
+cursor.id = 'cursor'
+
+/* ───────────── render(t): the whole frame is a pure function of t ───────────── */
+const S = (t, t0, f, z) => spring(t, t0, f, z)
+function show(e, on) { e.style.visibility = on ? 'visible' : 'hidden' }
+function render(t) {
+  t = clamp(t, 0, DUR)
+
+  // act 1 — goal bars land, cursor clicks 创建任务, composer leaves
+  show(caret, t < T.barsIn[0] && Math.floor(t / HALF) % 2 === 0)
+  goalBars.forEach((b, i) => { const p = S(t, T.barsIn[i]); b.style.opacity = clamp(p * 3); b.style.transform = `translateY(${(1 - p) * -40}px)` })
+  btnCreate.style.transform = `scale(${press(t, T.createClick, 0.08)})`
+  const out = S(t, T.taskIn, 2.2, 0.7)
+  composer.style.transform = `translateY(${-240 * out}px) scale(${1 - 0.12 * out})`
+  composer.style.opacity = 1 - clamp((t - T.taskIn) / 0.25)
+  show(composer, t < T.taskIn + 0.3)
+
+  // task card springs up from below; at the end it collapses into one audit row, then stacks to three
+  const inn = S(t, T.taskIn, 2.0, 0.62)
+  const col = S(t, T.collapse, 2.0, 0.66)
+  const up = S(t, T.stack[0], 2.2, 0.62)
+  const cx = mix(CARD.x, AUDIT_ROW.x, col), cw = mix(CARD.w, AUDIT_ROW.w, col), ch = mix(CARD.h, AUDIT_ROW.h, col)
+  const cy = mix(CARD.y, AUDIT_ROW.y, col) - 104 * up
+  Object.assign(card.style, {left: cx + 'px', top: cy + 'px', width: cw + 'px', height: ch + 'px', borderRadius: mix(28, 16, col) + 'px',
+    transform: `translateY(${(1 - inn) * 820}px)`})
+  show(card, t >= T.taskIn)
+  content.style.opacity = 1 - clamp((t - T.collapse) / 0.2)
+  const at = S(t, T.auditText)
+  auditText.style.opacity = clamp((t - T.auditText) / 0.2)
+  auditText.style.transform = `translateY(${(1 - at) * 14}px)`
+  // Stacking: row 1 (the card) lifts to 392 and reveals row 2 sitting behind it at 496;
+  // row 3 then slides down from behind row 2 to 600. Final rows: 392 / 496 / 600.
+  extraRows.forEach((r, k) => {
+    const p = S(t, T.stack[k], 2.2, 0.62)
+    r.style.top = (k === 0 ? AUDIT_ROW.y : mix(AUDIT_ROW.y, AUDIT_ROW.y + 104, p)) + 'px'
+    r.style.transform = `scale(${mix(0.94, 1, p)})`
+    r.style.zIndex = k === 0 ? 2 : 1
+    show(r, t >= T.stack[k])
+  })
+
+  // status pill: 进行中 (blue) → verified=true (green)
+  const v = S(t, T.verified)
+  if (t < T.verified) { pill.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:var(--blue)"></span>进行中'; pill.style.background = 'var(--blue-soft)'; pill.style.color = 'var(--blue)'; pill.style.transform = 'none'; pill.style.fontFamily = 'var(--font)' }
+  else { pill.innerHTML = TICK_INK('#0E8A6A') + 'verified=true'; pill.style.background = 'var(--green-soft)'; pill.style.color = 'var(--green)'; pill.style.fontFamily = 'var(--mono)'; pill.style.transform = `scale(${mix(0.6, 1, v)})`; pill.style.transformOrigin = 'left center' }
+  btnReview.style.transform = `scale(${press(t, T.reviewClick)})`
+
+  // act 2 — tool progress rolls up line by line
+  progRows.forEach((r, i) => {
+    const p = S(t, T.rows[i].inn)
+    r.row.style.transform = `translateY(${(1 - p) * 90}px)`
+    r.row.style.opacity = clamp(p * 2)
+    show(r.row, t >= T.rows[i].inn)
+    const isDone = t >= T.rows[i].done
+    show(r.spin, !isDone); show(r.done, isDone)
+    r.spin.style.transform = `rotate(${t * 720}deg)`
+    r.done.style.transform = `scale(${isDone ? mix(0.4, 1, S(t, T.rows[i].done, 3, 0.5)) : 1})`
+    if (i === 0) {
+      r.text.textContent = isDone ? '查询发票 · 已返回' : '正在查询发票…'
+      r.text.style.color = isDone ? 'var(--ink)' : 'var(--muted)'
+    }
+  })
+  const cp = clamp((t - T.count[0]) / (T.count[1] - T.count[0]))
+  const ce = 1 - Math.pow(1 - cp, 3)
+  countNum.innerHTML = `${t >= T.count[1] ? 10 : Math.floor(10 * ce)}<span class="unit">张</span>`
+  sumNum.innerHTML = `${t >= T.count[1] ? '9,622.06' : fmtMoney(Math.round(962206 * ce))}<span class="unit">元</span>`
+  const land = t >= T.count[1] ? press(t, T.count[1], -0.08) : 1
+  countNum.style.transform = sumNum.style.transform = `scale(${land})`
+  countNum.style.transformOrigin = sumNum.style.transformOrigin = 'left center'
+
+  // act 3 — table rises, five gap rows light up red, counter shows 缺用途 5 张
+  const tp = S(t, T.tableIn)
+  table.style.transform = `translateY(${(1 - tp) * 70}px)`
+  table.style.opacity = clamp(tp * 2)
+  show(table, t >= T.tableIn)
+  const g = S(t, T.gaps, 2.6, 0.55)
+  const verifiedFade = clamp((t - T.verified) / 0.2)
+  rows.forEach((r, i) => {
+    const isGap = GAP_ROWS.includes(i), saved = SAVE_ROWS.includes(i)
+    const lit = isGap && t >= T.gaps
+    const gone = saved && t >= T.verified
+    r.tint.style.opacity = lit ? clamp((t - T.gaps) / 0.12) * (gone ? 1 - verifiedFade : 1) : 0
+    r.stripe.style.transform = `scaleY(${lit && !gone ? g : 0})`
+    show(r.tag, lit && !gone)
+    r.tag.style.transform = `scale(${mix(0.5, 1, g)})`
+    show(r.ok, gone)
+    r.ok.style.transform = `scale(${gone ? mix(0.3, 1, S(t, T.verified, 3, 0.5)) : 1})`
+  })
+  const showGap = t >= T.gapCount
+  const gp = S(t, T.gapCount, 2.6, 0.5)
+  show(gapDash, !showGap)
+  tileGap.style.borderColor = showGap ? 'rgba(192,54,44,.45)' : 'var(--line)'
+  tileGap.style.background = showGap ? 'var(--red-soft)' : 'var(--bg)'
+  const d = S(t, T.drop, 2.4, 0.55)
+  show(gapOld, showGap && d < 0.98)
+  gapOld.style.transform = `translateY(${d * 60}px) scale(${showGap ? mix(0.5, 1, gp) : 1})`
+  gapOld.style.opacity = 1 - clamp(d * 1.6)
+  gapOld.style.transformOrigin = 'left center'
+  show(gapNew, t >= T.drop)
+  gapNew.style.transform = `translateY(${(1 - d) * -60}px)`
+  gapNew.style.opacity = clamp(d * 1.6)
+
+  // act 4 — 审核与结果: table expands (checkbox column + input column), three rows checked and filled
+  const e = S(t, T.expand)
+  headInner.style.transform = `translateX(${SHIFT * e}px)`
+  headInput.style.opacity = e; headInput.style.transform = `scaleX(${e})`; headInput.style.transformOrigin = 'left center'
+  rows.forEach((r, i) => {
+    r.inner.style.transform = `translateX(${SHIFT * e}px)`
+    r.check.style.opacity = clamp(e * 1.5)
+    r.check.style.transform = `scale(${mix(0.4, 1, e)})`
+    show(r.check, t >= T.expand)
+    const k = SAVE_ROWS.indexOf(i)
+    const checked = k >= 0 && t >= T.checks[k]
+    const c = checked ? S(t, T.checks[k], 3, 0.5) : 0
+    r.check.querySelector('i').style.transform = `scale(${c})`
+    r.check.querySelector('svg').style.opacity = checked ? 1 : 0
+    r.sel.style.opacity = checked && t < T.verified ? clamp((t - T.checks[k]) / 0.12) * 0.9 : 0
+    show(r.input, checked && t < T.verified + 0.25)
+    r.input.style.transform = `scaleX(${c})`
+    r.input.style.opacity = t >= T.verified ? 1 - clamp((t - T.verified) / 0.25) : 1
+    const filling = k >= 0 && t >= T.fills[k]
+    const f = filling ? S(t, T.fills[k], 2.6, 0.6) : 0
+    r.value.style.width = (filling ? (168 + k * 22) * f : 0) + 'px'
+    r.input.style.borderColor = filling && t < T.fills[k] + 0.25 ? 'var(--ink)' : '#D9D9DE'
+  })
+  const bp = S(t, T.expand)
+  batch.style.opacity = clamp((t - T.expand) / 0.15); batch.style.transform = `translateY(${(1 - bp) * 24}px)`
+  const nChecked = T.checks.filter(x => t >= x).length
+  batchCount.textContent = `已选 ${nChecked} 张`
+  show(btnCont, t >= T.expand)
+  btnCont.style.opacity = clamp((t - T.expand) / 0.15)
+  btnCont.className = 'btn ' + (t >= T.ready ? 'ink' : 'off')
+  btnCont.style.transform = `translateY(${(1 - bp) * 24}px) scale(${t >= T.ready ? press(t, T.continueClick) * mix(0.9, 1, S(t, T.ready, 3, 0.5)) : 1})`
+
+  // modal
+  const m = S(t, T.modalIn, 2.4, 0.62), mo = S(t, T.modalOut, 2.4, 0.8)
+  const modalOn = t >= T.modalIn && t < T.modalOut + 0.4
+  show(overlay, modalOn); show(modal, modalOn)
+  overlay.style.opacity = clamp((t - T.modalIn) / 0.2) * (1 - clamp((t - T.modalOut) / 0.25))
+  modal.style.opacity = clamp(m * 3) * (1 - clamp(mo * 2.5))
+  modal.style.transform = `translateY(${(1 - m) * 60}px) scale(${mix(0.9, 1, m) - 0.06 * mo})`
+  btnConfirm.style.transform = `scale(${press(t, T.confirmClick)})`
+
+  // nav 审计记录
+  const na = S(t, T.auditClick)
+  navAudit.style.color = t >= T.auditClick ? 'var(--ink)' : 'var(--muted)'
+  navAudit.style.fontWeight = t >= T.auditClick ? 600 : 400
+  navLine.style.transform = `scaleX(${na})`
+  navAudit.style.transform = `scale(${press(t, T.auditClick)})`
+
+  // cursor + click rings
+  const [x, y] = cursorAt(t)
+  const clickNow = CLICKS.find(([tc]) => t >= tc && t < tc + 0.2)
+  cursor.style.transform = `translate(${x - 4}px, ${y - 3}px) scale(${clickNow ? press(t, clickNow[0], 0.14) : 1})`
+  CLICKS.forEach(([tc, [px, py]], i) => {
+    const dt = t - tc
+    const r = rings[i]
+    if (dt < 0 || dt > 0.4) { r.style.opacity = 0; return }
+    r.style.left = px + 'px'; r.style.top = py + 'px'
+    r.style.opacity = 0.55 * (1 - dt / 0.4)
+    r.style.transform = `scale(${0.35 + dt * 3})`
+  })
+}
+
+/* ───────────── audio: 120 BPM, synthesised with WebAudio (same code for live play and offline WAV) ───────────── */
+const midi = n => 440 * Math.pow(2, (n - 69) / 12)
+const CHORDS = [   // one per bar (2 s): bass root, pad notes
+  [48, [60, 64, 67, 71]],   // Cmaj7
+  [45, [57, 60, 64, 67]],   // Am7
+  [41, [57, 60, 64, 65]],   // Fmaj7
+  [43, [55, 59, 62, 65]],   // G7
+  [41, [57, 60, 65, 69]],   // F
+  [48, [60, 64, 67, 72]],   // C
+]
+function noiseBuffer(ctx) {
+  let s = 1234567
+  const rnd = () => { s |= 0; s = s + 0x6D2B79F5 | 0; let x = Math.imul(s ^ s >>> 15, 1 | s); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296 }
+  const b = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate)
+  const d = b.getChannelData(0)
+  for (let i = 0; i < d.length; i++) d[i] = rnd() * 2 - 1
+  return b
+}
+function scheduleAudio(ctx, offset, when) {
+  const master = ctx.createGain(); master.gain.value = 0.85
+  const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 3
+  master.connect(comp); comp.connect(ctx.destination)
+  const noise = noiseBuffer(ctx)
+  const at = te => when + (te - offset)
+  const live = te => te >= offset - 1e-6
+  const env = (g, a, peak, attack, decay) => { g.gain.setValueAtTime(0.0001, a); g.gain.exponentialRampToValueAtTime(peak, a + attack); g.gain.exponentialRampToValueAtTime(0.0001, a + attack + decay) }
+  function kick(te, vel = 0.9) { if (!live(te)) return; const a = at(te), o = ctx.createOscillator(), g = ctx.createGain()
+    o.frequency.setValueAtTime(150, a); o.frequency.exponentialRampToValueAtTime(46, a + 0.12); env(g, a, vel, 0.004, 0.32); o.connect(g); g.connect(master); o.start(a); o.stop(a + 0.4) }
+  function hat(te, vel = 0.1) { if (!live(te)) return; const a = at(te), s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain()
+    s.buffer = noise; f.type = 'highpass'; f.frequency.value = 7500; env(g, a, vel, 0.002, 0.05); s.connect(f); f.connect(g); g.connect(master); s.start(a, 0, 0.08) }
+  function snap(te, vel = 0.16) { if (!live(te)) return; const a = at(te), s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain()
+    s.buffer = noise; f.type = 'bandpass'; f.frequency.value = 1900; f.Q.value = 0.9; env(g, a, vel, 0.003, 0.14); s.connect(f); f.connect(g); g.connect(master); s.start(a, 0.1, 0.2) }
+  function bass(te, note, dur = 0.42) { if (!live(te)) return; const a = at(te), o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain()
+    o.type = 'triangle'; o.frequency.value = midi(note); f.type = 'lowpass'; f.frequency.value = 700; env(g, a, 0.26, 0.01, dur); o.connect(f); f.connect(g); g.connect(master); o.start(a); o.stop(a + dur + 0.1) }
+  function pad(te, notes, dur) { if (!live(te)) return; const a = at(te)
+    const f = ctx.createBiquadFilter(), g = ctx.createGain(); f.type = 'lowpass'; f.frequency.value = 1500
+    g.gain.setValueAtTime(0.0001, a); g.gain.exponentialRampToValueAtTime(0.05, a + 0.25); g.gain.setValueAtTime(0.05, a + dur - 0.3); g.gain.exponentialRampToValueAtTime(0.0001, a + dur)
+    f.connect(g); g.connect(master)
+    notes.forEach(n => [-5, 5].forEach(det => { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = midi(n); o.detune.value = det; o.connect(f); o.start(a); o.stop(a + dur + 0.05) })) }
+  function tick(te, freq = 2300, vel = 0.14) { if (!live(te)) return; const a = at(te), o = ctx.createOscillator(), g = ctx.createGain()
+    o.type = 'sine'; o.frequency.value = freq; env(g, a, vel, 0.002, 0.04); o.connect(g); g.connect(master); o.start(a); o.stop(a + 0.08) }
+  function pluck(te, note, vel = 0.14, dur = 0.28) { if (!live(te)) return; const a = at(te), o = ctx.createOscillator(), g = ctx.createGain()
+    o.type = 'triangle'; o.frequency.value = midi(note); env(g, a, vel, 0.003, dur); o.connect(g); g.connect(master); o.start(a); o.stop(a + dur + 0.05) }
+
+  // groove
+  for (let b = 0; b < 24; b++) {
+    const te = b * 0.5, bar = Math.floor(b / 4), [root, notes] = CHORDS[bar]
+    kick(te, b === 0 ? 0.6 : 0.85)
+    if (b % 2 === 1) snap(te)
+    if (te >= 2) hat(te + 0.25)
+    bass(te, b % 4 === 2 ? root + 7 : root)
+    if (b % 4 === 0) pad(te, notes, 2)
+  }
+  // UI sounds, each on its half beat
+  T.barsIn.forEach((x, i) => pluck(x, 72 + [0, 4, 7][i], 0.09, 0.18))
+  CLICKS.forEach(([tc]) => tick(tc))
+  pluck(T.taskIn, 67, 0.12)
+  T.rows.forEach(r => { tick(r.inn, 1600, 0.06); pluck(r.done, 79, 0.08, 0.15) })
+  pluck(T.count[1], 84, 0.12)
+  pluck(T.tableIn, 64, 0.1)
+  pluck(T.gaps, 52, 0.18, 0.4); pluck(T.gapCount, 57, 0.12, 0.3)
+  pluck(T.expand, 69, 0.1)
+  T.fills.forEach((x, i) => pluck(x, 76 + i * 2, 0.07, 0.14))
+  pluck(T.modalIn, 72, 0.1)
+  ;[84, 88, 91, 96].forEach((n, i) => pluck(T.verified + i * 0.0625, n, 0.13, 0.5))   // chime on verified=true
+  pluck(T.drop, 60, 0.14, 0.35)
+  pluck(T.collapse, 67, 0.1); pluck(T.auditText, 72, 0.1)
+  T.stack.forEach((x, i) => pluck(x, 76 + i * 3, 0.1))
+  // gentle tail
+  const endA = at(DUR - 0.35)
+  if (DUR - 0.35 >= offset) { master.gain.setValueAtTime(0.85, endA); master.gain.linearRampToValueAtTime(0, at(DUR)) }
+  return master
+}
+async function renderWavBuffer() {
+  const SR = 48000
+  const ctx = new OfflineAudioContext(2, SR * DUR, SR)
+  scheduleAudio(ctx, 0, 0)
+  const buf = await ctx.startRendering()
+  const L = buf.getChannelData(0), R = buf.getChannelData(1), n = buf.length
+  const out = new DataView(new ArrayBuffer(44 + n * 4))
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) out.setUint8(o + i, s.charCodeAt(i)) }
+  w(0, 'RIFF'); out.setUint32(4, 36 + n * 4, true); w(8, 'WAVE'); w(12, 'fmt '); out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 2, true)
+  out.setUint32(24, SR, true); out.setUint32(28, SR * 4, true); out.setUint16(32, 4, true); out.setUint16(34, 16, true); w(36, 'data'); out.setUint32(40, n * 4, true)
+  for (let i = 0, o = 44; i < n; i++, o += 4) { out.setInt16(o, clamp(L[i], -1, 1) * 32767, true); out.setInt16(o + 2, clamp(R[i], -1, 1) * 32767, true) }
+  return out.buffer
+}
+async function renderWavBase64() {
+  const bytes = new Uint8Array(await renderWavBuffer())
+  let s = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+  return btoa(s)
+}
+
+/* ───────────── self-checks (shown under the player) ───────────── */
+const offBeat = BEAT_POINTS.filter(x => Math.abs(x / HALF - Math.round(x / HALF)) > 1e-9)
+const misaligned = CLICKS.map(([tc, [px, py], name]) => { const [x, y] = cursorAt(tc); return [name, Math.hypot(x - px, y - py)] }).filter(([, d]) => d > 1)
+
+/* ───────────── player ───────────── */
+const params = new URLSearchParams(location.search)
+const capture = params.has('capture')
+if (capture) document.body.classList.add('capture')
+const viewport = document.getElementById('viewport')
+function fit() { stage.style.transform = capture ? 'none' : `scale(${viewport.clientWidth / 1920})` }
+fit(); window.addEventListener('resize', fit)
+
+let t = capture ? clamp(parseFloat(params.get('t') || '0') || 0, 0, DUR) : 0
+let playing = false, audioCtx = null, startAt = 0, perfStart = 0, raf = 0
+const playBtn = document.getElementById('play'), scrub = document.getElementById('scrub'), timeEl = document.getElementById('time'), soundEl = document.getElementById('sound')
+function paint() {
+  render(t)
+  if (capture) return
+  scrub.value = t
+  timeEl.textContent = `${t.toFixed(2)} s · 第 ${Math.min(24, Math.floor(t / 0.5) + 1)} 拍`
+}
+function clock() { return audioCtx ? audioCtx.currentTime - startAt : performance.now() / 1000 - perfStart }
+function stopAudio() { if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null } }
+function play() {
+  if (t >= DUR - 1e-3) t = 0
+  playing = true; playBtn.textContent = '暂停'
+  stopAudio()
+  if (soundEl.checked) {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      const when = audioCtx.currentTime + 0.06
+      scheduleAudio(audioCtx, t, when)
+      startAt = when - t
+    } catch { audioCtx = null }
+  }
+  if (!audioCtx) perfStart = performance.now() / 1000 - t
+  cancelAnimationFrame(raf)
+  const loop = () => {
+    if (!playing) return
+    t = Math.max(0, clock())
+    if (t >= DUR) { t = DUR; paint(); pause(); return }
+    paint(); raf = requestAnimationFrame(loop)
+  }
+  raf = requestAnimationFrame(loop)
+}
+function pause() { playing = false; playBtn.textContent = '播放（含配乐）'; stopAudio(); cancelAnimationFrame(raf) }
+if (!capture) {
+  playBtn.addEventListener('click', () => playing ? pause() : play())
+  document.getElementById('restart').addEventListener('click', () => { pause(); t = 0; play() })
+  scrub.addEventListener('input', () => { const was = playing; pause(); t = parseFloat(scrub.value); paint(); if (was) play() })
+  soundEl.addEventListener('change', () => { if (playing) { pause(); play() } })
+  document.getElementById('wav').addEventListener('click', async () => {
+    const url = URL.createObjectURL(new Blob([await renderWavBuffer()], {type: 'audio/wav'}))
+    const a = document.createElement('a'); a.href = url; a.download = '财税AgentHarness-宣传片配乐.wav'; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  })
+  document.addEventListener('keydown', e => { if (e.key === ' ' && !e.target.closest('button,input')) { e.preventDefault(); playing ? pause() : play() } })
+  document.getElementById('report').innerHTML =
+    `自检：<b>${BEAT_POINTS.length}</b> 个画面落点${offBeat.length ? `中有 <b>${offBeat.length}</b> 个不在半拍上` : '全部在 0.25 秒半拍上'}；` +
+    `<b>${CLICKS.length}</b> 次点击${misaligned.length ? `中有 ${misaligned.map(([n, d]) => `${n} 偏 ${d.toFixed(1)}px`).join('、')}` : '时光标都落在被点元素正中（误差 &lt; 1px）'}。` +
+    `数字：发票 10 张 · 合计 9,622.06 元 · 缺用途 5 张 → 保存 3 张后剩 2 张 · verified=true。空格键播放或暂停。`
+}
+window.__seek = x => { t = clamp(+x, 0, DUR); paint() }
+window.__renderWav = renderWavBase64
+window.__DURATION = DUR; window.__FPS = FPS
+window.__checks = () => ({offBeat, misaligned, beatPoints: BEAT_POINTS.length, clicks: CLICKS.length})
+paint()
+})()
+</script>
+</body>
+</html>

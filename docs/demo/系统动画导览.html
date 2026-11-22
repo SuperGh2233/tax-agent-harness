@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- 财税 Agent Harness 系统动画导览：单文件、无外部依赖，双击即可在浏览器打开。数字来自合成种子数据与 docs/evidence/ 证据文件。 -->
+<title>财税 Agent Harness 动画导览</title>
+<style>
+/* Layout: one 16:9 "screen" that plays chapter by chapter, with the chapter index below it as a readable table of contents.
+   Visual language follows the product UI (T50): white ground, near-black ink, pill controls, semantic blue/green/amber/red.
+   Deliberately light-only, like the product itself; every colour is still set explicitly. */
+:root {
+  color-scheme: light;
+  --bg: #f6f6f7;
+  --screen: #ffffff;
+  --raised: #f4f4f5;
+  --soft: #fafafb;
+  --line: #ececee;
+  --line-strong: #d9d9de;
+  --ink: #0d0d0d;
+  --ink-2: #3f3f46;
+  --muted: #6e6e80;
+  --faint: #a1a1aa;
+  --info: #2f5bea; --info-soft: #eef2ff;
+  --ok: #0e8a6a; --ok-soft: #e6f5ef;
+  --warn: #a85d00; --warn-soft: #fdf4e3;
+  --danger: #c0362c; --danger-soft: #fdeeec;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.16,1,.3,1);
+  --spring: cubic-bezier(.34,1.4,.64,1);
+}
+* { box-sizing: border-box }
+html { background: var(--bg) }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 48px; -webkit-font-smoothing: antialiased }
+h1, h2, h3, p { margin: 0 }
+code, .mono { font-family: var(--mono) }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 20px }
+
+.head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px }
+.brand { display: flex; align-items: center; gap: 12px }
+.mark { width: 36px; height: 36px; border-radius: 10px; background: var(--ink); display: grid; place-items: center; flex: none }
+.mark svg { width: 20px; height: 20px }
+.head h1 { font-size: 22px; font-weight: 600; letter-spacing: -.02em; text-wrap: balance }
+.head p { color: var(--muted); font-size: 14px }
+.controls { display: flex; gap: 8px; align-items: center }
+.btn { border: 1px solid var(--line-strong); background: var(--screen); color: var(--ink); border-radius: 999px; height: 36px; padding: 0 14px; font: inherit; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px }
+.btn:hover { border-color: var(--ink) }
+.btn.primary { background: var(--ink); color: var(--screen); border-color: var(--ink) }
+.btn:focus-visible, .chap:focus-visible, .seg:focus-visible { outline: 2px solid var(--info); outline-offset: 2px }
+.counter { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 52px; text-align: right }
+
+/* ── the screen ── */
+.stage { container: stage / inline-size; position: relative; background: var(--screen); border: 1px solid var(--line); border-radius: 20px;
+  box-shadow: 0 2px 6px rgb(0 0 0 / .04), 0 24px 64px -16px rgb(0 0 0 / .14); overflow: hidden; aspect-ratio: 16 / 9; display: flex; flex-direction: column }
+.scenes { position: relative; flex: 1; min-height: 0 }
+.scene { display: none; position: absolute; inset: 0; padding: clamp(18px, 4cqw, 52px) clamp(18px, 4.4cqw, 56px) clamp(14px, 2.4cqw, 28px);
+  grid-template-columns: minmax(0, 34fr) minmax(0, 66fr); gap: clamp(16px, 3.6cqw, 48px); align-items: center }
+.scene.on { display: grid; animation: sceneIn .5s var(--ease) both }
+.copy { display: grid; gap: clamp(8px, 1.1cqw, 14px); align-content: center; min-width: 0 }
+.tag { display: inline-flex; width: fit-content; align-items: center; gap: 6px; font-size: clamp(11px, 1cqw, 13px); letter-spacing: .06em; color: var(--info); background: var(--info-soft); border-radius: 999px; padding: 3px 10px; font-weight: 600 }
+.copy h2 { font-size: clamp(20px, 2.9cqw, 36px); line-height: 1.22; font-weight: 600; letter-spacing: -.025em; text-wrap: balance }
+.copy p { color: var(--ink-2); font-size: clamp(13px, 1.32cqw, 16px); text-wrap: pretty }
+.copy .src { color: var(--muted); font-size: clamp(11px, 1cqw, 12.5px) }
+.vis { min-width: 0; display: grid; gap: clamp(8px, 1.2cqw, 14px); align-content: center; font-size: clamp(12px, 1.22cqw, 15px) }
+
+/* entrance pieces: visible at rest, animate only while their scene plays */
+.scene.on .a { animation: rise .6s var(--ease) backwards; animation-delay: var(--d, 0s) }
+.scene.on .pop { animation: pop .5s var(--spring) backwards; animation-delay: var(--d, 0s) }
+.scene.on .fade { animation: fade .6s ease backwards; animation-delay: var(--d, 0s) }
+.stage.paused .scene.on, .stage.paused .scene.on * { animation-play-state: paused !important }
+@keyframes sceneIn { from { opacity: 0 } }
+@keyframes rise { from { opacity: 0; transform: translateY(14px) } }
+@keyframes pop { from { opacity: 0; transform: scale(.85) } }
+@keyframes fade { from { opacity: 0 } }
+
+/* common bits */
+.card { background: var(--screen); border: 1px solid var(--line); border-radius: 14px; padding: clamp(10px, 1.3cqw, 16px) clamp(12px, 1.5cqw, 18px); min-width: 0 }
+.card.soft { background: var(--soft) }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+.between { justify-content: space-between }
+.pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 10px; font-size: .86em; font-weight: 500; white-space: nowrap; background: var(--raised); color: var(--ink-2) }
+.pill.ok { background: var(--ok-soft); color: var(--ok) }
+.pill.warn { background: var(--warn-soft); color: var(--warn) }
+.pill.bad { background: var(--danger-soft); color: var(--danger) }
+.pill.info { background: var(--info-soft); color: var(--info) }
+.pill.ink { background: var(--ink); color: var(--screen) }
+.lbl { font-size: .82em; color: var(--muted); letter-spacing: .02em }
+.num { font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: -.02em }
+.code { font-family: var(--mono); font-size: .88em; background: var(--raised); border-radius: 6px; padding: 1px 6px; color: var(--ink) }
+.dim { color: var(--muted) }
+.strike { position: relative; color: var(--faint) }
+.strike::after { content: ""; position: absolute; left: -2px; right: -2px; top: 52%; height: 2px; background: var(--danger); transform-origin: left; transform: scaleX(1) }
+.scene.on .strike::after { animation: strike .5s var(--ease) backwards; animation-delay: var(--d, 0s) }
+@keyframes strike { from { transform: scaleX(0) } }
+.swap { display: inline-grid }
+.swap > * { grid-area: 1 / 1 }
+.scene.on .swap .before { animation: swapOut .3s ease forwards; animation-delay: var(--d, 0s) }
+.scene.on .swap .after { animation: swapIn .4s var(--spring) backwards; animation-delay: var(--d, 0s) }
+.swap .before { visibility: hidden }
+.scene.on .swap .before { visibility: visible }
+@keyframes swapOut { to { opacity: 0; transform: translateY(-6px); visibility: hidden } }
+@keyframes swapIn { from { opacity: 0; transform: translateY(6px) } }
+
+/* S1 */
+.roles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(8px, 1.2cqw, 14px) }
+.role { display: grid; gap: 6px; align-content: start }
+.role .who { font-weight: 600; font-size: 1.08em }
+.role .ico { width: clamp(30px, 3.2cqw, 40px); height: clamp(30px, 3.2cqw, 40px); border-radius: 10px; display: grid; place-items: center; font-weight: 700; font-size: 1em }
+.ico.m { background: var(--info-soft); color: var(--info) }
+.ico.p { background: var(--ink); color: var(--screen) }
+.ico.h { background: var(--ok-soft); color: var(--ok) }
+.hero-mark { width: clamp(46px, 5.6cqw, 72px); height: clamp(46px, 5.6cqw, 72px); border-radius: 18px; background: var(--ink); display: grid; place-items: center }
+.hero-mark svg { width: 56%; height: 56% }
+.scene.on .hero-mark svg { animation: spin 1.2s var(--ease) backwards }
+@keyframes spin { from { transform: rotate(-90deg) scale(.4); opacity: 0 } }
+.footer-line { color: var(--muted); font-size: .9em; letter-spacing: .04em }
+
+/* S2 pipeline */
+.pipe { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: clamp(6px, 1cqw, 12px); position: relative }
+.node { display: grid; gap: 4px; text-align: left; position: relative; z-index: 1 }
+.node b { font-size: 1em }
+.node small { color: var(--muted); font-size: .82em; line-height: 1.4 }
+.node.lit { border-color: var(--ink) }
+.track { position: absolute; left: 8%; right: 8%; top: 50%; height: 2px; background: var(--line-strong); z-index: 0 }
+.packet { position: absolute; top: calc(50% - 5px); left: 8%; width: 10px; height: 10px; border-radius: 50%; background: var(--info); z-index: 2; box-shadow: 0 0 0 4px var(--info-soft) }
+.scene.on .packet { animation: travel 3.2s var(--ease) 0.8s infinite }
+@keyframes travel { 0% { left: 8%; opacity: 0 } 10% { opacity: 1 } 70% { left: calc(92% - 10px); opacity: 1 } 100% { left: calc(92% - 10px); opacity: 0 } }
+.guard { border: 1px dashed var(--ink); border-radius: 12px; padding: 8px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap }
+
+/* S3 */
+.bubble { background: var(--raised); border-radius: 14px 14px 14px 4px; padding: 10px 14px; max-width: 100% }
+.tools { display: flex; flex-wrap: wrap; gap: 8px }
+.tool { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; background: var(--screen); font-size: .92em }
+.tool .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint) }
+.scene.on .tool .dot { animation: lit .3s ease forwards; animation-delay: var(--d, 0s) }
+@keyframes lit { to { background: var(--ok) } }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: clamp(6px, 1cqw, 12px) }
+.stat { display: grid; gap: 2px }
+.stat .num { font-size: clamp(16px, 2.1cqw, 26px) }
+.stat.alert { border-color: var(--warn); background: var(--warn-soft) }
+.stat.alert .num { color: var(--warn) }
+
+/* S4 / S7 tables */
+.fact { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px 14px; align-items: center }
+.fact .k { font-family: var(--mono); font-size: .9em }
+.tx { border: 2px solid var(--ink); border-radius: 16px; padding: 12px; display: grid; gap: 8px; position: relative }
+.tx-label { position: absolute; top: -11px; left: 14px; background: var(--screen); padding: 0 8px; font-size: .82em; font-weight: 600 }
+
+/* S5 steps */
+.steps { display: grid; gap: 8px }
+.step { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; align-items: center }
+.step .n { width: 26px; height: 26px; border-radius: 50%; background: var(--raised); display: grid; place-items: center; font-size: .82em; font-weight: 600 }
+.scene.on .step .n { animation: stepOn .3s ease forwards; animation-delay: var(--d, 0s) }
+@keyframes stepOn { to { background: var(--ink); color: var(--screen) } }
+.verdicts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px }
+.verdict { display: grid; gap: 4px }
+.verdict.good { border-color: var(--ok); background: var(--ok-soft) }
+.verdict.bad { border-color: var(--danger); background: var(--danger-soft) }
+.verdict .big { font-family: var(--mono); font-weight: 700; font-size: 1.05em }
+.verdict.good .big { color: var(--ok) }
+.verdict.bad .big { color: var(--danger) }
+
+/* S6 bars */
+.bars { display: grid; gap: 14px }
+.bar-row { display: grid; grid-template-columns: clamp(64px, 8cqw, 96px) minmax(0, 1fr) clamp(54px, 6cqw, 80px); gap: 12px; align-items: center }
+.bar { height: clamp(22px, 3cqw, 36px); background: var(--raised); border-radius: 10px; overflow: hidden; position: relative }
+.bar i { position: absolute; inset: 0 auto 0 0; width: var(--w); border-radius: 10px; background: var(--faint) }
+.bar.after i { background: var(--ok) }
+.scene.on .bar i { animation: grow 1.2s var(--ease) backwards; animation-delay: var(--d, 0s) }
+@keyframes grow { from { width: 0 } }
+.bar-row .num { font-size: clamp(18px, 2.4cqw, 30px); text-align: right }
+.kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px }
+
+/* S8 context */
+.ctx { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start }
+.turns { display: grid; gap: 5px }
+.turn { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: .88em; background: var(--screen) }
+.turn b { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 3.4em }
+.turn.old { transform-origin: top }
+.scene.on .turn.old { animation: fold .5s var(--ease) forwards; animation-delay: var(--d, 0s) }
+@keyframes fold { to { opacity: .35; background: var(--raised); color: var(--muted) } }
+.meter { height: 12px; border-radius: 999px; background: var(--raised); overflow: hidden; position: relative }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 26.95%; background: var(--info); border-radius: 999px }
+.scene.on .meter i { animation: grow 1.4s var(--ease) backwards; animation-delay: var(--d, 0s) }
+.recall { border-color: var(--info); background: var(--info-soft) }
+
+/* S9 capabilities */
+.chips { display: flex; flex-wrap: wrap; gap: 6px }
+.chip { border-radius: 999px; padding: 2px 10px; font-size: .86em; background: var(--raised); color: var(--ink-2) }
+.chip.write { background: var(--warn-soft); color: var(--warn) }
+.scene.on .chip.off { animation: off .4s ease forwards; animation-delay: var(--d, 0s) }
+@keyframes off { to { opacity: .4; text-decoration: line-through } }
+.formula { font-family: var(--mono); font-size: .9em; background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; overflow-wrap: anywhere }
+
+/* S10 / S11 two-up */
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px }
+.file { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap }
+@keyframes fadeOld { to { opacity: .45 } }
+.mem { display: grid; gap: 2px }
+.scene.on .mem.loser { animation: rise .6s var(--ease) backwards var(--d, 0s), fadeOld .4s ease forwards var(--d2, 0s) }
+.map { display: grid; grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr); gap: 4px 6px; align-items: center; font-size: .9em }
+.map .arrow { color: var(--faint); text-align: center }
+.paper { aspect-ratio: 3 / 2; border-radius: 8px; background: repeating-linear-gradient(0deg, var(--raised) 0 6px, var(--screen) 6px 14px); border: 1px solid var(--line); position: relative; max-width: 100% }
+.paper::after { content: ""; position: absolute; left: 0; right: 0; height: 3px; background: var(--info); top: 0; opacity: .7 }
+.scene.on .paper::after { animation: scan 1.6s ease-in-out .6s 2 }
+@keyframes scan { from { top: 0 } to { top: calc(100% - 3px) } }
+
+/* S12 */
+.cases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px }
+.case { display: grid; gap: 6px; align-content: start }
+.case .q { font-size: .92em; color: var(--ink-2) }
+
+/* S13 */
+.close-line { font-size: clamp(18px, 2.4cqw, 30px); font-weight: 600; letter-spacing: -.02em; line-height: 1.35; text-wrap: balance }
+.big-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px }
+.big-stats .num { font-size: clamp(18px, 2.6cqw, 32px) }
+
+/* progress */
+.progress { display: flex; gap: 4px; padding: 0 clamp(18px, 4.4cqw, 56px) clamp(12px, 1.8cqw, 20px) }
+.seg { flex: 1; height: 4px; border-radius: 999px; background: var(--line); border: 0; padding: 0; cursor: pointer; position: relative; overflow: hidden }
+.seg i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ink); border-radius: 999px }
+.seg.done i { width: 100% }
+
+/* chapter index */
+.index h2 { font-size: 15px; font-weight: 600; margin-bottom: 10px }
+.chapters { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px }
+.chap { text-align: left; border: 1px solid var(--line); background: var(--screen); border-radius: 12px; padding: 10px 12px; font: inherit; color: inherit; cursor: pointer; display: grid; gap: 2px; min-width: 0 }
+.chap:hover { border-color: var(--line-strong) }
+.chap[aria-current="true"] { border-color: var(--ink) }
+.chap .t { font-size: 13.5px; font-weight: 600 }
+.chap .s { font-size: 12.5px; color: var(--muted); line-height: 1.45 }
+.chap .k { font-size: 11px; color: var(--info); letter-spacing: .04em }
+.note { color: var(--muted); font-size: 12.5px }
+
+/* narrow screens: the screen grows to fit its scene and stacks */
+@container stage (max-width: 760px) {
+  .scene { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 14px }
+  .pipe { grid-template-columns: minmax(0, 1fr) }
+  .track, .packet { display: none }
+  .stats, .big-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .roles, .cases, .two, .ctx, .verdicts, .kv { grid-template-columns: minmax(0, 1fr) }
+}
+@media (max-width: 800px) {
+  .stage { aspect-ratio: auto }
+  .scenes { min-height: 0 }
+  .scene { position: relative; inset: auto }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene.on, .scene.on * { animation: none !important }
+  .swap .before { display: none }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 5Q17 15 27 16Q17 17 16 27Q15 17 5 16Q15 15 16 5Z" fill="#fff"/></svg></div>
+      <div><h1>财税 Agent Harness</h1><p>两分钟看懂：模型怎么被约束，保存怎么被证明。</p></div>
+    </div>
+    <div class="controls">
+      <button class="btn" id="prev" type="button" aria-label="上一章">‹</button>
+      <button class="btn primary" id="play" type="button" aria-label="暂停">暂停</button>
+      <button class="btn" id="next" type="button" aria-label="下一章">›</button>
+      <span class="counter" id="counter">1 / 13</span>
+    </div>
+  </header>
+
+  <section class="stage" id="stage" aria-label="动画导览" aria-live="polite">
+    <div class="scenes">
+
+      <!-- 1 -->
+      <article class="scene" data-dur="7000" data-title="三方分工" data-sub="模型理解，程序把关，会计决定" data-tag="总览">
+        <div class="copy">
+          <div class="hero-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 5Q17 15 27 16Q17 17 16 27Q15 17 5 16Q15 15 16 5Z" fill="#fff"/></svg></div>
+          <h2 class="a" style="--d:.2s">财税 Agent Harness</h2>
+          <p class="a" style="--d:.4s">帮会计办理发票与银行流水事务的 Agent 系统。每一步执行都有据可查。</p>
+          <p class="footer-line fade" style="--d:.8s">受约束执行 · 可回读核验 · 模型文字不是财务执行证据</p>
+        </div>
+        <div class="vis">
+          <div class="roles">
+            <div class="card role a" style="--d:.7s"><div class="ico m">模</div><div class="who">模型</div><div class="dim">理解问题、追问缺失信息、选择调用哪些工具</div></div>
+            <div class="card role a" style="--d:1.1s"><div class="ico p">程</div><div class="who">程序</div><div class="dim">金额计算、权限校验、规则选版本、保存与回读</div></div>
+            <div class="card role a" style="--d:1.5s"><div class="ico h">人</div><div class="who">会计</div><div class="dim">逐项确认改不改数据，未确认不写入</div></div>
+          </div>
+          <div class="card soft fade" style="--d:2.2s"><div class="row between"><span class="lbl">模型</span><span class="code">qwen3.8-flash</span></div><div class="dim" style="font-size:.88em">只通过环境变量配置，换模型不改代码</div></div>
+        </div>
+      </article>
+
+      <!-- 2 -->
+      <article class="scene" data-dur="8000" data-title="一次请求的路径" data-sub="从提问到数据库，每次工具调用都重新查权限" data-tag="架构">
+        <div class="copy">
+          <span class="tag">架构</span>
+          <h2 class="a">一次请求怎么走</h2>
+          <p class="a" style="--d:.15s">模型只做决策。真正读写数据的是工具层，每次调用都在事务内重新校验权限。</p>
+          <p class="src fade" style="--d:.4s">状态全部存在 SQLite；每轮交给模型的上下文 ≤ 6000 字符。</p>
+        </div>
+        <div class="vis">
+          <div class="pipe">
+            <div class="track" aria-hidden="true"></div><div class="packet" aria-hidden="true"></div>
+            <div class="card node a" style="--d:.3s"><b>会计提问</b><small>可信会话决定身份</small></div>
+            <div class="card node a" style="--d:.5s"><b>Agent 运行时</b><small>每轮最多 8 步</small></div>
+            <div class="card node a" style="--d:.7s"><b>模型</b><small>单工具、批量只读、追问或结束</small></div>
+            <div class="card node a" style="--d:.9s"><b>工具层</b><small>查询、检查、检索、回溯、保存</small></div>
+            <div class="card node a" style="--d:1.1s"><b>SQLite</b><small>任务、记忆、台账、审计</small></div>
+          </div>
+          <div class="guard a" style="--d:1.6s"><span class="pill ink">PermissionGuard</span><span>每次业务操作都在事务内重新查 <span class="code">permissions</span> 表，一句话改不了身份</span></div>
+          <div class="row a" style="--d:2s"><span class="pill">工具结果超长 → 程序压缩</span><span class="pill">只读超时 → 重试一次</span><span class="pill warn">保存 → 永不自动重试</span></div>
+        </div>
+      </article>
+
+      <!-- 3 -->
+      <article class="scene" data-dur="9000" data-title="查询与缺口" data-sub="数字来自工具，缺口按当日启用的规则判断" data-tag="多轮办理">
+        <div class="copy">
+          <span class="tag">多轮办理</span>
+          <h2 class="a">查询与缺口</h2>
+          <p class="a" style="--d:.15s">调哪些工具由模型决定，数字全部来自工具结果。金额按整数分计算，收入和支出分开统计，不相互抵减。</p>
+          <p class="src fade" style="--d:.4s">示例：官方合成种子数据，甲企业 C001 · 2026 年 9 月</p>
+        </div>
+        <div class="vis">
+          <div class="bubble a" style="--d:.2s">查询 C001 2026-09 发票合计、银行收入和支出，检查发票用途并注明规则版本，缺信息请追问，不要猜测。</div>
+          <div class="tools">
+            <span class="tool a" style="--d:.8s"><i class="dot" style="--d:1.3s"></i>查询发票</span>
+            <span class="tool a" style="--d:1.1s"><i class="dot" style="--d:1.7s"></i>查询银行流水</span>
+            <span class="tool a" style="--d:1.4s"><i class="dot" style="--d:2.1s"></i>检查用途缺口</span>
+            <span class="tool a" style="--d:1.7s"><i class="dot" style="--d:2.5s"></i>查询规则</span>
+          </div>
+          <div class="stats">
+            <div class="card stat a" style="--d:2.6s"><span class="lbl">发票 10 张 · 合计</span><span class="num" data-count="962206" data-at="2.7">9,622.06</span></div>
+            <div class="card stat a" style="--d:2.8s"><span class="lbl">银行收入</span><span class="num" data-count="1300050" data-at="2.9">13,000.50</span></div>
+            <div class="card stat a" style="--d:3s"><span class="lbl">银行支出</span><span class="num" data-count="718074" data-at="3.1">7,180.74</span></div>
+            <div class="card stat alert a" style="--d:3.4s"><span class="lbl">缺用途 · R002 v2.0</span><span class="num"><span data-count="5" data-at="3.5" data-int>5</span> 张</span></div>
+          </div>
+          <div class="row a" style="--d:4.2s"><span class="lbl">任务状态</span><span class="swap" style="--d:4.6s"><span class="pill info before">进行中</span><span class="pill warn after">等待补充</span></span><span class="dim" style="font-size:.88em">待补字段没保存前，任务不会结束</span></div>
+        </div>
+      </article>
+
+      <!-- 4 -->
+      <article class="scene" data-dur="7500" data-title="补充与改口" data-sub="以最新陈述为准，说过不等于存过" data-tag="多轮办理">
+        <div class="copy">
+          <span class="tag">多轮办理</span>
+          <h2 class="a">补充与改口</h2>
+          <p class="a" style="--d:.15s">系统只记录会计明确说出的事实，从不从模型回复里提取。改口以最新陈述为准。</p>
+          <p class="a" style="--d:.3s">记下来的事实状态是「已声明、尚未保存」，要经过审核和批准才进数据库。</p>
+        </div>
+        <div class="vis">
+          <div class="card">
+            <div class="fact">
+              <span class="k a" style="--d:.4s">F002.purpose</span><span class="a" style="--d:.4s">办公室采购</span><span class="pill warn a" style="--d:.6s">已声明</span>
+              <span class="k a" style="--d:1.2s">F004.purpose</span><span class="a" style="--d:1.2s"><span class="strike" style="--d:2.4s">差旅费（合成）</span></span><span class="pill a" style="--d:1.4s">用户原话：F004 是差旅费</span>
+              <span class="k a" style="--d:2.8s">F004.purpose</span><span class="a" style="--d:2.8s"><b>会议费（合成）</b></span><span class="pill warn a" style="--d:3s">已声明</span>
+            </div>
+          </div>
+          <div class="bubble a" style="--d:2.2s">刚才说错了，F004 是会议费。</div>
+          <div class="card soft a" style="--d:3.8s"><span class="lbl">检查器 · 已声明、尚未保存</span><div class="row" style="margin-top:6px"><span class="code">F002.purpose = 办公室采购</span><span class="code">F004.purpose = 会议费（合成）</span></div></div>
+        </div>
+      </article>
+
+      <!-- 5 -->
+      <article class="scene" data-dur="10000" data-title="证据门" data-sub="保存成功只认数据库回读" data-tag="审核 · 批准 · 回读">
+        <div class="copy">
+          <span class="tag">审核 · 批准 · 回读</span>
+          <h2 class="a">证据门：保存只认回读</h2>
+          <p class="a" style="--d:.15s">会计确认后生成一次性授权，后端只执行与确认完全一致的修改，并在同一事务里回读。</p>
+          <p class="a" style="--d:.3s">模型说「已保存」不算数。没有本轮回读，结果只能是失败。</p>
+        </div>
+        <div class="vis">
+          <div class="card steps">
+            <div class="step a" style="--d:.3s"><span class="n" style="--d:.5s">1</span><span>只能选本轮真实查到的发票</span><span class="code">C001 / F002</span></div>
+            <div class="step a" style="--d:1s"><span class="n" style="--d:1.2s">2</span><span>逐项二次确认，生成一次性 operationId</span><span class="code">7f3a…c21e</span></div>
+            <div class="step a" style="--d:1.7s"><span class="n" style="--d:1.9s">3</span><span>执行保存，字段白名单只有用途和备注</span><span class="code">update_invoice</span></div>
+            <div class="step a" style="--d:2.4s"><span class="n" style="--d:2.6s">4</span><span>同一事务回读数据库</span><span class="code">purpose = 办公室采购</span></div>
+          </div>
+          <div class="verdicts">
+            <div class="card verdict good pop" style="--d:3.4s"><span class="big">verified=true</span><span class="dim">回读与确认一致，才算保存成功，页面写入锁才解除</span></div>
+            <div class="card verdict bad pop" style="--d:4.4s"><span class="big">WRITE_NOT_VERIFIED</span><span class="dim">模型只说「已保存」、没有本轮回读，任务保持进行中</span></div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 6 -->
+      <article class="scene" data-dur="9000" data-title="自主创新" data-sub="同模型同任务：9/20 → 20/20" data-tag="自主创新">
+        <div class="copy">
+          <span class="tag">自主创新</span>
+          <h2 class="a">同模型、同任务的前后对比</h2>
+          <p class="a" style="--d:.15s">改进前，模型常把「保存」和「查询」合成一批，整批被拒。现在模型只决定要不要保存，载荷由程序生成，保存先执行，再查询核对。</p>
+          <p class="src fade" style="--d:.4s">证据：docs/evidence/T37_INNOVATION_20261119_run3 · 自主创新说明.md</p>
+        </div>
+        <div class="vis">
+          <div class="card bars">
+            <span class="lbl">会计确认过的保存，20 次里成功几次</span>
+            <div class="bar-row a" style="--d:.4s"><span>改进前</span><div class="bar"><i style="--w:45%; --d:.6s"></i></div><span class="num"><span data-count="9" data-at=".6" data-int>9</span>/20</span></div>
+            <div class="bar-row a" style="--d:1.4s"><span>改进后</span><div class="bar after"><i style="--w:100%; --d:1.6s"></i></div><span class="num" style="color:var(--ok)"><span data-count="20" data-at="1.6" data-int>20</span>/20</span></div>
+          </div>
+          <div class="kv">
+            <div class="card a" style="--d:2.8s"><span class="lbl">模型</span><div class="num">qwen3.7-flash</div><span class="dim" style="font-size:.85em">前后同一模型</span></div>
+            <div class="card a" style="--d:3.1s"><span class="lbl">保存台账</span><div class="num">始终 1 条</div><span class="dim" style="font-size:.85em">不重复写入</span></div>
+            <div class="card a" style="--d:3.4s"><span class="lbl">代价</span><div class="num">+2–5 秒</div><span class="dim" style="font-size:.85em">每次批准轮</span></div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 7 -->
+      <article class="scene" data-dur="8000" data-title="批量单事务" data-sub="全部成功，或一张都不改" data-tag="多轮办理">
+        <div class="copy">
+          <span class="tag">多轮办理</span>
+          <h2 class="a">批量保存，单个事务</h2>
+          <p class="a" style="--d:.15s">一次确认 2–20 张发票。每张有自己的 operationId，整批在同一个事务里保存，任一张失败就全部回滚，成功后逐张回读。</p>
+          <p class="src fade" style="--d:.4s">qwen3.8-flash 实测：docs/evidence/T47_T48_QWEN38_20261121/batch.json</p>
+        </div>
+        <div class="vis">
+          <div class="tx a" style="--d:.3s">
+            <span class="tx-label">同一事务</span>
+            <div class="card row between a" style="--d:.6s"><span><span class="code">C001 / F004</span> 用途 → 会议费（合成）</span><span class="swap" style="--d:2s"><span class="pill before">待保存</span><span class="pill ok after">✓ 已回读</span></span></div>
+            <div class="card row between a" style="--d:.9s"><span><span class="code">C001 / F006</span> 用途 → 办公用品（合成）</span><span class="swap" style="--d:2.3s"><span class="pill before">待保存</span><span class="pill ok after">✓ 已回读</span></span></div>
+          </div>
+          <div class="card verdict good pop" style="--d:2.9s"><span class="big">批量 verified=true · 2 张发票已逐张回读核验</span><span class="dim">复核清单由程序根据保存前后的值和当前规则生成</span></div>
+          <div class="row a" style="--d:3.6s"><span class="lbl">甲企业 9 月缺用途</span><span class="num" style="font-size:1.4em">5 → <span data-count="2" data-from="5" data-at="3.8" data-int>2</span> 张</span><span class="dim" style="font-size:.88em">F002、F004、F006 已真正保存</span></div>
+        </div>
+      </article>
+
+      <!-- 8 -->
+      <article class="scene" data-dur="9500" data-title="上下文管理" data-sub="早期轮次折叠，原文按需取回" data-tag="上下文管理">
+        <div class="copy">
+          <span class="tag">上下文管理</span>
+          <h2 class="a">对话再长，输入也有上限</h2>
+          <p class="a" style="--d:.15s">只保留最近 4 轮原文，更早的轮次折叠成摘要，但用户的限制和更正保留。需要原文时，模型调用 <span class="code">recall_context</span> 取回。</p>
+          <p class="src fade" style="--d:.4s">30 轮实测：docs/evidence/T38_LONG_CONVERSATION_20261120</p>
+        </div>
+        <div class="vis">
+          <div class="ctx">
+            <div class="turns">
+              <div class="turn old" style="--d:1s"><b>第 1 轮</b>只看发票，不要查银行流水</div>
+              <div class="turn old" style="--d:1.1s"><b>第 2 轮</b>查询发票</div>
+              <div class="turn old" style="--d:1.2s"><b>第 3 轮</b>改成 10 月</div>
+              <div class="turn old" style="--d:1.3s"><b>第 4 轮</b>查询规则</div>
+              <div class="turn old" style="--d:1.4s"><b>第 5 轮</b>检查缺口</div>
+              <div class="turn"><b>第 6 轮</b>原文保留</div>
+              <div class="turn"><b>第 7 轮</b>原文保留</div>
+              <div class="turn"><b>第 8 轮</b>原文保留</div>
+              <div class="turn"><b>第 9 轮</b>原文保留</div>
+            </div>
+            <div style="display:grid; gap:10px">
+              <div class="card soft a" style="--d:1.8s"><span class="lbl">示意 · 已对话 9 轮 · 折叠 5 轮</span><div style="font-size:.9em; margin-top:4px">第 1 轮：只看发票，不要查银行流水<br>第 3 轮：当前月份「10 月」</div></div>
+              <div class="card recall a" style="--d:3s"><span class="lbl" style="color:var(--info)">recall_context</span><div style="font-size:.9em">取回第 2 轮原文，重新校验任务与企业权限</div></div>
+              <div class="card a" style="--d:4s"><div class="row between"><span class="lbl">模型输入最大值</span><span class="num"><span data-count="1617" data-at="4.2" data-int>1617</span> / 6000 字符</span></div><div class="meter" style="margin-top:6px"><i style="--d:4.2s"></i></div></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 9 -->
+      <article class="scene" data-dur="9000" data-title="Agent 与能力" data-sub="版本化配置，能力取交集" data-tag="Agent 管理 · 能力复用">
+        <div class="copy">
+          <span class="tag">Agent 管理 · 能力复用</span>
+          <h2 class="a">Agent 与能力在页面上配置</h2>
+          <p class="a" style="--d:.15s">Agent 有职责、提示词、模型配置、能力和适用企业。修改保存为新版本，从下一轮起生效。工具和技能可以被多个 Agent 复用，停用对所有使用者生效。</p>
+        </div>
+        <div class="vis">
+          <div class="card a" style="--d:.3s">
+            <div class="row between"><b>只读查询员</b><span class="swap" style="--d:1.4s"><span class="pill before">finance-reader · v1</span><span class="pill info after">finance-reader · v2</span></span></div>
+            <div class="dim" style="font-size:.9em; margin-top:4px">提示词：<span class="fade" style="--d:1.4s"><b style="color:var(--ink)">回答先给结论。</b></span>（追加在系统安全规则之后，不能覆盖）</div>
+          </div>
+          <div class="card a" style="--d:2s">
+            <span class="lbl">工具与技能</span>
+            <div class="chips" style="margin-top:6px"><span class="chip">查询发票</span><span class="chip">查询银行流水</span><span class="chip">检查用途缺口</span><span class="chip">查询规则</span><span class="chip">检索资料</span><span class="chip off" style="--d:3.4s">技能 · 用途缺口检查</span><span class="chip write">保存用途/备注</span></div>
+          </div>
+          <div class="formula a" style="--d:2.6s">实际可用 = (Agent 工具 ∪ 启用技能的工具) ∩ 已启用工具</div>
+          <div class="row a" style="--d:3.8s"><span class="pill bad">已停用 → CAPABILITY_DISABLED</span><span class="pill bad">未授予 → CAPABILITY_NOT_GRANTED</span><span class="dim" style="font-size:.86em">技能不能授予保存能力</span></div>
+        </div>
+      </article>
+
+      <!-- 10 -->
+      <article class="scene" data-dur="9000" data-title="知识与长期记忆" data-sub="只检索最新版本；记忆越具体越优先" data-tag="知识库 · 长期记忆">
+        <div class="copy">
+          <span class="tag">知识库 · 长期记忆</span>
+          <h2 class="a">知识会更新，记忆分范围</h2>
+          <p class="a" style="--d:.15s">同名文件上传即成新版本，旧版本退出检索但保留可追溯，回答引用文件、版本和段落。</p>
+          <p class="a" style="--d:.3s">长期记忆只记用户明确说的话。同名时：仅我 · 当前企业 &gt; 个人 &gt; 企业共享，被覆盖的不再提供给模型。</p>
+        </div>
+        <div class="vis">
+          <div class="two">
+            <div class="card" style="display:grid; gap:8px">
+              <span class="lbl">资料文件 · 差旅报销制度（合成）.docx</span>
+              <div class="file a" style="--d:.4s"><span>v1 · 住宿上限 400 元</span><span class="swap" style="--d:1.6s"><span class="pill ok before">检索中</span><span class="pill after">不检索（旧版本）</span></span></div>
+              <div class="file a" style="--d:1.4s"><span>v2 · 住宿上限 500 元</span><span class="pill ok">检索中</span></div>
+              <div class="bubble a" style="--d:2.4s">住宿每晚最多 500 元。依据：差旅报销制度（合成）.docx v2</div>
+            </div>
+            <div class="card" style="display:grid; gap:8px">
+              <span class="lbl">长期记忆 · 回复格式</span>
+              <div class="mem loser" style="--d:3.2s; --d2:4.2s"><span class="row"><span class="pill">企业共享</span>先给合计再列明细</span><small class="dim fade" style="--d:4.2s">被更具体范围的同名记忆覆盖，当前不提供给模型</small></div>
+              <div class="mem a" style="--d:3.8s"><span class="row"><span class="pill info">个人 · 所有企业</span><b>先给缺口张数</b></span><small class="dim">生效</small></div>
+              <span class="dim fade" style="--d:4.6s; font-size:.86em">删除或过期即擦除，历史模型输入里的值一并清除</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 11 -->
+      <article class="scene" data-dur="9000" data-title="文件处理" data-sub="程序建议，人来确认，只补缺失" data-tag="文件处理">
+        <div class="copy">
+          <span class="tag">文件处理</span>
+          <h2 class="a">陌生表格与扫描件</h2>
+          <p class="a" style="--d:.15s">以前，认不出表头的表格静默导入 0 条，扫描件直接被拒。现在程序给出建议，会计确认后才导入，只补缺失编号，不覆盖已有记录。</p>
+          <p class="src fade" style="--d:.4s">实测：docs/evidence/T45_T48_BROWSER_20261121 · T47_T48_QWEN38_20261121/scan.json</p>
+        </div>
+        <div class="vis">
+          <div class="two">
+            <div class="card" style="display:grid; gap:8px">
+              <span class="lbl">陌生表头的 Excel</span>
+              <div class="map">
+                <span class="a" style="--d:.4s">票号</span><span class="arrow a" style="--d:.6s">→</span><b class="a" style="--d:.6s">发票编号</b>
+                <span class="a" style="--d:.5s">日期</span><span class="arrow a" style="--d:.8s">→</span><b class="a" style="--d:.8s">开票日期</b>
+                <span class="a" style="--d:.6s">开票单位</span><span class="arrow a" style="--d:1s">→</span><b class="a" style="--d:1s">销售方名称</b>
+                <span class="a" style="--d:.7s">品名</span><span class="arrow a" style="--d:1.2s">→</span><b class="a" style="--d:1.2s">项目名称</b>
+                <span class="a" style="--d:.8s">含税金额</span><span class="arrow a" style="--d:1.4s">→</span><b class="a" style="--d:1.4s">价税合计</b>
+              </div>
+              <div class="row a" style="--d:2s"><span class="pill">改进前 0 条</span><span class="pill ok">确认后导入 2 张</span></div>
+            </div>
+            <div class="card" style="display:grid; gap:8px">
+              <span class="lbl">无文字层的扫描件 PDF</span>
+              <div class="paper" aria-hidden="true"></div>
+              <div class="row a" style="--d:3.4s"><span class="pill">改进前 NOT_TEXT_PDF</span><span class="pill ok">AMOUNT_WORDS_MATCH</span></div>
+              <span class="dim a" style="--d:4s; font-size:.88em">读图模型出草稿 → 程序核对大小写金额 → 会计对照票面、再输一遍价税合计 → 确认导入</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 12 -->
+      <article class="scene" data-dur="9000" data-title="隔离与异常恢复" data-sub="失败如实说明，写入绝不自动重试" data-tag="异常恢复">
+        <div class="copy">
+          <span class="tag">异常恢复</span>
+          <h2 class="a">出错时怎么办</h2>
+          <p class="a" style="--d:.15s">身份来自可信会话，权限每次在后端重新校验。结果未知时只允许只读核验，绝不自动重试写入。</p>
+          <p class="src fade" style="--d:.4s">故障注入：docs/evidence/T40_FAULT_INJECTION_20261120</p>
+        </div>
+        <div class="vis">
+          <div class="cases">
+            <div class="card case a" style="--d:.4s"><span class="q">只读成员 U002 访问乙企业 C002</span><span class="pill bad pop" style="--d:1.2s">PERMISSION_DENIED</span><span class="dim" style="font-size:.86em">身份保持不变，看不到别人的个人记忆</span></div>
+            <div class="card case a" style="--d:.8s"><span class="q">保存请求超时</span><span class="pill warn pop" style="--d:1.8s">不重发 · 只读核验</span><span class="dim" style="font-size:.86em">页面锁定，直到核验出结果</span></div>
+            <div class="card case a" style="--d:1.2s"><span class="q">保存后进程被杀</span><span class="pill ok pop" style="--d:2.4s">重启核验 VERIFIED</span><span class="dim" style="font-size:.86em">再发一次也不会写第二次，台账仍 1 条</span></div>
+          </div>
+          <div class="card row between a" style="--d:3.2s"><span>故障注入 8 个场景</span><span class="num" style="font-size:1.5em; color:var(--ok)"><span data-count="40" data-at="3.4" data-int>40</span> / 40 项通过</span></div>
+        </div>
+      </article>
+
+      <!-- 13 -->
+      <article class="scene" data-dur="8000" data-title="收尾" data-sub="八项能力，一条主线，全部可核对" data-tag="总结">
+        <div class="copy">
+          <span class="tag">总结</span>
+          <p class="close-line a" style="--d:.1s">模型负责理解，程序负责边界和证据，人负责确认。</p>
+          <p class="a" style="--d:.5s">查询 → 缺口 → 补充/改口 → 审核 → 批准 → 回读 → 复查，每一步都能在界面、数据库、审计或模型输入里核对。</p>
+        </div>
+        <div class="vis">
+          <div class="big-stats">
+            <div class="card a" style="--d:.8s"><span class="lbl">核心能力</span><div class="num"><span data-count="8" data-at="1" data-int>8</span> 项</div></div>
+            <div class="card a" style="--d:1s"><span class="lbl">后端测试</span><div class="num"><span data-count="353" data-at="1.2" data-int>353</span> 项</div></div>
+            <div class="card a" style="--d:1.2s"><span class="lbl">前端测试</span><div class="num"><span data-count="63" data-at="1.4" data-int>63</span> 项</div></div>
+            <div class="card a" style="--d:1.4s"><span class="lbl">故障注入</span><div class="num">40 / 40</div></div>
+          </div>
+          <div class="chips a" style="--d:2s"><span class="chip">Agent 管理</span><span class="chip">能力组织与复用</span><span class="chip">多轮办理</span><span class="chip">长期记忆</span><span class="chip">知识库使用与更新</span><span class="chip">文件处理</span><span class="chip">上下文管理</span><span class="chip">异常恢复</span></div>
+          <p class="footer-line fade" style="--d:2.6s">本地演示项目 · 只用合成数据 · 仅监听本机回环地址</p>
+        </div>
+      </article>
+
+    </div>
+    <div class="progress" id="progress" role="group" aria-label="章节进度"></div>
+  </section>
+
+  <section class="index" aria-label="章节">
+    <h2>章节</h2>
+    <div class="chapters" id="chapters"></div>
+  </section>
+  <p class="note">动画中的数字均来自项目的合成种子数据与实测证据文件；自主创新的对比在 qwen3.7-flash 上完成，最终比赛模型为 qwen3.8-flash。空格键暂停或继续，左右方向键切换章节。</p>
+</div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage')
+  const scenes = [...stage.querySelectorAll('.scene')]
+  const progress = document.getElementById('progress')
+  const chapters = document.getElementById('chapters')
+  const playBtn = document.getElementById('play')
+  const counter = document.getElementById('counter')
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  let idx = 0, t = 0, playing = !reduced, last = null
+
+  const segs = scenes.map((s, i) => {
+    const b = document.createElement('button')
+    b.className = 'seg'; b.type = 'button'; b.setAttribute('aria-label', `第 ${i + 1} 章：${s.dataset.title}`)
+    b.innerHTML = '<i></i>'; b.addEventListener('click', () => go(i)); progress.appendChild(b); return b
+  })
+  const chaps = scenes.map((s, i) => {
+    const b = document.createElement('button')
+    b.className = 'chap'; b.type = 'button'
+    b.innerHTML = `<span class="k">${String(i + 1).padStart(2, '0')} · ${s.dataset.tag}</span><span class="t">${s.dataset.title}</span><span class="s">${s.dataset.sub}</span>`
+    b.addEventListener('click', () => { go(i); stage.scrollIntoView({block: 'nearest', behavior: reduced ? 'auto' : 'smooth'}) })
+    chapters.appendChild(b); return b
+  })
+  const counters = scenes.map(s => [...s.querySelectorAll('[data-count]')])
+  const fmt = (el, v) => {
+    if (el.hasAttribute('data-int')) return String(Math.round(v))
+    return (v / 100).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+  }
+  function runCounters(final) {
+    for (const el of counters[idx]) {
+      const target = +el.dataset.count, from = +(el.dataset.from || 0), at = +(el.dataset.at || 0) * 1000
+      const p = final ? 1 : Math.min(1, Math.max(0, (t - at) / 900))
+      const e = 1 - Math.pow(1 - p, 3)
+      el.textContent = fmt(el, from + (target - from) * e)
+    }
+  }
+  function go(i) {
+    i = (i + scenes.length) % scenes.length
+    scenes[idx].classList.remove('on')
+    idx = i; t = 0
+    const s = scenes[i]
+    void s.offsetWidth
+    s.classList.add('on')
+    segs.forEach((g, j) => { g.classList.toggle('done', j < i); g.firstChild.style.width = j < i ? '100%' : '0' })
+    chaps.forEach((c, j) => c.setAttribute('aria-current', j === i ? 'true' : 'false'))
+    counter.textContent = `${i + 1} / ${scenes.length}`
+    runCounters(reduced)
+  }
+  function setPlaying(v) {
+    playing = v
+    stage.classList.toggle('paused', !v)
+    playBtn.textContent = v ? '暂停' : '播放'
+    playBtn.setAttribute('aria-label', v ? '暂停' : '播放')
+  }
+  function tick(now) {
+    if (last === null) last = now
+    const dt = Math.min(100, now - last); last = now
+    if (playing) {
+      t += dt
+      const dur = +scenes[idx].dataset.dur
+      if (t >= dur) go(idx + 1)
+      else {
+        segs[idx].firstChild.style.width = `${(t / dur) * 100}%`
+        runCounters(false)
+      }
+    }
+    requestAnimationFrame(tick)
+  }
+  playBtn.addEventListener('click', () => setPlaying(!playing))
+  document.getElementById('prev').addEventListener('click', () => go(idx - 1))
+  document.getElementById('next').addEventListener('click', () => go(idx + 1))
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return
+    if (e.key === ' ') { e.preventDefault(); setPlaying(!playing) }
+    if (e.key === 'ArrowRight') go(idx + 1)
+    if (e.key === 'ArrowLeft') go(idx - 1)
+  })
+  document.addEventListener('visibilitychange', () => { last = null })
+  go(0); setPlaying(playing)
+  requestAnimationFrame(tick)
+})()
+</script>
+
+</body>
+</html>
