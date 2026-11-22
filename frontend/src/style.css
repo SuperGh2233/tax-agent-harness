@@ -251,6 +251,12 @@ footer span { margin:0 10px; color:var(--line-strong) }
 .task-row>span { flex:1; overflow-wrap:anywhere; min-width:0; font-size:14px }
 .task-row small { display:block; margin-top:2px; font-size:11.5px; letter-spacing:.01em }
 .empty { padding:32px 0; color:var(--muted); font-size:13.5px }
+.empty-action { display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding:20px 0 24px }
+.empty-action .empty { padding:0 }
+.requery-form { display:flex; flex-wrap:wrap; align-items:flex-end; gap:10px 12px }
+.requery-form label { gap:6px; font-size:12.5px }
+.requery-form input { width:auto; min-width:170px; padding:8px 12px }
+.requery-form small { flex-basis:100% }
 
 /* ── Content pages ── */
 .content-page { max-width:980px; margin:56px auto 72px; padding:0 32px }

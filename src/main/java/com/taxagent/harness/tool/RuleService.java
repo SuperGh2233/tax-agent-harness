@@ -96,6 +96,35 @@ public final class RuleService {
         });
     }
 
+    /**
+     * T51: checked by the rule CLI before an import, so the operator learns about unusable wording before an
+     * immutable version exists. Returns why this text would be a purpose rule the checker cannot execute, or null
+     * when it is executable or not a purpose rule. Storing such a version stays possible (T28: a reworded version is
+     * kept and refused at check time); this method only reads.
+     */
+    public String purposeWordingProblem(ManagementContext context, String ruleId, String content, Set<String> enterprises) {
+        requireManagement(context);
+        if (ruleId == null || content == null || enterprises == null) throw invalid("Rule id, content and enterprises required");
+        boolean states = MUST_FILL.matcher(content.replaceAll("\\s+", "")).find();
+        // Same test purposeRule uses: an id is a purpose rule once any stored version for the enterprise states one.
+        boolean purposeId = !states && this.<Boolean>transaction(false, c -> {
+            for (String enterprise : enterprises)
+                for (var rule : rules(c, enterprise, null)) {
+                    var text = rule.definition().content();
+                    if (rule.key().ruleId().equals(ruleId) && text != null && MUST_FILL.matcher(text.replaceAll("\\s+", "")).find()) return true;
+                }
+            return false;
+        });
+        if (!states && !purposeId) return null;
+        try { requirement(content); return null; }
+        catch (DomainException unsupported) {
+            return (states ? "正文写了「必须填写用途」" : "规则 " + ruleId + " 已有版本是用途规则")
+                    + "，但这段正文不是可执行的用途要求。目前只支持两种写法：「每张发票都必须填写用途」，"
+                    + "或「……大于或等于 X 元……必须填写用途」（X 最多两位小数），两种不能写在同一版本里。"
+                    + "这个版本启用后，用途检查和保存都会返回 UNSUPPORTED_SCOPE。";
+        }
+    }
+
     /** Status belongs to the version globally, so disabling affects every associated enterprise. */
     public void disableVersion(ManagementContext context, RuleKey key) {
         requireManagement(context);

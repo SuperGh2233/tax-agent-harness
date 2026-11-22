@@ -772,3 +772,16 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
 - 动效（纯 CSS，另加 `src/motion.ts` 的两个只写 CSS 变量的钩子，经 CSSOM 写入，符合 `style-src 'self'`）：首页标题逐字模糊上浮（`ui.tsx` 的 `SplitText`，完整文字放在 h1 的 `aria-label`）、标题后方缓慢漂移的柔和渐变光晕、任务输入框聚焦时旋转的渐变描边、建议卡片与 Agent 卡片的指针跟随光斑、导航当前项的滑动胶囊、单张/批量分段控件的滑块、顶栏滚动后出现的毛玻璃细线（scroll-driven）、页面与区块入场上浮、下方内容进入视口时上浮（`animation-timeline: view()`，不支持的浏览器直接静态显示）、思考中文字扫光、流式回复末尾闪烁点、核验成功图标弹出、对话框缩放进入与检查器侧滑。入场动画都用 `backwards` 填充，播放完不残留 transform；`prefers-reduced-motion` 时关闭全部动画与过渡并隐藏光晕。
 - 待用户验证：`cd frontend && npm run verify`；在 1440 与 390 两种宽度下重拍首页、任务对话（含流式回复）、审核页（单张与批量）、资料文件（列对应、扫描件）、Agent 配置，并在系统「减弱动态效果」打开时确认页面静态可用。T49 第二轮验证并入本项。
 - 补充（2026-11-22）：用户本机控制台报 `/favicon.ico` 404（项目原本没有图标）。新增 `frontend/public/favicon.svg`（墨黑圆角方块 + 白色四角星，与顶栏品牌标一致），`index.html` 以 `%BASE_URL%favicon.svg` 引用；构建后位于 `dist/` 根，随 JAR 发布为 `/react-app/favicon.svg`。静态路径不经 `DemoSecurity` 的 API 校验，CSP `img-src 'self'` 允许。待验证：开发服务器与 JAR 两种方式下控制台无 404、标签页显示图标。
+
+### T51 — b2b-review 本周四件事（2026-11-22）
+- 状态：**代码已写，未验证**（Coding Agent）。依据用户以项目根目录 `b2b-review/SKILL.md` 审视后的指示「按顺序先改本周四件事」。不改写入边界、证据门与写入锁。
+  1. 交互体验：对话中的工具进度与「实际执行活动」改用业务名称（`toolLabel`，如「正在查询发票…」「查询发票已完成」「…未成功 · 错误码」），真实工具名仍以 `code` 保留在活动列表中供追溯；未知工具名照原样显示。
+  2. 可操作性：审核页（单张与批量）没有本轮发票查询证据时，空状态说明「审核只能选取 Agent 本轮实际查询到的发票」，并提供「让 Agent 重新查询发票」：回到对话，按普通一轮发送固定消息（只查询、不附带批准，不可能保存）。任务已结束、请求进行中或有待核验的保存时不显示该按钮。
+  3. 可验证性：审计页新增「导出 CSV」，调用已有的只读 `/api/demo/audit/export`（脱敏元数据），前端加 UTF-8 BOM 便于 Excel 打开；失败按错误码提示。
+  4. 可扩展性：`RuleService.purposeWordingProblem`（只读）判断待导入正文是否为用途规则（正文含「必须填写用途」，或该编号已有用途规则版本）以及能否执行；规则 CLI 导入前调用，不可执行时拒绝并说明支持的两种写法，`--allow-unexecutable` 放行时保存并输出 WARNING。服务层 `importVersion` 行为不变（T28：改写后的版本仍可存储、在检查时拒绝，原测试不动）。
+- 测试：`RuleAdminCliTest.refusesUnexecutablePurposeWordingBeforeStoringTheVersion`（Java +1）；`frontend/tests/extensions.test.ts` 审计导出（Vitest +1）。文档：`作品使用说明.md` 规则一节、`CLAUDE.md` CLI 注释。
+- 第一轮（2026-11-22，用户 Mac）：`mvn test` 352/0/0/0，`npm run verify` 全过（Vitest 62）。浏览器（证据 `docs/evidence/UI_CHECKS_20261122/`）：① 进度「正在查询发票…」、活动列表「查询发票 `query_invoices` · 已返回」通过；② 任务目标带月份时按钮完整通过（审计与库中可见该轮 `query_invoices`，month=2026-09），但目标没有月份时模型反问月份，用户会以为「点了没反应」；③ CSV 下载与 BOM 正确，但内容全是英文代码，Excel 中文显示无从验证。已改：
+  - ② 空审核页改为「查询月份」框＋按钮：月份只从用户自己的话（任务目标、用户消息，后出现者优先）预填（`latestMonth`），可修改；找不到月份时留空并提示先选，按钮在填好前不可用。从不默认当前月份（R001 第 4 条）。发送的固定消息带上该月份。
+  - ③ CSV 表头改为「中文(原键名)」，如「请求编号(requestId)」，取值保持原始代码以便追溯；原 `DemoApiTest.auditExportIsASanitizedCsv` 不需修改。
+  - 测试：`DemoApiTest.auditExportHeadersAreReadableAndKeepTheOriginalKeys`（Java +1）、`extensions.test.ts` 的 `latestMonth`（Vitest +1）。
+- 待用户验证（第二轮）：`mvn test`（预期 353）；`npm run verify`（预期 Vitest 63）；空审核页：没提过月份的任务显示空月份框且按钮不可用，选月后能查到；提过月份的任务月份已预填；导出的 CSV 用 Excel 打开表头为中文。通过后同步 README 等处的测试数。

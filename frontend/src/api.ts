@@ -331,6 +331,21 @@ export function localTime(iso: string | null | undefined, seconds = false): stri
   return seconds ? `${text}:${pad(date.getSeconds())}` : text
 }
 
+/**
+ * T51: the month the user most recently named (in the given order, later texts win), as YYYY-MM; null when none.
+ * Only pass the user's own words (task goal, user messages), never model text. Never falls back to the current month:
+ * R001 says an unclear month is asked for, not assumed.
+ */
+export function latestMonth(texts: string[]): string | null {
+  let found: string | null = null
+  for (const text of texts)
+    for (const match of text.matchAll(/(20\d{2})\s*(?:-|\/|年)\s*(\d{1,2})(?!\d)/g)) {
+      const month = Number(match[2])
+      if (month >= 1 && month <= 12) found = `${match[1]}-${String(month).padStart(2, '0')}`
+    }
+  return found
+}
+export const MONTH_PATTERN = /^20\d{2}-(0[1-9]|1[0-2])$/
 export function friendlyError(code: string) {
   const messages: Record<string, string> = {
     MODEL_NOT_CONFIGURED: '真实模型未配置。请在服务端设置 LLM_ENDPOINT、LLM_API_KEY 和 LLM_MODEL；当前没有模拟回复。',
@@ -467,6 +482,19 @@ export class DemoApi {
   deleteMemory(scope: MemoryScope, name: string) { return this.request<Memory[]>(`/memories/${scope}/${encodeURIComponent(name)}`, 'DELETE') }
   verify(taskId: string, operationId: string) { return this.request<OperationVerification>(`/tasks/${encodeURIComponent(taskId)}/operations/${encodeURIComponent(operationId)}/verify`, 'POST') }
   audit() { return this.request<AuditEvent[]>('/audit') }
+  /** The same sanitized audit metadata as CSV, with a BOM so Excel reads it as UTF-8. Read-only. */
+  async exportAudit(): Promise<Blob> {
+    let response: Response
+    try {
+      response = await fetch('/api/demo/audit/export', {credentials: 'same-origin', cache: 'no-store', headers: {'X-CSRF-Token': this.csrf}})
+    } catch { throw new ApiError('NETWORK_UNKNOWN') }
+    if (!response.ok) {
+      let code = `HTTP_${response.status}`
+      try { code = ((await response.json()) as {errorCode?: string}).errorCode ?? code } catch { /* keep the HTTP code */ }
+      throw new ApiError(code, response.status)
+    }
+    return new Blob(['\uFEFF', await response.text()], {type: 'text/csv;charset=utf-8'})
+  }
   /** Multipart upload; the browser sets the boundary and length. Never retried automatically.
    * T46: mappings, when given, are the accountant's explicit column assignment for the named sheets. */
   async upload(file: File, mappings?: SheetMapping[]): Promise<UploadResult> {

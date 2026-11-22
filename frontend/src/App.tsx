@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from 'react'
-import { ArrowUp, ArrowUpRight, Bot, Check, ChevronRight, CircleDashed, FileCheck2, FileUp, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
-import { AGENT_TOOLS, agentProblem, localTime, ApiError, contextSummary, memoryProblem, SCOPE_LABEL, impactMessage, skillProblem, canVerifyOperation, citedKnowledge, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, describeUpload, findOpenTask, friendlyError, isTerminalTaskStatus, issueLocation, issueReason, MAPPING_FIELDS, mappingProblem, MAX_BATCH, parseTool, provenNotExecuted, queriedInvoices, REVIEW_REASON, SCAN_CHECK, scanProblem, UPLOAD_ACCEPT, uploadProblem, usableAgents, verifiedBatchResult, verifiedWriteResult, verifyPendingOperation } from './api'
+import { ArrowUp, ArrowUpRight, Bot, Check, ChevronRight, CircleDashed, Download, FileCheck2, FileUp, History, PanelRight, ShieldCheck, Sparkles } from 'lucide-react'
+import { AGENT_TOOLS, agentProblem, localTime, ApiError, contextSummary, memoryProblem, SCOPE_LABEL, impactMessage, skillProblem, canVerifyOperation, citedKnowledge, citedRules, createAndRunFirstTurn, DemoApi, deriveExecutionPlan, describeUpload, findOpenTask, friendlyError, isTerminalTaskStatus, issueLocation, issueReason, latestMonth, MAPPING_FIELDS, mappingProblem, MAX_BATCH, MONTH_PATTERN, parseTool, provenNotExecuted, queriedInvoices, REVIEW_REASON, SCAN_CHECK, scanProblem, UPLOAD_ACCEPT, uploadProblem, usableAgents, verifiedBatchResult, verifiedWriteResult, verifyPendingOperation } from './api'
 import type { Memory, MemoryScope, AgentDef, AgentSpec, AgentsView, Capabilities, Skill, SkillInfo, SkillSpec, ToolInfo, Approval, AuditEvent, Exchange, FileDetail, Invoice, PlanStep, RowIssue, SavedTrace, ScanConfirmation, ScanDraft, ScanImport, Session, SheetMapping, Statement, StoredFile, TableCandidate, Task, ToolProgress, TurnView, UploadResult } from './api'
 import { Button, Modal, SplitText } from './ui'
 import { useNavIndicator, useSpotlight } from './motion'
@@ -12,6 +12,8 @@ type Message = {role: 'user' | 'agent' | 'notice'; text: string; history?: Excha
 // items (T47): the per-invoice operationIds of a batch; each must verify before the lock is released.
 type Operation = {id: string; taskId: string; unknown: boolean; items?: string[]}
 const HERO_TITLE = '今天，交给 Agent 什么任务？'
+// Sent as an ordinary chat turn: the model still decides and queries; no approval is attached, so nothing can be saved.
+const requeryMessage = (month: string) => `请重新查询 ${month} 的当前企业发票，供我在审核页逐项核对；只查询，不要保存。`
 const suggestions = ['查询 2026-09 发票与银行收支', '检查 2026-09 发票用途缺口', '继续核对待补充的发票信息']
 const statusLabel = {ACTIVE: '进行中', WAITING_USER: '等待补充', COMPLETED: '已结束', CANCELLED: '已取消'}
 const statusTone = {ACTIVE: 'accent', WAITING_USER: 'warn', COMPLETED: 'ok', CANCELLED: ''}
@@ -135,9 +137,10 @@ export default function App() {
   }
   const streamHandlers = {
     onText: (delta: string) => { setStreamingText(old => old + delta); setLiveProgress('') },
-    onTool: (event: ToolProgress) => setLiveProgress(event.phase === 'tool_start'
-      ? `正在调用 ${event.name}…`
-      : `${event.name} 已返回${event.outcome && event.outcome !== 'SUCCESS' ? ` · ${event.outcome}` : ''}`),
+    onTool: (event: ToolProgress) => { const label = toolName(event.name)
+      setLiveProgress(event.phase === 'tool_start'
+        ? (label ? `正在${label}…` : `正在调用 ${event.name}…`)
+        : `${label ?? event.name}${event.outcome && event.outcome !== 'SUCCESS' ? `未成功 · ${event.outcome}` : '已完成'}`) },
   }
   function clearStream() { setStreamingText(''); setLiveProgress('') }
   useEffect(() => {
@@ -324,6 +327,15 @@ export default function App() {
     })
   }
   async function showAudit() { await run(async () => { setAudit(await api.audit()) }) }
+  async function downloadAudit() {
+    await run(async () => {
+      const url = URL.createObjectURL(await api.exportAudit())
+      const link = document.createElement('a')
+      link.href = url; link.download = `审计记录-${session?.enterprise ?? ''}-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000) // Revoking at once can cancel the download in some browsers.
+    })
+  }
   async function refreshAgents() { await run(async () => { setAgentsView(await api.agents()); setCapabilities(await api.capabilities()) }) }
   async function refreshCapabilities() { await run(async () => { setCapabilities(await api.capabilities()) }) }
   async function confirmSwitch() {
@@ -439,6 +451,11 @@ export default function App() {
     if (next === 'agents' && selected && !lock.current) void refreshAgents()
     if (next === 'capabilities' && selected && !lock.current) void refreshCapabilities()
   }
+  // Offered on an empty review page; undefined (no button) for an ended task, while busy, or while a save awaits verification.
+  const requery = task && !isTerminalTaskStatus(task.status) && !busy && !operation && selected
+    ? (month: string) => { navigate('workspace'); void send(requeryMessage(month)) } : undefined
+  // Pre-fills the month box from the user's own words only; the user can change it, and an empty box blocks the button.
+  const requeryMonth = latestMonth([task?.goal ?? '', ...messages.filter(m => m.role === 'user').map(m => m.text)])
   const taskList = (limit?: number) => <div className="task-list">{tasks.length ? tasks.slice(0, limit).map(t => <button className="task-row" key={t.id} disabled={busy} onClick={() => void load(t.id)}><History size={17}/><span>{t.goal}<small>{t.id.slice(0,8)} · {statusLabel[t.status]}</small></span><ArrowUpRight size={17}/></button>) : <p className="empty">{selected ? '还没有任务，从一个具体问题开始。' : '选择企业与身份后，查看你的任务。'}</p>}</div>
 
   return <div className="app-shell">
@@ -481,8 +498,8 @@ export default function App() {
         <VerificationPanel turn={turn}/>
         <div className="segmented" role="group" aria-label="修改方式"><button type="button" aria-pressed={reviewMode === 'single'} onClick={() => setReviewMode('single')}>单张修改</button><button type="button" aria-pressed={reviewMode === 'batch'} onClick={() => setReviewMode('batch')}>批量保存（2–{MAX_BATCH} 张）</button></div>
         {reviewMode === 'single'
-          ? <Review key={`${task.id}:${task.version}`} invoices={invoices} enterprise={session?.enterprise ?? ''} disabled={busy || session?.profile !== 'operator' || !!operation || task.status === 'COMPLETED' || task.status === 'CANCELLED'} onApprove={approval => void send(`现在保存以下经我逐项核对的精确修改，并查询发票核对：${pretty({enterprise:session?.enterprise,invoiceId:approval.invoiceId,changes:approval.changes})}`, approval)}/>
-          : <BatchReview key={`batch:${task.id}:${task.version}`} invoices={invoices} enterprise={session?.enterprise ?? ''} supplied={task.supplied} disabled={busy || session?.profile !== 'operator' || !!operation || task.status === 'COMPLETED' || task.status === 'CANCELLED'} onApprove={approval => void send(`现在批量保存以下经我逐张核对的精确修改（共 ${approval.items?.length ?? 0} 张，同一事务），并查询发票核对：${pretty({enterprise:session?.enterprise,items:approval.items?.map(item => ({invoiceId:item.invoiceId,changes:item.changes}))})}`, approval)}/>}
+          ? <Review key={`${task.id}:${task.version}`} invoices={invoices} onQuery={requery} queryMonth={requeryMonth} enterprise={session?.enterprise ?? ''} disabled={busy || session?.profile !== 'operator' || !!operation || task.status === 'COMPLETED' || task.status === 'CANCELLED'} onApprove={approval => void send(`现在保存以下经我逐项核对的精确修改，并查询发票核对：${pretty({enterprise:session?.enterprise,invoiceId:approval.invoiceId,changes:approval.changes})}`, approval)}/>
+          : <BatchReview key={`batch:${task.id}:${task.version}`} invoices={invoices} onQuery={requery} queryMonth={requeryMonth} enterprise={session?.enterprise ?? ''} supplied={task.supplied} disabled={busy || session?.profile !== 'operator' || !!operation || task.status === 'COMPLETED' || task.status === 'CANCELLED'} onApprove={approval => void send(`现在批量保存以下经我逐张核对的精确修改（共 ${approval.items?.length ?? 0} 张，同一事务），并查询发票核对：${pretty({enterprise:session?.enterprise,items:approval.items?.map(item => ({invoiceId:item.invoiceId,changes:item.changes}))})}`, approval)}/>}
       </section>}
       {page === 'files' && <FilesPage heading={heading} selected={selected} canUpload={session?.profile === 'operator'} enterprise={session?.enterprise ?? ''} busy={busy}
         files={files} upload={upload} detail={fileDetail} onUpload={file => void uploadFile(file)} onRefresh={() => void refreshFiles()} onOpen={id => void openFile(id)} onToggle={file => void toggleKnowledge(file)}
@@ -495,7 +512,7 @@ export default function App() {
         onRefresh={() => void refreshCapabilities()} onSwitch={setPendingSwitch}
         onSave={async (id, spec) => { let saved = false; await run(async () => { await saveSkill(id, spec); saved = true }); return saved }}
         onHistory={id => api.skillHistory(id)} onOpenFiles={() => navigate('files')}/>}
-      {page === 'audit' && <section className="content-page"><span className="eyebrow">TRACEABLE BY DESIGN</span><h1 ref={heading} tabIndex={-1}>审计记录</h1><p className="muted">仅当前用户与企业的真实元数据；不展示财务原文。</p><details onToggle={e => { if (e.currentTarget.open && audit === null && selected && !busy) void showAudit() }}><summary>展开真实审计记录</summary><Button disabled={!selected || busy} onClick={() => void showAudit()}>刷新审计</Button><Audit events={audit}/></details></section>}
+      {page === 'audit' && <section className="content-page"><span className="eyebrow">TRACEABLE BY DESIGN</span><h1 ref={heading} tabIndex={-1}>审计记录</h1><p className="muted">仅当前用户与企业的真实元数据；不展示财务原文。</p><details onToggle={e => { if (e.currentTarget.open && audit === null && selected && !busy) void showAudit() }}><summary>展开真实审计记录</summary><div className="open-task-actions"><Button disabled={!selected || busy} onClick={() => void showAudit()}>刷新审计</Button><Button variant="ghost" disabled={!selected || busy} onClick={() => void downloadAudit()}><Download size={15}/>导出 CSV</Button></div><Audit events={audit}/></details></section>}
     </main>
     <footer>受约束执行 <span>·</span> 可回读核验 <span>·</span> 模型文字不是财务执行证据</footer>
     <Modal open={cancelCandidate !== null} onOpenChange={open => { if (!open && !busy) setCancelCandidate(null) }} title="确认结束这项任务？" description="只有你明确确认后才会结束旧任务；不会自动创建新任务或执行财务写入。">
@@ -638,7 +655,7 @@ function Composer({disabled,onSend}: {disabled:boolean; onSend:(m:string)=>void}
 }
 function ToolGroup({history}: {history:Exchange[]}) {
   if (!history.length) return null
-  return <details className="tool-group"><summary>实际执行活动 · {history.length} 个工具调用</summary><ol>{history.map((exchange,i) => { const result = parseTool(exchange); return <li key={`${exchange.call.id}-${i}`}><details><summary><span className="tool-dot"/>{exchange.call.name} <span className="muted">{!result ? '结果无法解析' : result.error ? `错误 ${result.error.code}` : '已返回'}</span></summary><p className="muted">真实调用 {exchange.call.id} · 原始数据可能含金额/敏感字段；金额单位为分。</p><pre>{pretty({call:exchange.call,result:result ?? exchange.resultJson})}</pre></details></li> })}</ol></details>
+  return <details className="tool-group"><summary>实际执行活动 · {history.length} 个工具调用</summary><ol>{history.map((exchange,i) => { const result = parseTool(exchange); return <li key={`${exchange.call.id}-${i}`}><details><summary><span className="tool-dot"/>{toolName(exchange.call.name) ?? exchange.call.name} <span className="muted"><code>{exchange.call.name}</code> · {!result ? '结果无法解析' : result.error ? `错误 ${result.error.code}` : '已返回'}</span></summary><p className="muted">真实调用 {exchange.call.id} · 原始数据可能含金额/敏感字段；金额单位为分。</p><pre>{pretty({call:exchange.call,result:result ?? exchange.resultJson})}</pre></details></li> })}</ol></details>
 }
 function Supplement({busy,onSubmit}: {busy:boolean; onSubmit:(key:string,value:string,quote:string)=>void}) {
   const [key,setKey] = useState(''), [value,setValue] = useState(''), [quote,setQuote] = useState('')
@@ -661,6 +678,8 @@ const toolLabel: Record<string, string> = {
   query_invoices: '查询发票', query_bank_entries: '查询银行流水', check_invoice_purpose: '检查用途缺口',
   query_rules: '查询规则', search_knowledge: '检索资料', recall_context: '回溯原文', update_invoice: '保存用途/备注（需逐项确认）',
 }
+/** Business name for progress and activity lists, without the parenthetical note; undefined for an unknown tool. */
+const toolName = (name: string): string | undefined => toolLabel[name]?.replace(/（.*）$/, '')
 const KNOWN_ENTERPRISES = ['C001', 'C002']
 
 function AgentPicker({agents, value, onChange, disabled}: {agents: AgentDef[]; value: string; onChange: (id: string) => void; disabled: boolean}) {
@@ -896,7 +915,7 @@ function Audit({events}: {events:AuditEvent[]|null}) {
   return <div className="audit-list">{events === null ? <p className="muted">展开后按需加载；未选择身份时无法读取。</p> : events.length ? events.map(e => <details key={e.id}><summary><span>{e.tool ?? '请求'} · {e.outcome}</span><small>{localTime(e.time, true)}</small>{e.verified && <Check size={15}/>}</summary><dl>{Object.entries(e).filter(([key,value]) => value !== null && !['id','tool','outcome','time'].includes(key)).map(([key,value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl></details>) : <p className="empty">暂无审计事件。</p>}</div>
 }
 
-export function Review({invoices,enterprise,disabled,onApprove}: {invoices:Invoice[]; enterprise:string; disabled:boolean; onApprove:(a:Approval)=>void}) {
+export function Review({invoices,enterprise,disabled,onApprove,onQuery,queryMonth}: {invoices:Invoice[]; enterprise:string; disabled:boolean; onApprove:(a:Approval)=>void; onQuery?:(month:string)=>void; queryMonth?:string|null}) {
   const [invoiceId,setInvoiceId] = useState(''), [field,setField] = useState<'purpose'|'remarks'>('purpose'), [value,setValue] = useState('')
   const [checked,setChecked] = useState(false), [draft,setDraft] = useState<Approval|null>(null)
   const invoice = invoices.find(i => i.key.invoice_id === invoiceId)
@@ -905,7 +924,7 @@ export function Review({invoices,enterprise,disabled,onApprove}: {invoices:Invoi
   const fieldLabel = field === 'purpose' ? '用途 purpose' : '备注 remarks'
   const change = (work:()=>void) => { work(); setChecked(false); setDraft(null) }
   const row = (label:string, content:ReactNode) => <div className="review-row"><span>{label}</span><div>{content}</div></div>
-  return <section className="review-editor"><h2>核对精确修改</h2><p className="muted">仅支持用途与备注。空白新值表示明确清空。恢复或新一轮请求后，请重新查询。</p>{!invoices.length && <p className="empty">本轮没有发票查询证据。返回对话，先让 Agent 查询当前企业的发票。</p>}
+  return <section className="review-editor"><h2>核对精确修改</h2><p className="muted">仅支持用途与备注。空白新值表示明确清空。恢复或新一轮请求后，请重新查询。</p>{!invoices.length && <RequeryAction month={queryMonth ?? null} onQuery={onQuery}/>}
     {row('企业 / 发票', <label><span className="sr-only">选择待审核发票</span><select value={invoiceId} onChange={e => change(() => setInvoiceId(e.target.value))}><option value="">选择本轮已查询发票</option>{invoices.map(i => <option key={i.key.invoice_id} value={i.key.invoice_id}>{enterprise} / {i.key.invoice_id} · {i.invoice_date} · {i.seller}</option>)}</select></label>)}
     {row('修改字段', <label><span className="sr-only">修改字段</span><select value={field} onChange={e => change(() => setField(e.target.value as 'purpose'|'remarks'))}><option value="purpose">用途 purpose</option><option value="remarks">备注 remarks</option></select></label>)}
     {row('数据库当前值', <p className="current-value">{invoice ? current || '（空）' : '尚无已查询记录'}</p>)}
@@ -918,8 +937,20 @@ export function Review({invoices,enterprise,disabled,onApprove}: {invoices:Invoi
   </section>
 }
 
+/** T51: empty review page. Explains why it is empty and, for an open task, asks the Agent to query one explicit month. */
+function RequeryAction({month, onQuery}: {month: string | null; onQuery?: (month: string) => void}) {
+  const [chosen, setChosen] = useState(month ?? '')
+  const valid = MONTH_PATTERN.test(chosen.trim())
+  return <div className="empty-action"><p className="empty">本轮没有发票查询证据。审核只能选取 Agent 本轮实际查询到的发票。</p>
+    {onQuery && <form className="requery-form" onSubmit={e => { e.preventDefault(); if (valid) onQuery(chosen.trim()) }}>
+      <label>查询月份<input type="month" value={chosen} onChange={e => setChosen(e.target.value)} placeholder="YYYY-MM" pattern="20[0-9]{2}-(0[1-9]|1[0-2])" required/></label>
+      <Button type="submit" variant="primary" disabled={!valid}>让 Agent 查询{valid ? ` ${chosen.trim()} ` : ''}的发票<ArrowUpRight size={15}/></Button>
+      <small>{month ? `已按你最近提到的月份（${month}）填好，可修改。` : '任务和对话里没有找到月份，请先选择要核对的月份。'}</small>
+    </form>}</div>
+}
+
 /** T47: one approval for several invoices and one field; each invoice is checked on screen, then confirmed in a dialog. */
-export function BatchReview({invoices,enterprise,supplied,disabled,onApprove}: {invoices:Invoice[]; enterprise:string; supplied:Record<string, Statement>; disabled:boolean; onApprove:(a:Approval)=>void}) {
+export function BatchReview({invoices,enterprise,supplied,disabled,onApprove,onQuery,queryMonth}: {invoices:Invoice[]; enterprise:string; supplied:Record<string, Statement>; disabled:boolean; onApprove:(a:Approval)=>void; onQuery?:(month:string)=>void; queryMonth?:string|null}) {
   const [field,setField] = useState<'purpose'|'remarks'>('purpose')
   const [values,setValues] = useState<Record<string, string>>({})
   const [selected,setSelected] = useState<string[]>([])
@@ -936,7 +967,7 @@ export function BatchReview({invoices,enterprise,supplied,disabled,onApprove}: {
   const toggle = (id: string) => change(() => setSelected(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]))
   return <section className="review-editor batch-review"><h2>批量核对精确修改</h2>
     <p className="muted">一次确认多张发票的同一字段。整批在同一事务内保存：全部回读核验成功，或一张都不改。保存后程序列出仍需复核的发票。空白新值表示明确清空。</p>
-    {!invoices.length && <p className="empty">本轮没有发票查询证据。返回对话，先让 Agent 查询当前企业的发票。</p>}
+    {!invoices.length && <RequeryAction month={queryMonth ?? null} onQuery={onQuery}/>}
     <div className="review-row"><span>修改字段</span><div><label><span className="sr-only">修改字段</span><select value={field} onChange={e => change(() => { setField(e.target.value as 'purpose'|'remarks'); setValues({}) })}><option value="purpose">用途 purpose</option><option value="remarks">备注 remarks</option></select></label></div></div>
     {invoices.length > 0 && <div className="batch-table"><table><thead><tr><th><span className="sr-only">选择</span></th><th>发票</th><th>日期 · 销售方</th><th className="num">价税合计（元）</th><th>数据库当前值</th><th>拟修改值</th></tr></thead>
       <tbody>{invoices.map(i => { const id = i.key.invoice_id, on = selected.includes(id)

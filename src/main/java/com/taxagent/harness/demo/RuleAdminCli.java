@@ -37,8 +37,15 @@ public final class RuleAdminCli {
                 var definition = new RuleDefinition(required(options, "name"),
                         LocalDate.parse(required(options, "effective-from")),
                         RuleStatus.valueOf(options.getOrDefault("status", "启用")), content);
+                // T51: versions are immutable, so unusable purpose wording is refused before it is stored.
+                var problem = service.purposeWordingProblem(admin, key.ruleId(), content, enterprises);
+                if (problem != null && !options.containsKey("allow-unexecutable")) {
+                    err.println("ERROR: 未导入。" + problem + "如确需保存这一版本（例如先存档、暂不启用），请加 --allow-unexecutable。");
+                    return 1;
+                }
                 var saved = service.importVersion(admin, key, definition, enterprises);
                 out.println("IMPORTED\t" + saved.key().ruleId() + "\t" + saved.key().version());
+                if (problem != null) err.println("WARNING: " + problem);
                 return 0;
             }
             if (options.containsKey("rules-disable")) {
@@ -69,7 +76,8 @@ public final class RuleAdminCli {
             }
             err.println("Usage: --rules-list --enterprise=C001 [--date=2026-09-15]");
             err.println("       --rules-import/--rules-update --rule-id=R005 --version=1.0 --name=NAME --effective-from=2026-10-01 "
-                    + "--content-file=rule.txt --enterprises=C001,C002 [--status=启用]");
+                    + "--content-file=rule.txt --enterprises=C001,C002 [--status=启用] [--allow-unexecutable]");
+            err.println("       （用途规则的正文须为可执行写法，否则拒绝导入；--allow-unexecutable 仍保存并给出警告）");
             err.println("       （更新 = 新增版本；已存在的版本号不可原地改写，须先 --rules-disable 再导入新版本）");
             err.println("       --rules-disable --rule-id=R005 --version=1.0");
             err.println("       --prefs-list --enterprise=C001 [--user=U001]");

@@ -287,6 +287,15 @@ class DemoApiTest {
         var csv=result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
         assertThat(csv).contains("requestId","turn","taskId").doesNotContain("private-purpose");
     }
+    /** T51: an accountant opening the export in Excel reads Chinese headers; the original keys stay in brackets. */
+    @Test void auditExportHeadersAreReadableAndKeepTheOriginalKeys() throws Exception {
+        setup(new FakeLlmClient(new Finish("查询完成")));
+        select("operator","C001"); start();
+        var csv=mvc.perform(get("/api/demo/audit/export").session(session)).andExpect(status().isOk()).andReturn()
+                .getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(csv.lines().findFirst().orElseThrow()).startsWith("序号(id),时间UTC(time),请求编号(requestId),任务编号(taskId)")
+                .endsWith("耗时毫秒(durationMs)").doesNotContain(" ");
+    }
     @Test void ordinaryTurnHidesWriteToolAndApprovedTurnPublishesIt() throws Exception {
         var fake = new FakeLlmClient(new Finish("查询完成"), new Finish("已保存"));
         setup(fake); select("operator","C001"); String task=start();

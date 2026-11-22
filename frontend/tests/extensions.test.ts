@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { amountCents, DemoApi, describeUpload, mappingProblem, provenNotExecuted, scanProblem, verifiedBatchResult, verifiedWriteResult, verifyPendingOperation } from '../src/api'
+import { amountCents, DemoApi, describeUpload, latestMonth, mappingProblem, MONTH_PATTERN, provenNotExecuted, scanProblem, verifiedBatchResult, verifiedWriteResult, verifyPendingOperation } from '../src/api'
 import type { TurnView, UploadResult } from '../src/api'
 import { initialOperation } from '../src/App'
 
@@ -90,4 +90,27 @@ test('T48 scan API posts the file as multipart and the confirmation as JSON with
   await api.confirmScan(batchId, {invoiceId:'F301',invoiceDate:'2026-10-12',seller:'s',item:'i',amount:'1.00',remarks:'',amountConfirmation:'1.00',confirmed:true})
   expect(fetcher.mock.calls[2][0]).toBe(`/api/demo/files/scan/${batchId}/confirm`)
   expect(JSON.parse(fetcher.mock.calls[2][1].body)).toMatchObject({invoiceId:'F301',confirmed:true})
+})
+
+test('T51 audit export returns the CSV with a UTF-8 BOM and reports a refusal by its error code', async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response('id,time\n1,t\n', {status:200, headers:{'Content-Type':'text/csv'}}))
+    .mockResolvedValueOnce(Response.json({errorCode:'AUTHENTICATION_REQUIRED'}, {status:401}))
+  vi.stubGlobal('fetch', fetcher)
+  const api = new DemoApi()
+  const blob = await api.exportAudit()
+  expect(fetcher.mock.calls[0][0]).toBe('/api/demo/audit/export')
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  expect([...bytes.slice(0, 3)]).toEqual([0xEF, 0xBB, 0xBF])
+  expect(new TextDecoder().decode(bytes.slice(3))).toBe('id,time\n1,t\n')
+  await expect(api.exportAudit()).rejects.toMatchObject({code:'AUTHENTICATION_REQUIRED', status:401})
+})
+
+test('T51 the re-query month comes only from what the user named, latest first, and is never assumed', () => {
+  expect(latestMonth(['查询 2026-09 发票与银行收支'])).toBe('2026-09')
+  expect(latestMonth(['检查 2026年9月 用途', '再看 2026/10 的银行流水'])).toBe('2026-10')
+  expect(latestMonth(['2026-09 的发票', '核对 2026-09-15 那张'])).toBe('2026-09')
+  expect(latestMonth(['你好，请介绍一下你自己'])).toBeNull()
+  expect(latestMonth(['2026-13 不是月份'])).toBeNull()
+  expect(MONTH_PATTERN.test('2026-09')).toBe(true)
+  expect(MONTH_PATTERN.test('2026-9')).toBe(false)
 })

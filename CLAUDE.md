@@ -89,7 +89,7 @@ npx vitest run tests/api.test.ts   # 单个前端测试文件
 ```sh
 java -jar target/harness-0.0.1-SNAPSHOT.jar --taxagent.database="$DEMO_DB" \
   --rules-list --enterprise=C001 --date=2026-09-15
-# --rules-import / --rules-update（更新=新增版本，原版本不可改写）
+# --rules-import / --rules-update（更新=新增版本，原版本不可改写；用途规则正文不可执行时拒绝导入，--allow-unexecutable 放行并警告，T51）
 # --rules-disable --rule-id=R005 --version=1.0
 # --prefs-list / --prefs-put / --prefs-delete
 ```

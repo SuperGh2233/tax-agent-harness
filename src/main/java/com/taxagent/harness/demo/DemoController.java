@@ -628,7 +628,9 @@ public final class DemoController {
     @GetMapping("/audit/export") public ResponseEntity<String> exportAudit(HttpSession session) {
         var p = principal(session);
         var events = audit.list(p.trustedSession(), p.enterprise());
-        var csv = new StringBuilder("id,time,requestId,taskId,tool,callId,outcome,errorCode,verified,ruleVersion,memorySource,durationMs\n");
+        // T51: readable Chinese headers that keep the original key in brackets, so scripts and earlier readers still match.
+        var csv = new StringBuilder("序号(id),时间UTC(time),请求编号(requestId),任务编号(taskId),工具或接口(tool),调用编号(callId),结果(outcome),"
+                + "错误码(errorCode),已回读核验(verified),规则版本(ruleVersion),记忆来源(memorySource),耗时毫秒(durationMs)\n");
         for (var e : events) csv.append(e.id()).append(',').append(csv(e.time())).append(',').append(csv(e.requestId()))
                 .append(',').append(csv(e.taskId())).append(',').append(csv(e.tool())).append(',').append(csv(e.callId()))
                 .append(',').append(csv(e.outcome())).append(',').append(csv(e.errorCode())).append(',').append(e.verified())
