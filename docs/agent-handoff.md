@@ -1,22 +1,23 @@
 # Tax Agent Harness — 开发交接说明
 
-> 更新时间：2026-11-21（新增第 0 节当前状态与第 20 节收尾，第 0 节已补 T45–T48；第 1–11 节为 2026-11-02 起的历史快照，其中模型协议、测试数、「浏览器流程未通过」等表述已过时，以第 0 节为准）
+> 更新时间：2026-11-22（第 0 节已补 T45–T48 的提交与验证、T49–T51；第 1–11 节为 2026-11-02 起的历史快照，其中模型协议、测试数、「浏览器流程未通过」等表述已过时，以第 0 节为准）
 > 上次全面更新：2026-11-02
 > 用途：交给下一位队友继续开发。本文记录当前工作树、已完成能力、真实验证边界和推荐接手顺序。**不是比赛最终交付证明，也不代表当前 Git 工作区已提交。**
 
-## 0. 当前状态（2026-11-21，暂停收尾时）
+## 0. 当前状态（2026-11-22）
 
-- Git：`main` 与 `origin/main` 同为 `64e4a63`；工作区有 T44 文档同步与 T45–T48 的代码、测试、文档改动，**均未提交**；未跟踪的官方复赛材料（目录与 zip）和 `审计docs/` 刻意不入库。
-- 范围：复赛契约 `docs/FINAL_ROUND_CONTRACT.md` 的 T28–T35 已实现，T36–T43 为稳健性、真实验证与环境验证补强，全部 DONE 并推送。T45–T48（四项可选扩展：回复语气、陌生 Excel 列对应、批量保存与复核、扫描件识别与票面金额确认）为自动化验证 DONE、未提交，详见 `TASKS.md`。
-- 测试（2026-11-21，含 T45–T48 的工作树，用户 Mac）：JDK 21 `mvn test` 351/0/0/0；`cd frontend && npm run verify` 通过（Vitest 61）。下方全新检出与 CI 证据基于 `64e4a63`（336 项），未覆盖 T45–T48。
+- Git：`main` 与 `origin/main` 同为 `b0c8b62`（T51）；T45–T48 在 `05bfcab`，证据在 `7d20c66`、`6969357`，T50 界面在 `442ac75`。未跟踪的官方复赛材料（目录与 zip）、`审计docs/`、`b2b-review/` 刻意不入库。
+- 范围：复赛契约 `docs/FINAL_ROUND_CONTRACT.md` 的 T28–T35 已实现，T36–T43 为稳健性、真实验证与环境验证补强，全部 DONE 并推送。T45–T48（四项可选扩展：回复语气、陌生 Excel 列对应、批量保存与复核、扫描件识别与票面金额确认）已推送并完成全新检出、CI、`qwen3.8-flash` 与浏览器验证。T49–T51（界面改版与动效、b2b-review 本周四件事）已推送、自动化测试通过，浏览器复核待做。详见 `TASKS.md`。
+- 测试（2026-11-22，`b0c8b62`，用户 Mac）：JDK 21 `mvn test` 353/0/0/0；`cd frontend && npm run verify` 通过（Vitest 63）。
 - 进程级证据（`docs/evidence/`）：
-  - 全新检出 + 空缓存构建：macOS 本机（T39），GitHub Actions Ubuntu / Windows / macOS（Wrapper 3.9.9）与 Ubuntu（Maven 3.6.3）四作业全绿（T41、T43）；
+  - 全新检出 + 空缓存构建：macOS 本机 Wrapper 3.9.9 与 Maven 3.6.3 均通过（基于 `05bfcab`，351 项，`docs/evidence/T45_T48_FRESH_*`）；GitHub Actions run `44916473839`（基于 `7d20c66`）Ubuntu / Windows / macOS（Wrapper 3.9.9）与 Ubuntu（Maven 3.6.3）四作业全绿、各 351 项（`docs/evidence/T45_T48_CI_20261121/`）。T49–T51（`442ac75`、`b0c8b62`）之后未重跑；更早基于 `64e4a63` 的见 T39、T41、T43；
   - 故障注入：真实 JAR + 桩模型 8 场景 40 项（T40）；
   - 真实模型 `qwen3.7-flash`：受控保存对比 20/20 vs 9/20（T37）、30 轮长对话（T38）、大结果分页取回（T39），程序行为项全部通过。
-- 模型：开发与已有真实验证用 `qwen3.7-flash`，DashScope Anthropic 兼容入口（`LLM_PROTOCOL=anthropic`）；最终比赛采用 `qwen3.8`（用户 2026-11-21），只改环境变量。扫描件读图另用 `LLM_VISION_*`。配置见 `CLAUDE.md`「模型配置」。
+- 模型：开发与已有真实验证用 `qwen3.7-flash`，DashScope Anthropic 兼容入口（`LLM_PROTOCOL=anthropic`）；最终比赛采用 `qwen3.8-flash`（`qwen3.8` 这个名称接口不认，HTTP 400），只改环境变量，`LLM_VISION_MODEL` 可填同一值。扫描件读图另用 `LLM_VISION_*`。配置见 `CLAUDE.md`「模型配置」。
 - T45–T48 真实模型（2026-11-21，`qwen3.7-flash`，对话与读图同一档）：扫描件识别全链路与 2 张批量保存通过，证据 `docs/evidence/T47_T48_REAL_MODEL_20261121/`。
-- **仍未完成**：T45–T48 在 `qwen3.8` 下复跑、浏览器中三个新页面的实际操作；≤5 分钟演示视频、最终作品压缩包（按 `RELEASE_CHECKLIST.md` 白名单人工整理与逐项审阅）。可选后续：写一个检查最终 zip 的脚本（解到空目录、核对禁止项、按 REPRODUCE 构建启动）。
-- 接手顺序：`AGENTS.md` → 本节 → `TASKS.md` 末尾 T38–T48 → `CLAUDE.md`（命令与架构）→ `REPRODUCE.md` / `作品使用说明.md`。
+- T45–T48 在 `qwen3.8-flash` 下复跑（`docs/evidence/T47_T48_QWEN38_20261121/`）与真实 Chrome 中三个新页面的操作（`docs/evidence/T45_T48_BROWSER_20261121/`）均已通过。
+- **仍未完成**：T49–T51 新界面的浏览器复核（见 `TASKS.md` 各条「待用户验证」）与之后的全新检出/CI 重跑；≤5 分钟演示视频、最终作品压缩包（按 `RELEASE_CHECKLIST.md` 白名单人工整理与逐项审阅）。可选后续：写一个检查最终 zip 的脚本（解到空目录、核对禁止项、按 REPRODUCE 构建启动）。
+- 接手顺序：`AGENTS.md` → 本节 → `TASKS.md` 末尾 T38–T51 → `CLAUDE.md`（命令与架构）→ `REPRODUCE.md` / `作品使用说明.md`。
 
 ## 1. 一句话结论
 

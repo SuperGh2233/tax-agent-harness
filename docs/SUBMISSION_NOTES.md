@@ -2,7 +2,7 @@
 
 > 截止：**2026-11-13**。本文件是操作清单，不是“已完成提交”的声明。视频、官方模型复测和最终 zip 未完成前不得勾选完成。
 >
-> 2026-11-21 补记：本文件是**初赛**提交说明，模型口径（统一 `qwen3.7-flash`）与测试数均为初赛时点。复赛的当前状态见 [RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md) 顶部与 [开发交接说明](agent-handoff.md) 第 0 节；复赛最终比赛采用 `qwen3.8`（用户 2026-11-21 告知），仍只经环境变量切换。
+> 2026-11-21 补记：本文件是**初赛**提交说明，模型口径（统一 `qwen3.7-flash`）与测试数均为初赛时点。复赛的当前状态见 [RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md) 顶部与 [开发交接说明](agent-handoff.md) 第 0 节；复赛最终比赛采用 `qwen3.8-flash`（用户 2026-11-21 告知 qwen3.8，接口实测该名称不存在，实际可用的是 `qwen3.8-flash`），仍只经环境变量切换。
 
 ## 1. 提交内容
 
@@ -79,7 +79,7 @@ java -Djava.io.tmpdir=$demoDir -Dorg.sqlite.tmpdir=$demoDir -jar target\harness-
 
 ## 6. 当前状态（2026-11-11 更新）
 
-> 2026-11-21 补记：本节为初赛时点快照，已过时。当前状态（含 T45–T48 的工作树：351 项后端测试、61 项前端测试；基于 `64e4a63` 的三平台全新检出构建、故障注入与真实模型检查）见 [RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md) 顶部与 [开发交接说明](agent-handoff.md) 第 0 节；仍未完成：T45–T48 的提交、qwen3.8 复跑与浏览器验证、演示视频、最终 zip。
+> 2026-11-21 补记：本节为初赛时点快照，已过时。当前状态（2026-11-22 的 `b0c8b62`：353 项后端测试、63 项前端测试；T45–T48 的三平台全新检出构建、`qwen3.8-flash` 真实模型与浏览器检查）见 [RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md) 顶部与 [开发交接说明](agent-handoff.md) 第 0 节；仍未完成：T49–T51 新界面的浏览器复核、演示视频、最终 zip。
 
 - 已完成：React 单一前端、执行计划/上下四栏、自然错误提示、完整 prompt trace、审计保留策略、OSV 扫描、离线构建脚本、TASKS 记录、规则变更即时生效、`agent_trace` 持久化与 `/traces` 回读。
 - 已验证：`qwen3.7-flash` 三场景真实 E2E（查询 → 待补追问 → 跨轮续接 → 受控保存 → 回读 → 审计）、React 浏览器保存与跨轮、252/37 测试、clean package、OSV 0 未抑制。

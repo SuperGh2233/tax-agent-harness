@@ -68,7 +68,7 @@ LLM_PROTOCOL=anthropic
 
 - `DemoConfiguration` 在 `LLM_PROTOCOL=anthropic` 或 endpoint 路径含 `/anthropic` 时选 `AnthropicMessagesClient`（追加 `/v1/messages`）；否则选 `OpenAiCompatibleClient`（`/responses` 或追加 `/chat/completions`）。不自动回退。
 - 缺少任一配置时返回 `MODEL_NOT_CONFIGURED`，不会用假模型伪造成功。模型超时 60 秒；运行时不重试模型（`modelRetries=0`），三种协议适配器对**格式无法解析**的回复统一纠正重试一次（`LlmClient.CORRECTION`），仍失败为 `MODEL_RESPONSE_INVALID`；HTTP 401/403/429/其他统一映射为 `MODEL_AUTH_FAILED`/`MODEL_RATE_LIMITED`/`MODEL_HTTP_ERROR`，均不重试（T36）。
-- 换模型只改环境变量，不要把型号写进代码或规则。开发期一直用 qwen3.7-flash，最终比赛采用 qwen3.8（用户 2026-11-21）。
+- 换模型只改环境变量，不要把型号写进代码或规则。开发期一直用 qwen3.7-flash，最终比赛采用 qwen3.8-flash（用户 2026-11-21；`qwen3.8` 这个名称接口返回 400）。
 - 扫描件读图（T48）用独立配置 `LLM_VISION_ENDPOINT / _API_KEY / _MODEL / _PROTOCOL`（`VisionClient`，必须是能读图的模型；`qwen3.7-flash` 已实测能读图，可与 `LLM_*` 填相同值）；未配置时扫描件走手工录入草稿，不回退到 `LLM_*`，也不会自动继承 `LLM_*`。
 - 命名模型配置（T30）：`LLM_<NAME>_ENDPOINT / _API_KEY / _MODEL / _PROTOCOL`，Agent 只引用配置名（`default` 即上面的 `LLM_*`）；未配置的名称返回 `MODEL_NOT_CONFIGURED`，从不回退到其他配置。密钥永不入库。
 

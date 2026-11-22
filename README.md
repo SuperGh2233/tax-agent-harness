@@ -232,15 +232,17 @@ Vite 开发服务器只监听本机回环地址，并将同源 `/api` 请求代�
 
 ## 测试与验证
 
-最近一次验证结果（测试数为 2026-11-21 含 T45–T48 的工作树，其余行为 2026-11-20 提交 `220b26c`／`64e4a63`；逐项证据见 [TASKS.md](TASKS.md) T38–T48 与 `docs/evidence/`）：
+最近一次验证结果（测试数为 2026-11-22 推送的 `b0c8b62`，含 T49–T51；全新检出与 CI 为 2026-11-21 的 T45–T48 提交；其余行为 2026-11-20 提交 `220b26c`／`64e4a63`；逐项证据见 [TASKS.md](TASKS.md) T38–T51 与 `docs/evidence/`）：
 
 | 验证项 | 结果 |
 | --- | ---: |
-| Java 21 Maven 全量测试 | 351 passed，0 failures，0 errors，0 skipped |
-| 前端 `npm run verify`（TypeScript、ESLint、Vitest、Vite build） | 通过；Vitest 61 passed |
-| 全新检出 + 空 Maven 缓存：在线 test/package、JAR 内含 React 页面、新库初始化、loopback 健康检查、离线复跑 | macOS 本机通过；GitHub Actions Ubuntu / Windows / macOS（Maven Wrapper 3.9.9）与 Ubuntu（Maven 3.6.3）四作业全绿（基于 `64e4a63`，当时 336 项；T45–T48 尚未提交，未经此项覆盖） |
+| Java 21 Maven 全量测试 | 353 passed，0 failures，0 errors，0 skipped |
+| 前端 `npm run verify`（TypeScript、ESLint、Vitest、Vite build） | 通过；Vitest 63 passed |
+| 全新检出 + 空 Maven 缓存：在线 test/package、JAR 内含 React 页面、新库初始化、loopback 健康检查、离线复跑 | macOS 本机 Wrapper 3.9.9 与 Maven 3.6.3 均通过（基于 `05bfcab`，351 项）；GitHub Actions run `44916473839` Ubuntu / Windows / macOS（Maven Wrapper 3.9.9）与 Ubuntu（Maven 3.6.3）四作业全绿（基于 `7d20c66`，各 351 项）；T49–T51 之后未重跑 |
 | 故障注入（真实 JAR + 本机桩模型：超时、429、畸形回复、工具错误熔断、保存后进程被杀、流式中途断开） | 8 个场景 40 项通过 |
 | 真实模型 `qwen3.7-flash`：受控保存对比、30 轮长对话、大工具结果分页取回 | 程序行为项全部通过（模型行为项单列，见 T37–T39） |
+| 真实模型 `qwen3.8-flash`（最终比赛型号）：扫描件识别、2 张批量保存 | 通过（`docs/evidence/T47_T48_QWEN38_20261121/`） |
+| 真实 Chrome + 打包 JAR：列对应、扫描件确认、批量保存三个页面 | 通过（`docs/evidence/T45_T48_BROWSER_20261121/`）；T49–T51 的新界面待复核 |
 
 更早的快照（2026-11-02 的 223 项、2026-11-11 的 252 项等）保留在 TASKS.md 与 REPRODUCE.md 的时间线里，不代表当前状态。
 
@@ -312,8 +314,8 @@ python3 scripts/large_result_check.py --jar target/harness-0.0.1-SNAPSHOT.jar   
 
 - 后端核心流程、任务记忆、受控写入、演示 API 与本地 UI 已实现。
 - React 是唯一 UI；真实浏览器内的查询、受控保存、跨轮补充与 `verified=true` 回读已通过。
-- 复赛范围（`docs/FINAL_ROUND_CONTRACT.md`）的 T28–T43 均已完成并推送；T45–T48（复赛视频提到的四项可选扩展：回复语气、陌生 Excel 列对应、批量保存与复核、扫描件识别与票面金额确认）已实现并通过自动化测试，尚未提交；真实模型 `qwen3.7-flash` 下扫描件识别与批量保存已通过（`docs/evidence/T47_T48_REAL_MODEL_20261121/`），qwen3.8 与浏览器验证未做。JDK 21 全量 351 项、前端 Vitest 61 项通过，三平台全新检出构建与故障注入均有证据（见上表）。队友接手请先阅读 [开发交接说明](docs/agent-handoff.md)，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
-- **仍未完成：** ≤5 分钟演示视频、最终作品压缩包（需人工按 RELEASE_CHECKLIST 白名单整理并逐项审阅）。模型型号由配置决定：开发与已有真实模型验证用 `qwen3.7-flash`，最终比赛采用 `qwen3.8`（只改环境变量）。
+- 复赛范围（`docs/FINAL_ROUND_CONTRACT.md`）的 T28–T43 均已完成并推送；T45–T48（复赛视频提到的四项可选扩展：回复语气、陌生 Excel 列对应、批量保存与复核、扫描件识别与票面金额确认）已推送，全新检出、CI、`qwen3.8-flash` 真实模型与浏览器操作均有证据；T49–T51（界面改版与动效、业务化工具名、可操作的空审核页、审计 CSV 导出、规则正文导入检查）已推送（`b0c8b62`）并通过自动化测试，浏览器复核待做。JDK 21 全量 353 项、前端 Vitest 63 项通过（见上表）。队友接手请先阅读 [开发交接说明](docs/agent-handoff.md)，详见 [TASKS.md](TASKS.md) 与 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
+- **仍未完成：** ≤5 分钟演示视频、最终作品压缩包（需人工按 RELEASE_CHECKLIST 白名单整理并逐项审阅）。模型型号由配置决定：开发与已有真实模型验证用 `qwen3.7-flash`，最终比赛采用 `qwen3.8-flash`（`qwen3.8` 这个名称接口不认，返回 HTTP 400；只改环境变量）。
 - 当前系统用于比赛演示与技术验证，不应视为具备生产环境所需的认证、部署、审计防篡改和运维能力。
 
 ---
