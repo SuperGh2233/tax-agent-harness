@@ -787,3 +787,12 @@ JAVA_HOME=/Users/a123/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/
   - 测试：`DemoApiTest.auditExportHeadersAreReadableAndKeepTheOriginalKeys`（Java +1）、`extensions.test.ts` 的 `latestMonth`（Vitest +1）。
 - 第二轮（2026-11-22，用户 Mac，随后推送为 `b0c8b62`）：`mvn test` **353/0/0/0**、`npm run verify` 全过（Vitest **63**），与预期一致；README、交接说明、检查单、提交说明的测试数已同步。
 - 待用户验证（第二轮浏览器）：空审核页：没提过月份的任务显示空月份框且按钮不可用，选月后能查到；提过月份的任务月份已预填；导出的 CSV 用 Excel 打开表头为中文。三处确认后标 DONE。
+
+### T52 — 复赛作品已提交：说明文档同步（2026-11-24）
+- 状态：DONE（2026-11-24，Coding Agent；仅文档改动，无代码与测试变化，未提交 Git）。依据用户确认「已经提交了」与指示「一起改了」。不改契约、官方材料、计划书与已 DONE 任务的范围。
+- 事实：复赛作品已提交，含提交包 `财税AgentHarness-提交包-20261123.zip`（根目录，未入库）与演示视频。提交包内的 `README.md`、`CLAUDE.md` 是本次整理之前的版本。
+- 改动：
+  - `README.md` 改为 GitHub 风格：居中标题与徽章（含 fresh-checkout CI 状态）、GitHub 提示框、复赛八项能力表、包结构表、检查脚本表，验证结果折叠进 `<details>`（数字与提交号原样保留）。纠正过时表述：模型口径（开发期 `qwen3.7-flash`、最终 `qwen3.8-flash`）、根路径跳转 `/react-app/`，补 `LLM_VISION_*` 与 `LLM_<NAME>_*`。「当前状态」改为已提交。
+  - `CLAUDE.md`：「架构大图」只保留现行规则（约 5400 → 2800 字），去掉任务编号与修复经过；新增包结构导航一句、根目录比赛材料一条（不编辑、不打进构建；两份讲稿只在用户明确要求时改）；「测试约定」补发布前脚本，指向 `RELEASE_CHECKLIST.md` 与 `REPRODUCE.md`；删去已修复的 T35 旧坑。
+  - `RELEASE_CHECKLIST.md` 顶部与演示一行、`docs/agent-handoff.md` 第 0 节、`docs/SUBMISSION_NOTES.md` 第 6 节补记：演示视频与最终作品包由「未完成」改为已提交；历史快照原文保留。
+- 提交前未补做：T49–T51 新界面的浏览器复核（T51 三处「待用户验证」）与 T51 之后的全新检出/CI 重跑。
