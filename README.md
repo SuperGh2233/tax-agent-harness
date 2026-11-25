@@ -214,6 +214,8 @@ mvn test                       # 后端全量测试
 cd frontend && npm run verify  # 前端类型检查、Lint、Vitest、构建
 ```
 
+GitHub Actions 除原有 Java 全新检出矩阵外，现增加独立的 `frontend-quality` Job。2026-11-25 的 PR 验证中，前端 **63 项测试通过**，后端全新检出矩阵在 macOS、Windows、Ubuntu（Maven Wrapper）及 Ubuntu（Maven 3.6.3）全部通过；后端测试为 **353 passed**。
+
 进程级检查脚本都在 `scripts/`，跑在已打好的 JAR 上（合成数据、独立临时库、只走 loopback）：
 
 | 脚本 | 检查内容 | 是否调用模型 |
@@ -294,6 +296,10 @@ cd frontend && npm run verify  # 前端类型检查、Lint、Vitest、构建
 - 本系统用于比赛演示与技术验证，不具备生产环境所需的认证、部署、防篡改审计和运维能力。
 
 接手开发请先读 [开发交接说明](docs/agent-handoff.md)，再看 [TASKS.md](TASKS.md)。
+
+## License
+
+当前仓库尚未提供项目级 `LICENSE` 文件。官方比赛原件、第三方依赖和其他素材仍受其各自原始授权约束；在明确添加许可证前，不应将仓库公开理解为允许自由复制、修改或再分发。
 
 ---
 
